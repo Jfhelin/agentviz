@@ -15,6 +15,11 @@ function fmtMetric(n) {
   return n.toLocaleString();
 }
 
+function fmtPercent(n) {
+  if (n == null) return "N/A";
+  return (n * 100).toFixed(1) + "%";
+}
+
 function getFilesTouched(events) {
   var paths = new Set();
   if (!events) return 0;
@@ -59,6 +64,7 @@ export function buildMetrics(session) {
     outputTokens: hasTokenUsage ? (tu.outputTokens || 0) : null,
     cacheRead: hasTokenUsage ? (tu.cacheRead || 0) : null,
     cacheWrite: hasTokenUsage ? (tu.cacheWrite || 0) : null,
+    cacheHitRate: hasTokenUsage && tu.cacheHitRate != null ? tu.cacheHitRate : null,
     toolCalls: meta.totalToolCalls || 0,
     errors: meta.errorCount || 0,
     turns: meta.totalTurns || 0,
@@ -224,6 +230,9 @@ function Scorecard({ mA, mB, fileA, fileB, onOpenSessionA, onOpenSessionB }) {
       )}
       {cacheAvailable && (
         <Row label="Cache writes" valA={fmtMetric(mA.cacheWrite)} valB={fmtMetric(mB.cacheWrite)} a={mA.cacheWrite} b={mB.cacheWrite} lowerIsBetter={null} indent />
+      )}
+      {cacheAvailable && (
+        <Row label="Cache hit rate" valA={fmtPercent(mA.cacheHitRate)} valB={fmtPercent(mB.cacheHitRate)} a={mA.cacheHitRate} b={mB.cacheHitRate} lowerIsBetter={null} indent />
       )}
       {hasPRU && (
         <Row

@@ -185,6 +185,8 @@ function answerCost(data) {
   if (usage.inputTokens) lines.push("- Input tokens: " + usage.inputTokens.toLocaleString());
   if (usage.outputTokens) lines.push("- Output tokens: " + usage.outputTokens.toLocaleString());
   if (usage.cacheRead) lines.push("- Cache read: " + usage.cacheRead.toLocaleString());
+  if (usage.cacheWrite) lines.push("- Cache write: " + usage.cacheWrite.toLocaleString());
+  if (usage.cacheHitRate != null) lines.push("- Cache hit rate: " + (usage.cacheHitRate * 100).toFixed(1) + "%");
   if (model) lines.push("- Model: " + model);
   return instant(lines.join("\n"));
 }

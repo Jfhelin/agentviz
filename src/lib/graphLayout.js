@@ -5,6 +5,7 @@
  * graph structure, then runs layout to get positioned nodes and edges.
  */
 import ELK from "elkjs/lib/elk-api.js";
+import { computeCacheHitRate } from "./cacheMetrics";
 
 var elk = new ELK({
   workerUrl: new URL("elkjs/lib/elk-worker.min.js", import.meta.url),
@@ -835,10 +836,32 @@ function getDominantTrack(events) {
   return dominant;
 }
 
+function summarizeTurnTokenUsage(turnEvents) {
+  var usage = { inputTokens: 0, outputTokens: 0, cacheRead: 0, cacheWrite: 0 };
+  var hasUsage = false;
+  for (var i = 0; i < turnEvents.length; i++) {
+    var tu = turnEvents[i].event && turnEvents[i].event.tokenUsage;
+    if (!tu) continue;
+    hasUsage = true;
+    usage.inputTokens += tu.inputTokens || 0;
+    usage.outputTokens += tu.outputTokens || 0;
+    usage.cacheRead += tu.cacheRead || 0;
+    usage.cacheWrite += tu.cacheWrite || 0;
+  }
+  if (!hasUsage || usage.cacheRead <= 0) return null;
+  usage.cacheHitRate = computeCacheHitRate(usage.inputTokens, usage.cacheWrite, usage.cacheRead);
+  return usage;
+}
+
 // Build a useful snippet for a turn node.
 // Priority: real user message > tool call summary > first reasoning text > fallback
 export function buildTurnSnippet(turn, turnEvents) {
   var msg = turn.userMessage || "";
+  var tokenUsage = summarizeTurnTokenUsage(turnEvents);
+
+  if (tokenUsage && tokenUsage.cacheRead > 0) {
+    return tokenUsage.cacheRead.toLocaleString() + " cache read / " + tokenUsage.cacheWrite.toLocaleString() + " cache write / cache hit rate " + (tokenUsage.cacheHitRate != null ? (tokenUsage.cacheHitRate * 100).toFixed(1) : "0.0") + "%";
+  }
 
   // If there's a real user message (not a placeholder), use it
   if (msg && msg !== "(continuation)" && msg !== "(system)") {

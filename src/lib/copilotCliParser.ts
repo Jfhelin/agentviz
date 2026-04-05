@@ -22,6 +22,7 @@
  */
 
 import type { NormalizedEvent, ParsedSession, SessionMetadata, SessionTurn } from "./sessionTypes";
+import { computeCacheHitRate, computeCacheHitRateDenomTokens } from "./cacheMetrics";
 import type { TrackType } from "./theme";
 
 const MAX_TEXT_LENGTH = 4000;
@@ -537,7 +538,7 @@ function buildMetadata(
   let totalCacheReadTokens = 0;
   let totalCacheWriteTokens = 0;
   let totalCost: number | null = null;
-  let modelTokenUsage: Record<string, { inputTokens: number; outputTokens: number; cacheRead: number; cacheWrite: number }> | null = null;
+  let modelTokenUsage: Record<string, { inputTokens: number; outputTokens: number; cacheRead: number; cacheWrite: number; cacheHitRate?: number; denomTokens?: number }> | null = null;
 
   if (sessionShutdown && sessionShutdown.modelMetrics) {
     const modelMetrics = sessionShutdown.modelMetrics;
@@ -546,15 +547,21 @@ function buildMetadata(
     for (const model of Object.keys(modelMetrics)) {
       const metric = modelMetrics[model];
       if (metric.usage) {
-        totalInputTokens += metric.usage.inputTokens || 0;
-        totalOutputTokens += metric.usage.outputTokens || 0;
-        totalCacheReadTokens += metric.usage.cacheReadTokens || 0;
-        totalCacheWriteTokens += metric.usage.cacheWriteTokens || 0;
+        const inputTokens = metric.usage.inputTokens || 0;
+        const outputTokens = metric.usage.outputTokens || 0;
+        const cacheReadTokens = metric.usage.cacheReadTokens || 0;
+        const cacheWriteTokens = metric.usage.cacheWriteTokens || 0;
+        totalInputTokens += inputTokens;
+        totalOutputTokens += outputTokens;
+        totalCacheReadTokens += cacheReadTokens;
+        totalCacheWriteTokens += cacheWriteTokens;
         modelTokenUsage[model] = {
-          inputTokens: metric.usage.inputTokens || 0,
-          outputTokens: metric.usage.outputTokens || 0,
-          cacheRead: metric.usage.cacheReadTokens || 0,
-          cacheWrite: metric.usage.cacheWriteTokens || 0,
+          inputTokens,
+          outputTokens,
+          cacheRead: cacheReadTokens,
+          cacheWrite: cacheWriteTokens,
+          cacheHitRate: computeCacheHitRate(inputTokens, cacheWriteTokens, cacheReadTokens),
+          denomTokens: computeCacheHitRateDenomTokens(inputTokens, cacheWriteTokens, cacheReadTokens),
         };
       }
       if (metric.requests) {
@@ -581,6 +588,9 @@ function buildMetadata(
 
   const context = sessionInfo && sessionInfo.context ? sessionInfo.context : {};
 
+  const cacheHitRate = computeCacheHitRate(totalInputTokens, totalCacheWriteTokens, totalCacheReadTokens);
+  const denomTokens = computeCacheHitRateDenomTokens(totalInputTokens, totalCacheWriteTokens, totalCacheReadTokens);
+
   return {
     totalEvents: events.length,
     totalTurns: turns.length,
@@ -595,6 +605,8 @@ function buildMetadata(
         outputTokens: totalOutputTokens,
         cacheRead: totalCacheReadTokens,
         cacheWrite: totalCacheWriteTokens,
+        cacheHitRate,
+        denomTokens,
       }
       : null,
     warnings,
