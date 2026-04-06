@@ -135,6 +135,7 @@ export default function App() {
   var [showFilters, setShowFilters] = useState(false);
   var [compareLanding, setCompareLanding] = useState(false);
   var [showQA, setShowQA] = useState(false);
+  var [loadError, setLoadError] = useState(null);
   var qaFlag = useFeatureFlag("qa", false);
   var searchInputRef = useRef(null);
   var filtersRef = useRef(null);
@@ -160,29 +161,27 @@ export default function App() {
         return true;
       });
 
-      // Build a lookup: discoveredPath/sessionId -> discovered session for path enrichment
-      var discoveredByPath = {};
+      // Build a lookup: sessionId -> discovered session for path enrichment
       var discoveredBySessionId = {};
       discovered.sessions.forEach(function (s) {
         if (s.source !== "manifest" && s.size < 5000) return;
-        if (s.path) discoveredByPath[s.path] = s;
         if (s.sessionId) discoveredBySessionId[s.sessionId] = s;
       });
 
-      // Enrich library entries with discoveredPath if we can match them to a discovered session
+      // Enrich library entries with discoveredPath from discovered/manifest sessions
       var enrichedLibrary = visibleLibraryEntries.map(function (e) {
         if (e.discoveredPath) return e; // already has it
-        var match = (e.sessionId && discoveredBySessionId[e.sessionId])
-          || (e.discoveredPath && discoveredByPath[e.discoveredPath]);
+        var match = (e.sessionId && discoveredBySessionId[e.sessionId]);
         if (match) return Object.assign({}, e, { discoveredPath: match.path });
         return e;
       });
 
-      // Only add discovered entries that aren't already in the library
+      // Only add discovered entries that aren't already in the library.
+      // Use enrichedLibrary (which has discoveredPath set) for accurate dedup.
       var discoveredOnly = discovered.sessions.filter(function (s) {
         if (s.source !== "manifest" && s.size < 5000) return false;
-        return !visibleLibraryEntries.some(function (e) {
-          return e.discoveredPath === s.path || e.sessionId === s.sessionId;
+        return !enrichedLibrary.some(function (e) {
+          return e.discoveredPath === s.path || (e.sessionId && e.sessionId === s.sessionId);
         });
       }).map(function (s) {
         return {
@@ -310,36 +309,44 @@ export default function App() {
     var sessionName = entry.file || entry.summary || entry.filename || "events.jsonl";
 
     function afterLoad(rawText) {
+      setLoadError(null);
       setView("stats");
       handleFile(rawText, sessionName);
-      if (sessionPath) {
+      // Patch discoveredPath and tags onto the persisted library entry so that
+      // tag filtering continues to work after the session is in localStorage.
+      var entryTags = entry.tags && entry.tags.length > 0 ? entry.tags : null;
+      if (sessionPath || entryTags) {
         setLibraryEntries(function (prev) {
           return prev.map(function (e) {
-            if (e.id === entry.id && !e.discoveredPath) {
-              return Object.assign({}, e, { discoveredPath: sessionPath });
-            }
-            return e;
+            if (e.id !== entry.id) return e;
+            var updates = {};
+            if (!e.discoveredPath && sessionPath) updates.discoveredPath = sessionPath;
+            if (entryTags && (!e.tags || e.tags.length === 0)) updates.tags = entryTags;
+            if (Object.keys(updates).length === 0) return e;
+            return Object.assign({}, e, updates);
           });
         });
       }
     }
 
+    function onFetchError(err) {
+      console.error("[session] failed to load:", sessionName, err);
+      setLoadError("Failed to load session: " + sessionName);
+    }
+
+    // Manifest or discovered sessions: fetch via the discovered-sessions hook
     if ((entry.source === "manifest" || entry.isDiscovered) && sessionPath) {
       var fetchArg = entry.source === "manifest"
         ? { source: "manifest", path: sessionPath }
         : sessionPath;
-      discovered.fetchSessionContent(fetchArg).then(afterLoad).catch(function (err) {
-        console.error("[" + (entry.source || "discovered") + "] failed to load session:", sessionPath, err);
-      });
+      discovered.fetchSessionContent(fetchArg).then(afterLoad).catch(onFetchError);
       return;
     }
 
     var rawText = loadStoredSessionContent(entry.id);
     if (rawText) { afterLoad(rawText); return; }
     if (sessionPath) {
-      discovered.fetchSessionContent(sessionPath).then(afterLoad).catch(function (err) {
-        console.error("[discovered] failed to load session:", sessionPath, err);
-      });
+      discovered.fetchSessionContent(sessionPath).then(afterLoad).catch(onFetchError);
       return;
     }
 
@@ -431,7 +438,7 @@ export default function App() {
   if (!session.events) {
     return (
       <AppLandingState
-        error={session.error}
+        error={session.error || loadError}
         onLoad={handleFile}
         onLoadSample={loadSample}
         onStartCompare={function () { setCompareLanding(true); }}
