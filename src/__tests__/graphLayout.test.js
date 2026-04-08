@@ -367,6 +367,14 @@ describe("buildTurnSnippet", function () {
     expect(buildTurnSnippet(turn, [])).toBe("Fix the login bug");
   });
 
+  it("keeps real user message ahead of cache metrics", function () {
+    var events = [
+      makeEvent(0, { track: "output", tokenUsage: { inputTokens: 1200, outputTokens: 300, cacheRead: 600, cacheWrite: 300 } }),
+    ];
+    var turn = makeTurn(0, [0], { userMessage: "Fix the login bug" });
+    expect(buildTurnSnippet(turn, events)).toBe("Fix the login bug");
+  });
+
   it("truncates long user messages", function () {
     var longMsg = "A".repeat(100);
     var turn = makeTurn(0, [], { userMessage: longMsg });

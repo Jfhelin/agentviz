@@ -424,6 +424,7 @@ describe("parseClaudeCodeJSONL", function () {
       };
       var result = parseClaudeCodeJSONL(makeSession([USER_MSG, repeated1, repeated2, repeated3]));
       expect(result.metadata.tokenUsage.inputTokens).toBe(1000);
+      expect(result.metadata.tokenUsage.outputTokens).toBe(200);
       expect(result.metadata.tokenUsage.cacheRead).toBe(800);
       expect(result.metadata.tokenUsage.cacheWrite).toBe(0);
       expect(result.metadata.tokenUsage.cacheHitRate).toBeCloseTo(800 / ((1000 - 800) + 0 + 800), 6);

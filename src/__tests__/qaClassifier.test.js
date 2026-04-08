@@ -25,7 +25,7 @@ function makeSession(overrides) {
     models: { "claude-sonnet-4": 3 },
     primaryModel: "claude-sonnet-4",
     format: "claude-code",
-    tokenUsage: { inputTokens: 5000, outputTokens: 2000, cacheRead: 1000, cacheWrite: 200, cacheHitRate: 1000 / ((5000) + 200 + 1000) },
+    tokenUsage: { inputTokens: 5000, outputTokens: 2000, cacheRead: 1000, cacheWrite: 200, cacheHitRate: 1000 / ((5000 - 1000) + 200 + 1000) },
   }, overrides.metadata || {});
   var autonomyMetrics = Object.assign({
     autonomyEfficiency: 0.72,
@@ -162,6 +162,13 @@ describe("classify: cost", function () {
     var r = classify("How much did this cost?", SESSION);
     expect(r.tier).toBe("instant");
     expect(r.answer).toContain("Cache hit rate");
+  });
+
+  it("handles missing token usage data", function () {
+    var noTokenUsage = makeSession({ metadata: { tokenUsage: null } });
+    var r = classify("How much did this cost?", noTokenUsage);
+    expect(r.tier).toBe("instant");
+    expect(r.answer).toContain("No token usage data available");
   });
 });
 

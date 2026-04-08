@@ -186,14 +186,55 @@ function getUsageDedupKey(raw: RawRecord): string | null {
   return null;
 }
 
-function extractEventsFromRecord(raw: RawRecord, syntheticTime: number, issues: ParseIssues, seenUsageKeys?: Set<string>): NormalizedEvent[] {
+function mergeTokenUsage(previous: TokenUsage | null | undefined, next: TokenUsage): TokenUsage {
+  if (!previous) {
+    return {
+      inputTokens: next.inputTokens || 0,
+      outputTokens: next.outputTokens || 0,
+      cacheRead: next.cacheRead || 0,
+      cacheWrite: next.cacheWrite || 0,
+    };
+  }
+
+  return {
+    inputTokens: Math.max(previous.inputTokens || 0, next.inputTokens || 0),
+    outputTokens: Math.max(previous.outputTokens || 0, next.outputTokens || 0),
+    cacheRead: Math.max(previous.cacheRead || 0, next.cacheRead || 0),
+    cacheWrite: Math.max(previous.cacheWrite || 0, next.cacheWrite || 0),
+  };
+}
+
+function collectMergedUsageByKey(rawRecords: RawRecord[]): Map<string, TokenUsage> {
+  const usageByKey = new Map<string, TokenUsage>();
+
+  for (let index = 0; index < rawRecords.length; index += 1) {
+    const raw = rawRecords[index];
+    const usage = extractUsage(raw);
+    const usageDedupKey = getUsageDedupKey(raw);
+    if (!usage || !usageDedupKey) continue;
+
+    usageByKey.set(usageDedupKey, mergeTokenUsage(usageByKey.get(usageDedupKey), usage));
+  }
+
+  return usageByKey;
+}
+
+function extractEventsFromRecord(
+  raw: RawRecord,
+  syntheticTime: number,
+  issues: ParseIssues,
+  mergedUsageByKey?: Map<string, TokenUsage>,
+  attachedUsageKeys?: Set<string>,
+): NormalizedEvent[] {
   const events: NormalizedEvent[] = [];
   const timestamp = extractTimestamp(raw);
   const tSeconds = timestamp !== null ? timestamp : syntheticTime;
   const model = extractModel(raw);
-  const usage = extractUsage(raw);
-  const usageDedupKey = usage ? getUsageDedupKey(raw) : null;
-  const shouldAttachUsage = Boolean(usage) && (!usageDedupKey || !seenUsageKeys || !seenUsageKeys.has(usageDedupKey));
+  const usageDedupKey = getUsageDedupKey(raw);
+  const usage = usageDedupKey && mergedUsageByKey
+    ? mergedUsageByKey.get(usageDedupKey) || null
+    : extractUsage(raw);
+  const shouldAttachUsage = Boolean(usage) && (!usageDedupKey || !attachedUsageKeys || !attachedUsageKeys.has(usageDedupKey));
   let usageAttached = false;
 
   function pushEvent(event: Partial<NormalizedEvent>): void {
@@ -206,7 +247,7 @@ function extractEventsFromRecord(raw: RawRecord, syntheticTime: number, issues: 
     if (shouldAttachUsage && usage && !event.tokenUsage && !usageAttached) {
       event.tokenUsage = usage;
       usageAttached = true;
-      if (usageDedupKey && seenUsageKeys) seenUsageKeys.add(usageDedupKey);
+      if (usageDedupKey && attachedUsageKeys) attachedUsageKeys.add(usageDedupKey);
     }
     events.push(event);
   }
@@ -518,11 +559,12 @@ export function parseClaudeCodeJSONL(text: string): ParsedSession | null {
   const hasRealTimestamps = timestampCount > rawRecords.length * 0.5;
 
   const events: NormalizedEvent[] = [];
-  const seenUsageKeys = new Set<string>();
+  const mergedUsageByKey = collectMergedUsageByKey(rawRecords);
+  const attachedUsageKeys = new Set<string>();
   let syntheticTime = 0;
 
   for (let index = 0; index < rawRecords.length; index += 1) {
-    const parsedEvents = extractEventsFromRecord(rawRecords[index], syntheticTime, issues, seenUsageKeys);
+    const parsedEvents = extractEventsFromRecord(rawRecords[index], syntheticTime, issues, mergedUsageByKey, attachedUsageKeys);
     events.push(...parsedEvents);
     syntheticTime += Math.max(1, parsedEvents.length);
   }

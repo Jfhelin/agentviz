@@ -854,18 +854,19 @@ function summarizeTurnTokenUsage(turnEvents) {
 }
 
 // Build a useful snippet for a turn node.
-// Priority: real user message > tool call summary > first reasoning text > fallback
+// Priority: real user message > cache metrics > tool call summary > first reasoning text > fallback
 export function buildTurnSnippet(turn, turnEvents) {
   var msg = turn.userMessage || "";
+  var hasRealUserMessage = msg && msg !== "(continuation)" && msg !== "(system)";
   var tokenUsage = summarizeTurnTokenUsage(turnEvents);
+
+  // If there's a real user message (not a placeholder), use it
+  if (hasRealUserMessage) {
+    return msg.length > 60 ? msg.slice(0, 57) + "..." : msg;
+  }
 
   if (tokenUsage && tokenUsage.cacheRead > 0) {
     return tokenUsage.cacheRead.toLocaleString() + " cache read / " + tokenUsage.cacheWrite.toLocaleString() + " cache write / cache hit rate " + (tokenUsage.cacheHitRate != null ? (tokenUsage.cacheHitRate * 100).toFixed(1) : "0.0") + "%";
-  }
-
-  // If there's a real user message (not a placeholder), use it
-  if (msg && msg !== "(continuation)" && msg !== "(system)") {
-    return msg.length > 60 ? msg.slice(0, 57) + "..." : msg;
   }
 
   // Summarize by tool calls used in this turn
