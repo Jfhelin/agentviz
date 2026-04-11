@@ -165,6 +165,7 @@ Side-by-side metrics with delta badges:
 | Cost / PRUs | Green = A cheaper (delta suppressed for cross-agent comparisons since units differ) |
 | Input / Output tokens | Neutral |
 | Cache reads / writes | Neutral (shown only when cache data present) |
+| Cache hit rate | Neutral (shown only when cache data present) |
 | Premium requests (PRU) | Green = A uses fewer (shown only for Copilot sessions) |
 | Tool calls | Neutral |
 | Errors | Green = A has fewer |
@@ -232,7 +233,7 @@ Interactive directed graph of session turns with expandable tool-call structure.
 
 ### Stats View
 
-Aggregate metrics, event distribution bars, tools used ranking, and a per-turn summary. Includes token counts and estimated USD cost per turn for Claude models.
+Aggregate metrics, event distribution bars, tools used ranking, and a per-turn summary. Includes token counts, estimated USD cost per turn for Claude models, and per-turn cache hit rate (cache read / cache write / hit %) when prompt caching data is available.
 
 <div align="center">
 <img src="docs/screenshots/stats-view.png" alt="Stats View" width="800" />
@@ -377,6 +378,7 @@ src/
     sessionLibrary.js    # localStorage-backed session library with content persistence
     sessionParsing.ts    # Session parsing utilities and types
     sessionTypes.ts      # TypeScript type definitions for session data
+    cacheMetrics.ts      # Shared cache hit rate helpers
     autonomyMetrics.js   # Human response time, idle gaps, intervention scoring
     projectConfig.js     # Project config surface detection (CLAUDE.md, .github/, etc.)
     aiCoachAgent.js      # AI Coach powered by @github/copilot-sdk (gpt-4o)

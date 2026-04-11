@@ -430,6 +430,13 @@ describe("parseClaudeCodeJSONL", function () {
       expect(result.metadata.tokenUsage.cacheHitRate).toBeCloseTo(800 / ((1000 - 800) + 0 + 800), 6);
     });
 
+    it("reports session duration", function () {
+      var result = parseClaudeCodeJSONL(makeSession([
+        USER_MSG, ASSISTANT_TEXT, ASSISTANT_TOOL_USE,
+      ]));
+      expect(result.metadata.duration).toBeGreaterThan(0);
+    });
+
   });
 
 
