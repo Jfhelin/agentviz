@@ -5,7 +5,7 @@
  * across three source categories:
  *   - project:   .github/skills/, .claude/skills/, .agents/skills/, repo instructions
  *   - personal:  ~/.copilot/skills/, ~/.claude/skills/, user instructions
- *   - extension: VS Code extension-contributed tools, MCP servers, agent plugins
+ *   - extension: VS Code extension-contributed tools, MCP servers
  *
  * Also extracts related customization signals:
  *   - Custom instructions (copilot-instructions.md, .instructions.md)
@@ -34,8 +34,7 @@ export type SkillCategory =
   | "agent"             // Custom agent (.agent.md)
   | "tool"              // Tool (built-in, extension, MCP)
   | "mcp-server"        // MCP server
-  | "prompt"            // Prompt file (.prompt.md)
-  | "plugin";           // Agent plugin
+  | "prompt";           // Prompt file (.prompt.md)
 
 export interface SkillEvent {
   /** Event index in the session events array */
@@ -94,8 +93,6 @@ export interface SkillSummary {
   totalSkills: number;
   /** Total skill invocations */
   totalInvocations: number;
-  /** Session format */
-  format: string;
 }
 
 // ── Stage ordering for max-stage computation ─────────────────────────────────
@@ -159,20 +156,21 @@ var PROMPT_FILE_PATTERNS = [
 function classifyFilePath(filePath: string): { category: SkillCategory; source: SkillSource } | null {
   if (!filePath) return null;
 
-  for (var i = 0; i < PROJECT_SKILL_PATTERNS.length; i++) {
-    if (PROJECT_SKILL_PATTERNS[i].test(filePath)) return { category: "skill", source: "project" };
+  var pi;
+  for (pi = 0; pi < PROJECT_SKILL_PATTERNS.length; pi++) {
+    if (PROJECT_SKILL_PATTERNS[pi].test(filePath)) return { category: "skill", source: "project" };
   }
-  for (var i = 0; i < PERSONAL_SKILL_PATTERNS.length; i++) {
-    if (PERSONAL_SKILL_PATTERNS[i].test(filePath)) return { category: "skill", source: "personal" };
+  for (pi = 0; pi < PERSONAL_SKILL_PATTERNS.length; pi++) {
+    if (PERSONAL_SKILL_PATTERNS[pi].test(filePath)) return { category: "skill", source: "personal" };
   }
-  for (var i = 0; i < AGENT_FILE_PATTERNS.length; i++) {
-    if (AGENT_FILE_PATTERNS[i].test(filePath)) return { category: "agent", source: "project" };
+  for (pi = 0; pi < AGENT_FILE_PATTERNS.length; pi++) {
+    if (AGENT_FILE_PATTERNS[pi].test(filePath)) return { category: "agent", source: "project" };
   }
-  for (var i = 0; i < PROMPT_FILE_PATTERNS.length; i++) {
-    if (PROMPT_FILE_PATTERNS[i].test(filePath)) return { category: "prompt", source: "project" };
+  for (pi = 0; pi < PROMPT_FILE_PATTERNS.length; pi++) {
+    if (PROMPT_FILE_PATTERNS[pi].test(filePath)) return { category: "prompt", source: "project" };
   }
-  for (var i = 0; i < PROJECT_INSTRUCTION_PATTERNS.length; i++) {
-    if (PROJECT_INSTRUCTION_PATTERNS[i].test(filePath)) return { category: "instruction", source: "project" };
+  for (pi = 0; pi < PROJECT_INSTRUCTION_PATTERNS.length; pi++) {
+    if (PROJECT_INSTRUCTION_PATTERNS[pi].test(filePath)) return { category: "instruction", source: "project" };
   }
   return null;
 }
@@ -271,7 +269,6 @@ export function extractSkills(
   metadata: SessionMetadata,
 ): SkillSummary {
   var skillMap: Record<string, ExtractedSkill> = {};
-  var format = metadata.format || "unknown";
 
   function getOrCreate(id: string, defaults: Partial<ExtractedSkill>): ExtractedSkill {
     if (!skillMap[id]) {
@@ -606,7 +603,7 @@ export function extractSkills(
     "project": [], "personal": [], "extension": [], "built-in": [], "mcp": [], "unknown": [],
   };
   var byCategory: Record<SkillCategory, ExtractedSkill[]> = {
-    "skill": [], "instruction": [], "agent": [], "tool": [], "mcp-server": [], "prompt": [], "plugin": [],
+    "skill": [], "instruction": [], "agent": [], "tool": [], "mcp-server": [], "prompt": [],
   };
   var byStage: Record<SkillLifecycleStage, ExtractedSkill[]> = {
     "discovered": [], "loaded": [], "invoked": [], "resource-accessed": [], "completed": [], "errored": [],
@@ -628,6 +625,5 @@ export function extractSkills(
     byStage: byStage,
     totalSkills: skills.length,
     totalInvocations: totalInvocations,
-    format: format,
   };
 }
