@@ -6,7 +6,7 @@ import ToolbarButton from "./ui/ToolbarButton.jsx";
 import ResizablePanel from "./ResizablePanel.jsx";
 import { buildAutonomySummary } from "../lib/autonomyMetrics.js";
 import { useState, useMemo } from "react";
-import { extractSkills } from "../lib/skillExtractor.ts";
+import { extractSkills } from "../lib/skillExtractor.js";
 
 function getCardStyle() {
   return {
@@ -56,33 +56,38 @@ function MetricCard({ value, label, tooltip, color }) {
 
 // ── Capabilities panel (skills, instructions, MCP, agents) ──────────────────
 
-var SOURCE_COLORS = {
-  project: theme.track.tool_call,
-  personal: theme.track.context,
-  extension: theme.track.agent,
-  "built-in": theme.track.reasoning,
-  mcp: theme.semantic.success,
-  unknown: theme.text.dim,
-};
+function getSourceColors() {
+  return {
+    project: theme.track.tool_call,
+    personal: theme.track.context,
+    extension: theme.track.agent,
+    "built-in": theme.track.reasoning,
+    mcp: theme.semantic.success,
+    unknown: theme.text.dim,
+  };
+}
 
-var CATEGORY_COLORS = {
-  skill: theme.track.context,
-  instruction: theme.accent.primary,
-  agent: theme.track.agent,
-  tool: theme.track.tool_call,
-  "mcp-server": theme.semantic.success,
-  prompt: theme.semantic.success,
-  plugin: theme.agentType["configure-copilot"],
-};
+function getCategoryColors() {
+  return {
+    skill: theme.track.context,
+    instruction: theme.accent.primary,
+    agent: theme.track.agent,
+    tool: theme.track.tool_call,
+    "mcp-server": theme.semantic.success,
+    prompt: theme.semantic.success,
+  };
+}
 
-var STAGE_COLORS = {
-  discovered: theme.text.dim,
-  loaded: theme.accent.primary,
-  invoked: theme.track.tool_call,
-  "resource-accessed": theme.track.context,
-  completed: theme.semantic.success,
-  errored: theme.semantic.error,
-};
+function getStageColors() {
+  return {
+    discovered: theme.text.dim,
+    loaded: theme.accent.primary,
+    invoked: theme.track.tool_call,
+    "resource-accessed": theme.track.context,
+    completed: theme.semantic.success,
+    errored: theme.semantic.error,
+  };
+}
 
 var STAGE_LABELS = {
   discovered: "Discovered",
@@ -96,6 +101,7 @@ var STAGE_LABELS = {
 var STAGE_SEQUENCE = ["discovered", "loaded", "invoked", "resource-accessed", "completed"];
 
 function SkillStageBar({ maxStage, hasError }) {
+  var stageColors = getStageColors();
   var activeIdx = STAGE_SEQUENCE.indexOf(maxStage);
   if (activeIdx < 0) activeIdx = maxStage === "errored" ? 4 : 0;
   return (
@@ -110,8 +116,8 @@ function SkillStageBar({ maxStage, hasError }) {
             style={{
               width: 14,
               height: 3,
-              borderRadius: 1.5,
-              background: isErr ? theme.semantic.error : reached ? STAGE_COLORS[stage] : theme.text.ghost,
+              borderRadius: theme.radius.sm / 2,
+              background: isErr ? theme.semantic.error : reached ? stageColors[stage] : theme.text.ghost,
               opacity: reached ? 1 : 0.25,
             }}
           />
@@ -123,7 +129,10 @@ function SkillStageBar({ maxStage, hasError }) {
 
 function CapabilityRow({ skill, isExpanded, onToggle, sourceFilter, onSourceFilter }) {
   var [hovered, setHovered] = useState(false);
-  var catColor = CATEGORY_COLORS[skill.category] || theme.track.tool_call;
+  var categoryColors = getCategoryColors();
+  var sourceColors = getSourceColors();
+  var stageColors = getStageColors();
+  var catColor = categoryColors[skill.category] || theme.track.tool_call;
   return (
     <div style={{ marginBottom: 2 }}>
       <div
@@ -168,12 +177,12 @@ function CapabilityRow({ skill, isExpanded, onToggle, sourceFilter, onSourceFilt
           style={{
             fontSize: theme.fontSize.xs,
             padding: "0 4px",
-            borderRadius: 3,
-            color: SOURCE_COLORS[skill.source],
-            background: alpha(SOURCE_COLORS[skill.source] || theme.text.dim, 0.1),
+            borderRadius: theme.radius.sm / 2,
+            color: sourceColors[skill.source],
+            background: alpha(sourceColors[skill.source] || theme.text.dim, 0.1),
             flexShrink: 0,
             cursor: "pointer",
-            border: sourceFilter === skill.source ? "1px solid " + SOURCE_COLORS[skill.source] : "1px solid transparent",
+            border: sourceFilter === skill.source ? "1px solid " + sourceColors[skill.source] : "1px solid transparent",
           }}
           title={skill.sourceLabel || skill.source}
         >
@@ -199,7 +208,7 @@ function CapabilityRow({ skill, isExpanded, onToggle, sourceFilter, onSourceFilt
           </div>
           <div style={{ maxHeight: 120, overflowY: "auto" }}>
             {skill.events.map(function (ev, idx) {
-              var stageColor = STAGE_COLORS[ev.stage] || theme.text.dim;
+              var stageColor = stageColors[ev.stage] || theme.text.dim;
               return (
                 <div key={idx} style={{
                   display: "flex", alignItems: "center", gap: 5, padding: "2px 0",
@@ -224,6 +233,7 @@ function CapabilitiesPanel({ events, turns, metadata }) {
   var [expandedId, setExpandedId] = useState(null);
   var [capFilter, setCapFilter] = useState("all");
   var [sourceFilter, setSourceFilter] = useState(null);
+  var sourceColors = getSourceColors();
 
   var summary = useMemo(function () {
     return extractSkills(events || [], turns || [], metadata || {});
@@ -237,9 +247,6 @@ function CapabilitiesPanel({ events, turns, metadata }) {
     if (sourceFilter && s.source !== sourceFilter) return false;
     return true;
   });
-
-  // Count non-tool capabilities
-  var interestingCount = summary.skills.filter(function (s) { return s.category !== "tool"; }).length;
 
   // Category filter tabs
   var catTabs = [
@@ -275,7 +282,7 @@ function CapabilitiesPanel({ events, turns, metadata }) {
                 background: active ? alpha(theme.accent.primary, 0.15) : "transparent",
                 color: active ? theme.accent.primary : theme.text.dim,
                 cursor: "pointer",
-                lineHeight: "14px",
+                lineHeight: (theme.fontSize.xs + theme.space.sm) + "px",
               }}
             >
               {tab.label} {tab.count}
@@ -288,13 +295,13 @@ function CapabilitiesPanel({ events, turns, metadata }) {
             style={{
               padding: "2px 7px",
               borderRadius: theme.radius.full,
-                fontSize: theme.fontSize.xs,
-                fontFamily: theme.font.mono,
-                border: "1px solid " + (SOURCE_COLORS[sourceFilter] || theme.border.default),
-              background: alpha(SOURCE_COLORS[sourceFilter] || theme.text.dim, 0.15),
-              color: SOURCE_COLORS[sourceFilter] || theme.text.dim,
+              fontSize: theme.fontSize.xs,
+              fontFamily: theme.font.mono,
+              border: "1px solid " + (sourceColors[sourceFilter] || theme.border.default),
+              background: alpha(sourceColors[sourceFilter] || theme.text.dim, 0.15),
+              color: sourceColors[sourceFilter] || theme.text.dim,
               cursor: "pointer",
-              lineHeight: "14px",
+              lineHeight: (theme.fontSize.xs + theme.space.sm) + "px",
             }}
             title="Click to clear source filter"
           >
@@ -304,6 +311,11 @@ function CapabilitiesPanel({ events, turns, metadata }) {
       </div>
 
       {/* Skill list */}
+      {nonToolSkills.length === 0 && (
+        <div style={{ fontSize: theme.fontSize.md, color: theme.text.dim, textAlign: "center", padding: theme.space.lg + "px 0" }}>
+          No matching capabilities
+        </div>
+      )}
       {nonToolSkills.map(function (skill) {
         return (
           <CapabilityRow
@@ -330,12 +342,6 @@ export default function StatsView({ events, totalTime, metadata, turns, autonomy
     if (!trackStats[e.track]) trackStats[e.track] = { count: 0 };
     trackStats[e.track].count++;
   });
-
-  var toolStats = {};
-  events.forEach(function (e) {
-    if (e.toolName) toolStats[e.toolName] = (toolStats[e.toolName] || 0) + 1;
-  });
-  var sortedTools = Object.entries(toolStats).sort(function (a, b) { return b[1] - a[1]; });
 
   // Compute subagent stats
   var agentStats = {};
