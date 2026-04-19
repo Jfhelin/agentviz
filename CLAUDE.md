@@ -134,6 +134,7 @@ Vite proxies `/api/*` to the backend automatically.
 - Design tokens defined in src/lib/theme.js
 - Product name is always AGENTVIZ (all caps, no spaces)
 - UI/UX design system: see docs/ui-ux-style-guide.md -- all UI changes must conform to it
+- Cache usage summaries omit the cache-write segment when `cacheWrite` is zero
 
 ## Planned features
 - Bookmarks and annotations (persisted to localStorage)

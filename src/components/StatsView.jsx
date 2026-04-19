@@ -2,7 +2,7 @@ import { theme, TRACK_TYPES, alpha } from "../lib/theme.js";
 import Icon from "./Icon.jsx";
 import { estimateCost, estimateMultiModelCost, formatCost, hasModelPricing } from "../lib/pricing.js";
 import { formatDurationLong } from "../lib/formatTime.js";
-import { computeCacheHitRate } from "../lib/cacheMetrics";
+import { formatCacheUsageSummary, summarizeTokenUsage } from "../lib/cacheMetrics";
 import ToolbarButton from "./ui/ToolbarButton.jsx";
 import ResizablePanel from "./ResizablePanel.jsx";
 import { buildAutonomySummary } from "../lib/autonomyMetrics.js";
@@ -368,12 +368,7 @@ export default function StatsView({ events, totalTime, metadata, turns, autonomy
   events.forEach(function (e) {
     if (e.tokenUsage) {
       if (e.turnIndex !== undefined) {
-        var t = turnTokenMap[e.turnIndex] || { inputTokens: 0, outputTokens: 0, cacheRead: 0, cacheWrite: 0 };
-        t.inputTokens += e.tokenUsage.inputTokens || 0;
-        t.outputTokens += e.tokenUsage.outputTokens || 0;
-        t.cacheRead += e.tokenUsage.cacheRead || 0;
-        t.cacheWrite += e.tokenUsage.cacheWrite || 0;
-        t.cacheHitRate = computeCacheHitRate(t.inputTokens, t.cacheWrite, t.cacheRead);
+        var t = summarizeTokenUsage([turnTokenMap[e.turnIndex], e.tokenUsage]);
         turnTokenMap[e.turnIndex] = t;
       }
       // Bucket by model; fall back to primaryModel for events without a model field
@@ -386,6 +381,9 @@ export default function StatsView({ events, totalTime, metadata, turns, autonomy
       modelTokenMap[modelKey] = m;
     }
   });
+  var sessionCacheSummary = metadata && metadata.tokenUsage
+    ? formatCacheUsageSummary(metadata.tokenUsage, { variant: "compact" })
+    : null;
 
   var cards = [
     { label: "Total Events", value: events.length, color: theme.text.primary },
@@ -541,11 +539,9 @@ export default function StatsView({ events, totalTime, metadata, turns, autonomy
                           <span style={{ color: theme.semantic.success }}>{metadata.tokenUsage.outputTokens.toLocaleString()}</span>
                           <span style={{ color: theme.text.muted }}>{" out"}</span>
                         </div>
-                        {metadata.tokenUsage.cacheRead > 0 && (
+                        {sessionCacheSummary && (
                           <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, fontFamily: theme.font.mono, marginTop: 4 }}>
-                            {metadata.tokenUsage.cacheRead.toLocaleString()} cache read
-                            {metadata.tokenUsage.cacheWrite > 0 ? " / " + metadata.tokenUsage.cacheWrite.toLocaleString() + " cache write" : ""}
-                            {metadata.tokenUsage.cacheHitRate != null ? " / " + (metadata.tokenUsage.cacheHitRate * 100).toFixed(1) + "% hit" : ""}
+                            {sessionCacheSummary}
                           </div>
                         )}
                         <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, marginTop: 4 }}>{card.label}</div>
@@ -685,9 +681,9 @@ export default function StatsView({ events, totalTime, metadata, turns, autonomy
                       {formatCost(estimateCost(turnTokenMap[turn.index], metadata && metadata.primaryModel))}
                     </span>
                   )}
-                  {turnTokenMap[turn.index] && turnTokenMap[turn.index].cacheRead > 0 && (
+                  {formatCacheUsageSummary(turnTokenMap[turn.index], { variant: "verbose" }) && (
                     <span style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, fontFamily: theme.font.mono, flexShrink: 0 }}>
-                      {turnTokenMap[turn.index].cacheRead.toLocaleString()} cache read / {turnTokenMap[turn.index].cacheWrite.toLocaleString()} cache write / cache hit rate {turnTokenMap[turn.index].cacheHitRate != null ? (turnTokenMap[turn.index].cacheHitRate * 100).toFixed(1) : "0.0"}%
+                      {formatCacheUsageSummary(turnTokenMap[turn.index], { variant: "verbose" })}
                     </span>
                   )}
                   {turn.hasError && (

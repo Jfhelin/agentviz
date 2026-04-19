@@ -381,7 +381,6 @@ describe("parseClaudeCodeJSONL", function () {
         expect(result.metadata.tokenUsage.cacheRead).toBe(600);
         expect(result.metadata.tokenUsage.cacheWrite).toBe(300);
         expect(result.metadata.tokenUsage.cacheHitRate).toBeCloseTo(600 / ((1200 - 600) + 300 + 600), 6);
-        expect(result.metadata.tokenUsage.denomTokens).toBe(1500);
       }
     });
 

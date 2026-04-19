@@ -233,7 +233,7 @@ Interactive directed graph of session turns with expandable tool-call structure.
 
 ### Stats View
 
-Aggregate metrics, event distribution bars, tools used ranking, and a per-turn summary. Includes token counts, estimated USD cost per turn for Claude models, and per-turn cache hit rate (cache read / cache write / hit %) when prompt caching data is available.
+Aggregate metrics, event distribution bars, tools used ranking, and a per-turn summary. Includes token counts, estimated USD cost per turn for Claude models, and per-turn cache hit rate summaries when prompt caching data is available. The cache write segment is omitted when it is zero.
 
 <div align="center">
 <img src="docs/screenshots/stats-view.png" alt="Stats View" width="800" />
