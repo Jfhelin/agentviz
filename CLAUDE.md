@@ -40,6 +40,7 @@ src/
     sessionParsing.ts  # Session parsing utilities and types
     sessionTypes.ts    # TypeScript type definitions for session data
     cacheMetrics.ts    # Shared cache hit rate helpers
+    skillExtractor.ts  # Skill/capability lifecycle extractor (skills, instructions, agents, MCP servers, tools, prompts)
     autonomyMetrics.js # Human response time, idle gaps, intervention scoring
     projectConfig.js   # Project config surface detection (CLAUDE.md, .github/, etc.)
     aiCoachAgent.js    # AI Coach powered by @github/copilot-sdk (gpt-4o)

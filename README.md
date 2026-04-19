@@ -235,6 +235,8 @@ Interactive directed graph of session turns with expandable tool-call structure.
 
 Aggregate metrics, event distribution bars, tools used ranking, and a per-turn summary. Includes token counts, estimated USD cost per turn for Claude models, and per-turn cache hit rate summaries when prompt caching data is available. The cache write segment is omitted when it is zero.
 
+A **Tools &amp; Skills** panel surfaces every skill, instruction file, custom agent, MCP server, built-in tool, and prompt that appeared in the session. Each entry shows its lifecycle stage (Discovered &rarr; Loaded &rarr; Invoked &rarr; Resources &rarr; Completed or Errored) as a mini progress bar, its invocation count, and its source (project / personal / extension / built-in / MCP). Click any row to expand its full event timeline. Filter by category (Skills, Instructions, Agents, Tools, MCP, Prompts) or click a source chip to isolate entries from that origin.
+
 <div align="center">
 <img src="docs/screenshots/stats-view.png" alt="Stats View" width="800" />
 </div>
@@ -270,6 +272,7 @@ AI-powered session coaching available directly from any session. The coach reads
 | **Static Manifest Mode** | Deploy as a pure static site with `?manifest=URL` pointing to a JSON manifest of sessions. Tag-based filtering, no backend required. |
 | **AI Coach** | Agentic analysis powered by Copilot SDK. Recommends prompts, skills, and MCP config with one-click apply. |
 | **Session Q&A** | Slide-over drawer (`Cmd+Shift+K`) with instant answers for common queries and Copilot SDK model fallback for open-ended questions. |
+| **Skills and Capability Tracking** | Stats View surfaces every skill, instruction, agent, MCP server, tool, and prompt from the session with lifecycle stage bars, invocation counts, source chips, and expandable event timelines. Filter by category or source. |
 | **Autonomy Metrics** | Measures human response time, idle gaps, and intervention frequency per session. |
 | **Dark / Light / System Theme** | Full dark and light palettes with a one-click switcher in the header. System mode auto-follows OS preference. Preference is persisted across sessions. |
 
@@ -379,6 +382,7 @@ src/
     sessionParsing.ts    # Session parsing utilities and types
     sessionTypes.ts      # TypeScript type definitions for session data
     cacheMetrics.ts      # Shared cache hit rate helpers
+    skillExtractor.ts    # Skill/capability lifecycle extractor: skills, instructions, agents, MCP servers, tools, prompts
     autonomyMetrics.js   # Human response time, idle gaps, intervention scoring
     projectConfig.js     # Project config surface detection (CLAUDE.md, .github/, etc.)
     aiCoachAgent.js      # AI Coach powered by @github/copilot-sdk (gpt-4o)
