@@ -22,7 +22,7 @@
  */
 
 import type { NormalizedEvent, ParsedSession, SessionMetadata, SessionTurn } from "./sessionTypes";
-import { computeCacheHitRate, computeCacheHitRateDenomTokens } from "./cacheMetrics";
+import { computeCacheHitRate } from "./cacheMetrics";
 import type { TrackType } from "./theme";
 
 const MAX_TEXT_LENGTH = 4000;
@@ -538,7 +538,7 @@ function buildMetadata(
   let totalCacheReadTokens = 0;
   let totalCacheWriteTokens = 0;
   let totalCost: number | null = null;
-  let modelTokenUsage: Record<string, { inputTokens: number; outputTokens: number; cacheRead: number; cacheWrite: number; cacheHitRate?: number; denomTokens?: number }> | null = null;
+  let modelTokenUsage: Record<string, { inputTokens: number; outputTokens: number; cacheRead: number; cacheWrite: number; cacheHitRate?: number }> | null = null;
 
   if (sessionShutdown && sessionShutdown.modelMetrics) {
     const modelMetrics = sessionShutdown.modelMetrics;
@@ -561,7 +561,6 @@ function buildMetadata(
           cacheRead: cacheReadTokens,
           cacheWrite: cacheWriteTokens,
           cacheHitRate: computeCacheHitRate(inputTokens, cacheWriteTokens, cacheReadTokens),
-          denomTokens: computeCacheHitRateDenomTokens(inputTokens, cacheWriteTokens, cacheReadTokens),
         };
       }
       if (metric.requests) {
@@ -589,7 +588,6 @@ function buildMetadata(
   const context = sessionInfo && sessionInfo.context ? sessionInfo.context : {};
 
   const cacheHitRate = computeCacheHitRate(totalInputTokens, totalCacheWriteTokens, totalCacheReadTokens);
-  const denomTokens = computeCacheHitRateDenomTokens(totalInputTokens, totalCacheWriteTokens, totalCacheReadTokens);
 
   return {
     totalEvents: events.length,
@@ -606,7 +604,6 @@ function buildMetadata(
         cacheRead: totalCacheReadTokens,
         cacheWrite: totalCacheWriteTokens,
         cacheHitRate,
-        denomTokens,
       }
       : null,
     warnings,

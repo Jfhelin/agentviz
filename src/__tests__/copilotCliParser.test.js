@@ -391,8 +391,10 @@ describe("metadata", function () {
   });
 
   it("computes cache hit rate using copilot session semantics", function () {
+    expect(meta.tokenUsage.inputTokens).toBe(5000);
+    expect(meta.tokenUsage.outputTokens).toBe(150);
+    expect(meta.tokenUsage.cacheRead).toBe(3000);
     expect(meta.tokenUsage.cacheHitRate).toBeCloseTo(3000 / ((5000 - 3000) + 0 + 3000), 6);
-    expect(meta.tokenUsage.denomTokens).toBe(5000);
   });
 
   it("uses null tokenUsage when no token counters are present", function () {
@@ -426,7 +428,6 @@ describe("metadata", function () {
     expect(meta.modelTokenUsage["claude-opus-4.6"].outputTokens).toBe(150);
     expect(meta.modelTokenUsage["claude-opus-4.6"].cacheRead).toBe(3000);
     expect(meta.modelTokenUsage["claude-opus-4.6"].cacheHitRate).toBeCloseTo(3000 / ((5000 - 3000) + 0 + 3000), 6);
-    expect(meta.modelTokenUsage["claude-opus-4.6"].denomTokens).toBe(5000);
   });
 
   it("returns null totalCost and modelTokenUsage when no shutdown data", function () {

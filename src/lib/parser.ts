@@ -20,7 +20,7 @@
  */
 
 import type { NormalizedEvent, ParseIssues, ParsedSession, SessionMetadata, SessionTurn, TokenUsage } from "./sessionTypes";
-import { computeCacheHitRate, computeCacheHitRateDenomTokens } from "./cacheMetrics";
+import { computeCacheHitRate } from "./cacheMetrics";
 
 type RawRecord = Record<string, any>;
 import { truncateText as truncate } from "./formatTime.js";
@@ -634,7 +634,6 @@ function buildMetadata(events: NormalizedEvent[], turns: SessionTurn[], issues: 
   });
 
   const cacheHitRate = computeCacheHitRate(totalInput, totalCacheWrite, totalCacheRead);
-  const denomTokens = computeCacheHitRateDenomTokens(totalInput, totalCacheWrite, totalCacheRead);
 
   return {
     totalEvents: events.length,
@@ -651,7 +650,6 @@ function buildMetadata(events: NormalizedEvent[], turns: SessionTurn[], issues: 
         cacheRead: totalCacheRead,
         cacheWrite: totalCacheWrite,
         cacheHitRate,
-        denomTokens,
       }
       : null,
     warnings: buildWarnings(issues),

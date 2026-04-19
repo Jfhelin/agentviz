@@ -1022,13 +1022,15 @@ Cache observability is shown when `cacheRead > 0` in token usage data.
 
 | Location | Format | Font | Style |
 |----------|--------|------|-------|
-| StatsView summary card | `{n} cache read / {n} cache write / {pct}% hit` | `theme.font.mono` | `fontSize: theme.fontSize.xs`, `color: theme.text.muted` |
-| StatsView per-turn row | `{n} cache read / {n} cache write / cache hit rate {pct}%` | `theme.font.mono` | `fontSize: theme.fontSize.xs`, `color: theme.text.muted` |
+| StatsView summary card | `{n} cache read / [{n} cache write /] {pct}% hit` | `theme.font.mono` | `fontSize: theme.fontSize.xs`, `color: theme.text.muted` |
+| StatsView per-turn row | `{n} cache read / [{n} cache write /] cache hit rate {pct}%` | `theme.font.mono` | `fontSize: theme.fontSize.xs`, `color: theme.text.muted` |
 | CompareView scorecard | `{pct}%` or `N/A` | `theme.font.mono` | Same as other scorecard rows, `lowerIsBetter: null` (neutral) |
-| GraphView turn snippet | `{n} cache read / {n} cache write / cache hit rate {pct}%` | Plain text | Only shown for placeholder turns (no real user message) |
+| GraphView turn snippet | `{n} cache read / [{n} cache write /] cache hit rate {pct}%` | Plain text | Only shown for placeholder turns (no real user message) |
 | Q&A cost answer | `- Cache write: {n}\n- Cache hit rate: {pct}%` | Markdown list | Appended to existing token usage lines |
 
 **Formula:** `cacheHitRate = cacheRead / ((inputTokens - cacheRead) + cacheWrite + cacheRead)`. Computed by `computeCacheHitRate()` in `src/lib/cacheMetrics.ts`. Returns `undefined` when denominator is zero.
+
+The cache write segment is omitted when `cacheWrite` is zero.
 
 Percentages use `.toFixed(1)` (e.g. `85.3%`). Token counts use `.toLocaleString()` for thousands separators.
 

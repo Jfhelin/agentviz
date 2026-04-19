@@ -6,7 +6,6 @@ export interface TokenUsage {
   cacheRead?: number;
   cacheWrite?: number;
   cacheHitRate?: number;
-  denomTokens?: number;
 }
 
 export type SessionFormat = "claude-code" | "copilot-cli" | "vscode-chat";
