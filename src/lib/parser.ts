@@ -20,6 +20,7 @@
  */
 
 import type { NormalizedEvent, ParseIssues, ParsedSession, SessionMetadata, SessionTurn, TokenUsage } from "./sessionTypes";
+import { computeCacheHitRate, computeCacheHitRateDenomTokens } from "./cacheMetrics";
 
 type RawRecord = Record<string, any>;
 import { truncateText as truncate } from "./formatTime.js";
@@ -177,12 +178,64 @@ function detectError(block: MessageBlock, text: string): boolean {
   return ERROR_PATTERNS.some(function (pattern) { return pattern.test(text); });
 }
 
-function extractEventsFromRecord(raw: RawRecord, syntheticTime: number, issues: ParseIssues): NormalizedEvent[] {
+function getUsageDedupKey(raw: RawRecord): string | null {
+  const message = raw.message && typeof raw.message === "object" ? raw.message : null;
+  if ((raw.type === "assistant" || raw.role === "assistant") && message && typeof message.id === "string") {
+    return "assistant:" + message.id;
+  }
+  return null;
+}
+
+function mergeTokenUsage(previous: TokenUsage | null | undefined, next: TokenUsage): TokenUsage {
+  if (!previous) {
+    return {
+      inputTokens: next.inputTokens || 0,
+      outputTokens: next.outputTokens || 0,
+      cacheRead: next.cacheRead || 0,
+      cacheWrite: next.cacheWrite || 0,
+    };
+  }
+
+  return {
+    inputTokens: Math.max(previous.inputTokens || 0, next.inputTokens || 0),
+    outputTokens: Math.max(previous.outputTokens || 0, next.outputTokens || 0),
+    cacheRead: Math.max(previous.cacheRead || 0, next.cacheRead || 0),
+    cacheWrite: Math.max(previous.cacheWrite || 0, next.cacheWrite || 0),
+  };
+}
+
+function collectMergedUsageByKey(rawRecords: RawRecord[]): Map<string, TokenUsage> {
+  const usageByKey = new Map<string, TokenUsage>();
+
+  for (let index = 0; index < rawRecords.length; index += 1) {
+    const raw = rawRecords[index];
+    const usage = extractUsage(raw);
+    const usageDedupKey = getUsageDedupKey(raw);
+    if (!usage || !usageDedupKey) continue;
+
+    usageByKey.set(usageDedupKey, mergeTokenUsage(usageByKey.get(usageDedupKey), usage));
+  }
+
+  return usageByKey;
+}
+
+function extractEventsFromRecord(
+  raw: RawRecord,
+  syntheticTime: number,
+  issues: ParseIssues,
+  mergedUsageByKey?: Map<string, TokenUsage>,
+  attachedUsageKeys?: Set<string>,
+): NormalizedEvent[] {
   const events: NormalizedEvent[] = [];
   const timestamp = extractTimestamp(raw);
   const tSeconds = timestamp !== null ? timestamp : syntheticTime;
   const model = extractModel(raw);
-  const usage = extractUsage(raw);
+  const usageDedupKey = getUsageDedupKey(raw);
+  const usage = usageDedupKey && mergedUsageByKey
+    ? mergedUsageByKey.get(usageDedupKey) || null
+    : extractUsage(raw);
+  const shouldAttachUsage = Boolean(usage) && (!usageDedupKey || !attachedUsageKeys || !attachedUsageKeys.has(usageDedupKey));
+  let usageAttached = false;
 
   function pushEvent(event: Partial<NormalizedEvent>): void {
     if (!isValidEvent(event)) {
@@ -191,7 +244,11 @@ function extractEventsFromRecord(raw: RawRecord, syntheticTime: number, issues: 
     }
 
     if (model && !event.model) event.model = model;
-    if (usage && !event.tokenUsage) event.tokenUsage = usage;
+    if (shouldAttachUsage && usage && !event.tokenUsage && !usageAttached) {
+      event.tokenUsage = usage;
+      usageAttached = true;
+      if (usageDedupKey && attachedUsageKeys) attachedUsageKeys.add(usageDedupKey);
+    }
     events.push(event);
   }
 
@@ -550,6 +607,8 @@ function buildMetadata(events: NormalizedEvent[], turns: SessionTurn[], issues: 
   const models: Record<string, number> = {};
   let totalInput = 0;
   let totalOutput = 0;
+  let totalCacheRead = 0;
+  let totalCacheWrite = 0;
   let errorCount = 0;
   let toolCalls = 0;
 
@@ -559,6 +618,8 @@ function buildMetadata(events: NormalizedEvent[], turns: SessionTurn[], issues: 
     if (event.tokenUsage) {
       totalInput += event.tokenUsage.inputTokens || 0;
       totalOutput += event.tokenUsage.outputTokens || 0;
+      totalCacheRead += event.tokenUsage.cacheRead || 0;
+      totalCacheWrite += event.tokenUsage.cacheWrite || 0;
     }
     if (event.isError) errorCount += 1;
     if (event.track === "tool_call") toolCalls += 1;
@@ -572,6 +633,9 @@ function buildMetadata(events: NormalizedEvent[], turns: SessionTurn[], issues: 
     return right[1] - left[1];
   });
 
+  const cacheHitRate = computeCacheHitRate(totalInput, totalCacheWrite, totalCacheRead);
+  const denomTokens = computeCacheHitRateDenomTokens(totalInput, totalCacheWrite, totalCacheRead);
+
   return {
     totalEvents: events.length,
     totalTurns: turns.length,
@@ -580,8 +644,15 @@ function buildMetadata(events: NormalizedEvent[], turns: SessionTurn[], issues: 
     duration,
     models,
     primaryModel: modelEntries.length > 0 ? modelEntries[0][0] : null,
-    tokenUsage: totalInput + totalOutput > 0
-      ? { inputTokens: totalInput, outputTokens: totalOutput }
+    tokenUsage: totalInput + totalOutput + totalCacheRead + totalCacheWrite > 0
+      ? {
+        inputTokens: totalInput,
+        outputTokens: totalOutput,
+        cacheRead: totalCacheRead,
+        cacheWrite: totalCacheWrite,
+        cacheHitRate,
+        denomTokens,
+      }
       : null,
     warnings: buildWarnings(issues),
     parseIssues: issues,
@@ -611,10 +682,12 @@ export function parseClaudeCodeJSONL(text: string): ParsedSession | null {
   const hasRealTimestamps = timestampCount > rawRecords.length * 0.5;
 
   const events: NormalizedEvent[] = [];
+  const mergedUsageByKey = collectMergedUsageByKey(rawRecords);
+  const attachedUsageKeys = new Set<string>();
   let syntheticTime = 0;
 
   for (let index = 0; index < rawRecords.length; index += 1) {
-    const parsedEvents = extractEventsFromRecord(rawRecords[index], syntheticTime, issues);
+    const parsedEvents = extractEventsFromRecord(rawRecords[index], syntheticTime, issues, mergedUsageByKey, attachedUsageKeys);
     events.push(...parsedEvents);
     syntheticTime += Math.max(1, parsedEvents.length);
   }

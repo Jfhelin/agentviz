@@ -27,7 +27,7 @@ var ASSISTANT_TEXT = {
     content: [
       { type: "text", text: "Here is the Express.js project with TypeScript." },
     ],
-    usage: { input_tokens: 1200, output_tokens: 350 },
+    usage: { input_tokens: 1200, output_tokens: 350, cache_read_input_tokens: 600, cache_creation_input_tokens: 300 },
   },
 };
 
@@ -375,11 +375,59 @@ describe("parseClaudeCodeJSONL", function () {
       expect(result.metadata.primaryModel).toBe("claude-sonnet-4-20250514");
     });
 
-    it("aggregates token usage", function () {
+    it("aggregates cache buckets and cache hit rate", function () {
       var result = parseClaudeCodeJSONL(makeSession([ASSISTANT_TEXT]));
       if (result.metadata.tokenUsage) {
-        expect(result.metadata.tokenUsage.inputTokens).toBeGreaterThan(0);
+        expect(result.metadata.tokenUsage.cacheRead).toBe(600);
+        expect(result.metadata.tokenUsage.cacheWrite).toBe(300);
+        expect(result.metadata.tokenUsage.cacheHitRate).toBeCloseTo(600 / ((1200 - 600) + 300 + 600), 6);
+        expect(result.metadata.tokenUsage.denomTokens).toBe(1500);
       }
+    });
+
+    it("deduplicates usage across assistant records with the same message id", function () {
+      var repeated1 = {
+        type: "assistant",
+        timestamp: "2026-01-18T22:25:00.000Z",
+        message: {
+          id: "resp_same",
+          model: "claude-sonnet-4-20250514",
+          content: [
+            { type: "tool_use", id: "tool_a", name: "Read", input: { file_path: "/tmp/a" } },
+          ],
+          usage: { input_tokens: 1000, output_tokens: 0, cache_read_input_tokens: 800, cache_creation_input_tokens: 0 },
+        },
+      };
+      var repeated2 = {
+        type: "assistant",
+        timestamp: "2026-01-18T22:25:01.000Z",
+        message: {
+          id: "resp_same",
+          model: "claude-sonnet-4-20250514",
+          content: [
+            { type: "tool_use", id: "tool_b", name: "Grep", input: { pattern: "x" } },
+          ],
+          usage: { input_tokens: 1000, output_tokens: 0, cache_read_input_tokens: 800, cache_creation_input_tokens: 0 },
+        },
+      };
+      var repeated3 = {
+        type: "assistant",
+        timestamp: "2026-01-18T22:25:02.000Z",
+        message: {
+          id: "resp_same",
+          model: "claude-sonnet-4-20250514",
+          content: [
+            { type: "tool_use", id: "tool_c", name: "Bash", input: { command: "pwd" } },
+          ],
+          usage: { input_tokens: 1000, output_tokens: 200, cache_read_input_tokens: 800, cache_creation_input_tokens: 0 },
+        },
+      };
+      var result = parseClaudeCodeJSONL(makeSession([USER_MSG, repeated1, repeated2, repeated3]));
+      expect(result.metadata.tokenUsage.inputTokens).toBe(1000);
+      expect(result.metadata.tokenUsage.outputTokens).toBe(200);
+      expect(result.metadata.tokenUsage.cacheRead).toBe(800);
+      expect(result.metadata.tokenUsage.cacheWrite).toBe(0);
+      expect(result.metadata.tokenUsage.cacheHitRate).toBeCloseTo(800 / ((1000 - 800) + 0 + 800), 6);
     });
 
     it("reports session duration", function () {
@@ -388,6 +436,7 @@ describe("parseClaudeCodeJSONL", function () {
       ]));
       expect(result.metadata.duration).toBeGreaterThan(0);
     });
+
   });
 
 

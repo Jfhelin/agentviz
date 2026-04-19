@@ -593,6 +593,8 @@ The Graph view renders five distinct node types. All node text uses `theme.font.
 
 **Pre-fork and post-join tools:** Tools that execute before the fork or after the join are rendered as compound children of the host turn node, preserving parent-child edges via `parentToolCallId`.
 
+**Turn snippet priority:** real user message > cache metrics (for placeholder turns with `cacheRead > 0`) > tool call summary > first reasoning text > `"Turn {n}"`. Cache metric snippets use the format `{n} cache read / {n} cache write / cache hit rate {pct}%`.
+
 ### Grid Layout
 
 Used for metric cards:
@@ -1013,6 +1015,22 @@ Two loading patterns exist:
   - `<$0.01` for sub-cent
   - `$0.XXX` (3 decimals) for < $1
   - `$X.XX` (2 decimals) for >= $1
+
+### Cache Metrics
+
+Cache observability is shown when `cacheRead > 0` in token usage data.
+
+| Location | Format | Font | Style |
+|----------|--------|------|-------|
+| StatsView summary card | `{n} cache read / {n} cache write / {pct}% hit` | `theme.font.mono` | `fontSize: theme.fontSize.xs`, `color: theme.text.muted` |
+| StatsView per-turn row | `{n} cache read / {n} cache write / cache hit rate {pct}%` | `theme.font.mono` | `fontSize: theme.fontSize.xs`, `color: theme.text.muted` |
+| CompareView scorecard | `{pct}%` or `N/A` | `theme.font.mono` | Same as other scorecard rows, `lowerIsBetter: null` (neutral) |
+| GraphView turn snippet | `{n} cache read / {n} cache write / cache hit rate {pct}%` | Plain text | Only shown for placeholder turns (no real user message) |
+| Q&A cost answer | `- Cache write: {n}\n- Cache hit rate: {pct}%` | Markdown list | Appended to existing token usage lines |
+
+**Formula:** `cacheHitRate = cacheRead / ((inputTokens - cacheRead) + cacheWrite + cacheRead)`. Computed by `computeCacheHitRate()` in `src/lib/cacheMetrics.ts`. Returns `undefined` when denominator is zero.
+
+Percentages use `.toFixed(1)` (e.g. `85.3%`). Token counts use `.toLocaleString()` for thousands separators.
 
 ### Color Coding for Values
 

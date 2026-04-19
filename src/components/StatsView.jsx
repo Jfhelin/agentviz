@@ -2,6 +2,7 @@ import { theme, TRACK_TYPES, alpha } from "../lib/theme.js";
 import Icon from "./Icon.jsx";
 import { estimateCost, estimateMultiModelCost, formatCost, hasModelPricing } from "../lib/pricing.js";
 import { formatDurationLong } from "../lib/formatTime.js";
+import { computeCacheHitRate } from "../lib/cacheMetrics";
 import ToolbarButton from "./ui/ToolbarButton.jsx";
 import ResizablePanel from "./ResizablePanel.jsx";
 import { buildAutonomySummary } from "../lib/autonomyMetrics.js";
@@ -372,6 +373,7 @@ export default function StatsView({ events, totalTime, metadata, turns, autonomy
         t.outputTokens += e.tokenUsage.outputTokens || 0;
         t.cacheRead += e.tokenUsage.cacheRead || 0;
         t.cacheWrite += e.tokenUsage.cacheWrite || 0;
+        t.cacheHitRate = computeCacheHitRate(t.inputTokens, t.cacheWrite, t.cacheRead);
         turnTokenMap[e.turnIndex] = t;
       }
       // Bucket by model; fall back to primaryModel for events without a model field
@@ -542,6 +544,8 @@ export default function StatsView({ events, totalTime, metadata, turns, autonomy
                         {metadata.tokenUsage.cacheRead > 0 && (
                           <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, fontFamily: theme.font.mono, marginTop: 4 }}>
                             {metadata.tokenUsage.cacheRead.toLocaleString()} cache read
+                            {metadata.tokenUsage.cacheWrite > 0 ? " / " + metadata.tokenUsage.cacheWrite.toLocaleString() + " cache write" : ""}
+                            {metadata.tokenUsage.cacheHitRate != null ? " / " + (metadata.tokenUsage.cacheHitRate * 100).toFixed(1) + "% hit" : ""}
                           </div>
                         )}
                         <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, marginTop: 4 }}>{card.label}</div>
@@ -679,6 +683,11 @@ export default function StatsView({ events, totalTime, metadata, turns, autonomy
                   {turnTokenMap[turn.index] && (
                     <span style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, fontFamily: theme.font.mono, flexShrink: 0 }}>
                       {formatCost(estimateCost(turnTokenMap[turn.index], metadata && metadata.primaryModel))}
+                    </span>
+                  )}
+                  {turnTokenMap[turn.index] && turnTokenMap[turn.index].cacheRead > 0 && (
+                    <span style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, fontFamily: theme.font.mono, flexShrink: 0 }}>
+                      {turnTokenMap[turn.index].cacheRead.toLocaleString()} cache read / {turnTokenMap[turn.index].cacheWrite.toLocaleString()} cache write / cache hit rate {turnTokenMap[turn.index].cacheHitRate != null ? (turnTokenMap[turn.index].cacheHitRate * 100).toFixed(1) : "0.0"}%
                     </span>
                   )}
                   {turn.hasError && (

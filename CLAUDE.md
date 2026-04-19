@@ -39,6 +39,7 @@ src/
     sessionLibrary.js  # localStorage-backed session library with content persistence
     sessionParsing.ts  # Session parsing utilities and types
     sessionTypes.ts    # TypeScript type definitions for session data
+    cacheMetrics.ts    # Shared cache hit rate helpers
     autonomyMetrics.js # Human response time, idle gaps, intervention scoring
     projectConfig.js   # Project config surface detection (CLAUDE.md, .github/, etc.)
     aiCoachAgent.js    # AI Coach powered by @github/copilot-sdk (gpt-4o)
