@@ -9,6 +9,7 @@ import Icon from "./Icon.jsx";
 import { isDiffViewable } from "../lib/diffUtils.js";
 import { formatCost } from "../lib/pricing.js";
 import { getSessionCost } from "../lib/autonomyMetrics.js";
+import { formatDurationLong } from "../lib/formatTime.js";
 
 var REPLAY_WINDOW_OVERSCAN = 600;
 var REPLAY_BOTTOM_THRESHOLD = 80;
@@ -77,7 +78,16 @@ function ReplayInspector({ selectedEntry, hasExplicitSelection, metadata, toolEn
               ["Turns", metadata.totalTurns, theme.text.primary],
               ["Tools", metadata.totalToolCalls, theme.track.tool_call],
               metadata.errorCount > 0 ? ["Errors", metadata.errorCount, theme.semantic.error] : null,
-              metadata.primaryModel ? ["Model", metadata.primaryModel.split("-").slice(0, 3).join("-"), theme.track.context] : null,
+              metadata.duration > 0 ? ["Duration", formatDurationLong(metadata.duration), theme.text.primary] : null,
+              (function () {
+                if (!metadata.models || Object.keys(metadata.models).length === 0) return null;
+                var entries = Object.entries(metadata.models).sort(function (a, b) { return b[1] - a[1]; });
+                if (entries.length === 1) {
+                  return ["Model", entries[0][0].split("-").slice(0, 3).join("-"), theme.track.context];
+                }
+                var primary = entries[0][0].split("-").slice(0, 3).join("-");
+                return ["Models", primary + " +" + (entries.length - 1) + " more", theme.track.context];
+              })(),
               metadata.tokenUsage && (metadata.tokenUsage.inputTokens + metadata.tokenUsage.outputTokens) > 0
                 ? ["Tokens", (metadata.tokenUsage.inputTokens + metadata.tokenUsage.outputTokens).toLocaleString(), theme.accent.primary] : null,
               (function () {
