@@ -51,6 +51,12 @@ describe("formatDurationLong", function () {
   it("formats minutes and seconds", function () {
     expect(formatDurationLong(125)).toBe("2m 05s");
   });
+
+  it("formats hours and minutes", function () {
+    expect(formatDurationLong(3661)).toBe("1h 01m");
+    expect(formatDurationLong(7200)).toBe("2h 00m");
+    expect(formatDurationLong(654240)).toBe("181h 44m");
+  });
 });
 
 describe("truncateText", function () {

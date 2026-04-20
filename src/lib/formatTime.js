@@ -20,11 +20,13 @@ export function formatTime(seconds) {
   return m + ":" + (s < 10 ? "0" : "") + s;
 }
 
-// Formats a duration in seconds as "Xm Ys" for summary stats panels.
+// Formats a duration in seconds as "Xh Ym Zs" for summary stats panels.
 export function formatDurationLong(secs) {
   if (!secs) return "--";
-  var m = Math.floor(secs / 60);
+  var h = Math.floor(secs / 3600);
+  var m = Math.floor((secs % 3600) / 60);
   var s = Math.round(secs % 60);
+  if (h > 0) return h + "h " + (m < 10 ? "0" : "") + m + "m";
   return m > 0 ? m + "m " + (s < 10 ? "0" : "") + s + "s" : s + "s";
 }
 

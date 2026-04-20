@@ -447,7 +447,11 @@ export default function StatsView({ events, totalTime, metadata, turns, autonomy
     }
 
     var usageCards = [];
-    usageCards.push({ label: "Model", value: metadata.primaryModel, color: theme.track.context });
+    var mKeys = Object.keys(metadata.models || {});
+    var modelCardValue = mKeys.length > 1
+      ? metadata.primaryModel.split("-").slice(0, 3).join("-") + " +" + (mKeys.length - 1) + " more"
+      : metadata.primaryModel;
+    usageCards.push({ label: mKeys.length > 1 ? "Models" : "Model", value: modelCardValue, color: theme.track.context });
     if (hasTokens) {
       usageCards.push({ label: "Tokens", color: theme.accent.primary, isTokenCard: true });
     }
@@ -457,12 +461,10 @@ export default function StatsView({ events, totalTime, metadata, turns, autonomy
     if (estimated > 0) {
       usageCards.push({ label: "Est. Cost", value: formatCost(estimated), color: hasApiCost ? theme.text.muted : theme.semantic.success, sub: "based on " + modelLabel });
     }
-    var allModelsText = Object.keys(metadata.models).length > 1
-      ? Object.entries(metadata.models).map(function (entry) {
-          return entry[0].split("-").slice(0, 3).join("-") + " (" + entry[1] + ")";
-        }).join(", ")
+    var allModelsEntries = Object.keys(metadata.models).length > 1
+      ? Object.entries(metadata.models).sort(function (a, b) { return b[1] - a[1]; })
       : null;
-    modelUsageData = { usageCards: usageCards, allModelsText: allModelsText };
+    modelUsageData = { usageCards: usageCards, allModelsEntries: allModelsEntries };
   }
 
   return (
@@ -533,14 +535,18 @@ export default function StatsView({ events, totalTime, metadata, turns, autonomy
                   <div key={card.label} style={cardStyle}>
                     {card.isTokenCard ? (
                       <div>
-                        <div style={{ fontSize: theme.fontSize.lg, fontWeight: 700, fontFamily: theme.font.mono }}>
-                          <span style={{ color: theme.accent.primary }}>{metadata.tokenUsage.inputTokens.toLocaleString()}</span>
-                          <span style={{ color: theme.text.muted }}>{" in / "}</span>
-                          <span style={{ color: theme.semantic.success }}>{metadata.tokenUsage.outputTokens.toLocaleString()}</span>
-                          <span style={{ color: theme.text.muted }}>{" out"}</span>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 2, fontFamily: theme.font.mono }}>
+                          <div style={{ fontSize: theme.fontSize.lg, fontWeight: 700 }}>
+                            <span style={{ color: theme.accent.primary }}>{metadata.tokenUsage.inputTokens.toLocaleString()}</span>
+                            <span style={{ color: theme.text.muted }}>{" in"}</span>
+                          </div>
+                          <div style={{ fontSize: theme.fontSize.lg, fontWeight: 700 }}>
+                            <span style={{ color: theme.semantic.success }}>{metadata.tokenUsage.outputTokens.toLocaleString()}</span>
+                            <span style={{ color: theme.text.muted }}>{" out"}</span>
+                          </div>
                         </div>
                         {sessionCacheSummary && (
-                          <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, fontFamily: theme.font.mono, marginTop: 4 }}>
+                          <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, fontFamily: theme.font.mono, marginTop: 6 }}>
                             {sessionCacheSummary}
                           </div>
                         )}
@@ -557,13 +563,20 @@ export default function StatsView({ events, totalTime, metadata, turns, autonomy
                 );
               })}
             </div>
-            {modelUsageData.allModelsText && (
+            {modelUsageData.allModelsEntries && (
               <div style={Object.assign({}, cardStyle, { marginTop: 12 })}>
                 <div style={{ fontSize: theme.fontSize.xs, color: theme.text.dim, textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>
                   All Models
                 </div>
-                <div style={{ fontSize: theme.fontSize.sm, color: theme.text.muted, lineHeight: 1.6 }}>
-                  {modelUsageData.allModelsText}
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {modelUsageData.allModelsEntries.map(function (entry) {
+                    return (
+                      <div key={entry[0]} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: theme.fontSize.sm }}>
+                        <span style={{ color: theme.text.secondary, fontFamily: theme.font.mono }}>{entry[0].split("-").slice(0, 3).join("-")}</span>
+                        <span style={{ color: theme.text.muted, fontFamily: theme.font.mono }}>{entry[1] + " calls"}</span>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}
