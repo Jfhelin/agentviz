@@ -326,7 +326,7 @@ describe("parseAtifJSON — recent regressions (turn segmentation, message durat
       { step_id: 3, timestamp: "2026-04-18T05:48:10.000Z", source: "agent", message: "b", metrics: { cost_usd: 0.008 } },
     ]);
     const session = parseAtifJSON(text);
-    expect(session.metadata.totalCostUsd).toBeCloseTo(0.02, 5);
+    expect(session.metadata.totalCost).toBeCloseTo(0.02, 5);
   });
 
   it("prefers final_metrics.total_cost_usd when present", function () {
@@ -341,7 +341,54 @@ describe("parseAtifJSON — recent regressions (turn segmentation, message durat
       final_metrics: { total_cost_usd: 1.23 },
     });
     const session = parseAtifJSON(text);
-    expect(session.metadata.totalCostUsd).toBeCloseTo(1.23, 5);
+    expect(session.metadata.totalCost).toBeCloseTo(1.23, 5);
+  });
+
+  it("emits metadata.modelTokenUsage per model so StatsView can compute per-model cost", function () {
+    const text = JSON.stringify({
+      schema_version: "ATIF-v1.6",
+      session_id: "mt-test",
+      agent: { name: "test", version: "1.0", model_name: "m1" },
+      steps: [
+        { step_id: 1, timestamp: "2026-04-18T05:48:00.000Z", source: "user", message: "go" },
+        { step_id: 2, timestamp: "2026-04-18T05:48:05.000Z", source: "agent", model_name: "m1", message: "a", metrics: { prompt_tokens: 100, completion_tokens: 20, cached_tokens: 50 } },
+        { step_id: 3, timestamp: "2026-04-18T05:48:10.000Z", source: "agent", model_name: "m2", message: "b", metrics: { prompt_tokens: 40, completion_tokens: 5, cached_tokens: 10 } },
+      ],
+    });
+    const session = parseAtifJSON(text);
+    expect(session.metadata.modelTokenUsage).toBeDefined();
+    expect(session.metadata.modelTokenUsage.m1.inputTokens).toBe(100);
+    expect(session.metadata.modelTokenUsage.m1.outputTokens).toBe(20);
+    expect(session.metadata.modelTokenUsage.m1.cacheRead).toBe(50);
+    expect(session.metadata.modelTokenUsage.m2.inputTokens).toBe(40);
+  });
+
+  it("pairs tool_call events with their observation result via source_call_id and exposes it as toolOutput", function () {
+    const text = makeAtif([
+      { step_id: 1, timestamp: "2026-04-18T05:48:00.000Z", source: "user", message: "go" },
+      {
+        step_id: 2,
+        timestamp: "2026-04-18T05:48:05.000Z",
+        source: "agent",
+        message: "",
+        tool_calls: [
+          { tool_call_id: "call_a", function_name: "bash", arguments: { command: "ls" } },
+          { tool_call_id: "call_b", function_name: "bash", arguments: { command: "pwd" } },
+        ],
+        observation: {
+          results: [
+            { source_call_id: "call_b", content: "/tmp" },
+            { source_call_id: "call_a", content: "file1.txt\nfile2.txt" },
+          ],
+        },
+      },
+    ]);
+    const session = parseAtifJSON(text);
+    const toolEvents = session.events.filter(function (e) { return e.track === "tool_call"; });
+    const callA = toolEvents.find(function (e) { return e.toolCallId === "call_a"; });
+    const callB = toolEvents.find(function (e) { return e.toolCallId === "call_b"; });
+    expect(callA.toolOutput).toBe("file1.txt\nfile2.txt");
+    expect(callB.toolOutput).toBe("/tmp");
   });
 
   it("reads subagent_trajectory_ref from observation results (per ATIF v1.6 spec) as a list", function () {

@@ -481,6 +481,17 @@ export function parseAtifJSON(text: string): ParsedSession | null {
     }
 
     // 3. Tool call events.
+    // Build a quick lookup so each tool_call event can carry its observation
+    // result text on `toolOutput`, mirroring how other inspectors render
+    // tool_input. Without this, views that pair input/output on the same node
+    // (e.g. GraphView) have nothing to show as the actual tool result.
+    const observationBySourceId = new Map<string, string>();
+    for (let resultIndex = 0; resultIndex < observationResults.length; resultIndex += 1) {
+      const result = observationResults[resultIndex];
+      if (typeof result.source_call_id === "string") {
+        observationBySourceId.set(result.source_call_id, flattenMessage(result.content as AtifMessage));
+      }
+    }
     for (let toolIndex = 0; toolIndex < toolCalls.length; toolIndex += 1) {
       const toolCall = toolCalls[toolIndex];
       let argsString = "";
@@ -496,6 +507,9 @@ export function parseAtifJSON(text: string): ParsedSession | null {
         }
       }
       const text = (toolCall.function_name || "tool") + (argsString ? ": " + argsString : "");
+      const toolOutput = typeof toolCall.tool_call_id === "string"
+        ? observationBySourceId.get(toolCall.tool_call_id)
+        : undefined;
       const event = makeEvent(
         stepRel,
         agentName,
@@ -510,6 +524,7 @@ export function parseAtifJSON(text: string): ParsedSession | null {
           toolName: toolCall.function_name,
           toolInput: toolCall.arguments,
           toolCallId: typeof toolCall.tool_call_id === "string" ? toolCall.tool_call_id : null,
+          toolOutput: toolOutput != null ? toolOutput : null,
         },
       );
       events.push(event);
@@ -634,6 +649,32 @@ export function parseAtifJSON(text: string): ParsedSession | null {
     }
   }
 
+  // Per-model token breakdown, mirroring copilotCliParser.metadata.modelTokenUsage.
+  // StatsView reads this to compute per-model estimated cost.
+  const modelTokenUsage: Record<string, { inputTokens: number; outputTokens: number; cacheRead: number; cacheWrite: number; cacheHitRate?: number }> = {};
+  for (let index = 0; index < steps.length; index += 1) {
+    const step = steps[index];
+    const metrics = step.metrics;
+    if (!metrics) continue;
+    const model = step.model_name || trajectory.agent.model_name;
+    if (!model) continue;
+    const input = metrics.prompt_tokens || 0;
+    const output = metrics.completion_tokens || 0;
+    const cacheRead = metrics.cached_tokens || 0;
+    if (input + output + cacheRead === 0) continue;
+    if (!modelTokenUsage[model]) {
+      modelTokenUsage[model] = { inputTokens: 0, outputTokens: 0, cacheRead: 0, cacheWrite: 0 };
+    }
+    modelTokenUsage[model].inputTokens += input;
+    modelTokenUsage[model].outputTokens += output;
+    modelTokenUsage[model].cacheRead += cacheRead;
+  }
+  for (const model of Object.keys(modelTokenUsage)) {
+    const usage = modelTokenUsage[model];
+    usage.cacheHitRate = computeCacheHitRate(usage.inputTokens, usage.cacheWrite, usage.cacheRead);
+  }
+  const hasModelTokenUsage = Object.keys(modelTokenUsage).length > 0;
+
   const tokenUsage: TokenUsage | null = (totalInput + totalOutput + totalCacheRead) > 0
     ? {
       inputTokens: totalInput,
@@ -668,8 +709,12 @@ export function parseAtifJSON(text: string): ParsedSession | null {
     continuationRef: trajectory.continued_trajectory_ref || null,
   };
 
+  if (hasModelTokenUsage) {
+    metadata.modelTokenUsage = modelTokenUsage;
+  }
+
   if (anyCost) {
-    metadata.totalCostUsd = totalCostUsd;
+    metadata.totalCost = totalCostUsd;
   }
 
   if (typeof trajectory.notes === "string" && trajectory.notes.length > 0) {

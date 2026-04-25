@@ -66,7 +66,7 @@ export interface SessionMetadata {
   format?: SessionFormat;
   customTitle?: string;
   sessionMode?: string;
-  totalCostUsd?: number;
+  totalCost?: number | null;
   [key: string]: unknown;
 }
 
