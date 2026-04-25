@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { parseClaudeCodeJSONL } from "../lib/parser";
+import { parseSession } from "../lib/parseSession";
 
 // ── Helpers ──
 
@@ -231,6 +232,13 @@ describe("parseClaudeCodeJSONL", function () {
       var ctx = result.events.find(function (e) { return e.track === "context"; });
       expect(ctx).toBeDefined();
       expect(ctx.text).toContain("Directory created");
+    });
+
+    it("via parseSession, attaches tool_result content to its tool_call event as toolOutput (paired by tool_use_id)", function () {
+      var result = parseSession(makeSession([ASSISTANT_TOOL_USE, TOOL_RESULT_OK]));
+      var tool = result.events.find(function (e) { return e.track === "tool_call" && e.toolName === "bash"; });
+      expect(tool).toBeDefined();
+      expect(tool.toolOutput).toContain("Directory created");
     });
 
     it("parses system messages", function () {

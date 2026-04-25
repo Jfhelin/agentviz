@@ -677,4 +677,11 @@ describe("parseSession integration", function () {
     expect(result.metadata.format).toBe("copilot-cli");
     expect(result.events.length).toBeGreaterThan(0);
   });
+
+  it("attaches tool result content to tool_call events as toolOutput", function () {
+    var result = parseSession(buildTrace(BASIC_TRACE));
+    var tools = result.events.filter(function (e) { return e.track === "tool_call"; });
+    expect(tools.length).toBeGreaterThan(0);
+    expect(tools[0].toolOutput).toBe("src/auth.js:15: function login() {");
+  });
 });
