@@ -4,7 +4,7 @@
 
 **See what your AI agents actually do.**
 
-Drop a Claude Code, VS Code Copilot Chat, or Copilot CLI session file and explore the agent's reasoning, tool calls, turn flow, and output through replay, tracks, waterfall, graph, and stats views. Or run it from the CLI for a live view that updates as your session unfolds.
+Drop a Claude Code, VS Code Copilot Chat, Copilot CLI, or ATIF / Harbor session file and explore the agent's reasoning, tool calls, turn flow, and output through replay, tracks, waterfall, graph, and stats views. Or run it from the CLI for a live view that updates as your session unfolds.
 
 [![CI](https://github.com/jayparikh/agentviz/actions/workflows/ci.yml/badge.svg)](https://github.com/jayparikh/agentviz/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/agentviz?color=blue&logo=npm)](https://www.npmjs.com/package/agentviz)
@@ -24,7 +24,7 @@ Drop a Claude Code, VS Code Copilot Chat, or Copilot CLI session file and explor
 
 ## Why AGENTVIZ?
 
-AI coding agents (Claude Code, VS Code Copilot Chat, Copilot CLI, etc.) generate dense session logs, but reading raw JSONL is painful. AGENTVIZ turns those logs into something you can actually explore:
+AI coding agents (Claude Code, VS Code Copilot Chat, Copilot CLI, ATIF / Harbor, etc.) generate dense session logs, but reading raw JSONL is painful. AGENTVIZ turns those logs into something you can actually explore:
 
 - **Replay** sessions like a video, stepping through each tool call and reasoning step
 - **Trace** decision flow in a graph view with expandable turn and tool-call structure
@@ -263,7 +263,7 @@ AI-powered session coaching available directly from any session. The coach reads
 | **Track Filters** | Toggle visibility per track type with filter chips in the header. |
 | **Playback Control** | Play/pause with variable speed (0.5x to 8x). Seek with arrow keys. |
 | **Diff Viewer** | Inline unified diff with dual-gutter line numbers for file-editing tool calls. |
-| **Auto-detect Format** | Supports Claude Code JSONL, Copilot CLI JSONL, and VS Code Copilot Chat JSON or JSONL. Auto-detected. |
+| **Auto-detect Format** | Supports Claude Code JSONL, Copilot CLI JSONL, VS Code Copilot Chat JSON or JSONL, and ATIF / Harbor trajectory JSON. Auto-detected. |
 | **Session Comparison** | Load two traces side by side. Scorecard and tool-usage chart with delta badges. |
 | **HTML Export** | One-click export of any session or comparison to a self-contained shareable `.html` file. |
 | **Inbox Auto-discovery** | Automatically finds recent Claude Code, Copilot CLI, and VS Code sessions and ranks them by review priority. |
@@ -321,6 +321,9 @@ Modals, drawers, and overlay panels render keyboard hints with a shared `<kbd>` 
 | Claude Code | `.jsonl` from `~/.claude/projects/` | Default fallback |
 | VS Code Copilot Chat | `.json` or `.jsonl` from VS Code `workspaceStorage/*/chatSessions/` | `version` + `requests` + `sessionId` fields |
 | Copilot CLI | `.jsonl` event traces | `session.start` with `producer: "copilot-agent"` |
+| ATIF / Harbor | `.json` trajectory from the Harbor framework | Top-level `schema_version: "ATIF-v1.6"` with `agent` and `steps` |
+
+ATIF (Agent Trajectory Interchange Format) sessions are loaded via drag-and-drop, the `--file` flag, or `?manifest=` URLs. Auto-discovery is not wired up because Harbor has no canonical output directory.
 
 More formats planned -- see [Roadmap](#roadmap).
 ## Static Manifest Mode
@@ -376,6 +379,7 @@ src/
     parser.ts            # Claude Code JSONL parser
     copilotCliParser.ts  # Copilot CLI JSONL parser
     vscodeSessionParser.ts # VS Code Copilot Chat JSON parser
+    atifParser.ts        # ATIF / Harbor trajectory JSON parser
     dataInspector.js     # Payload summary and preview helpers for inspector panels
     session.ts           # Pure helpers: getSessionTotal, buildFilteredEventEntries
     sessionLibrary.js    # localStorage-backed session library with content persistence

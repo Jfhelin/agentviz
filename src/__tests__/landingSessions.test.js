@@ -7,6 +7,7 @@ import {
   getLandingEntryTimestamp,
   isLowSignalDiscoveredEntry,
   isLandingSearchShortcut,
+  LANDING_FORMAT_OPTIONS,
   settleLandingRefresh,
   sortDiscoveredLandingEntries,
   sortLandingEntries,
@@ -23,6 +24,19 @@ describe("formatLandingClientLabel", function () {
   it("uses a neutral fallback for unknown clients", function () {
     expect(formatLandingClientLabel({ format: "custom-client" })).toBe("custom-client");
     expect(formatLandingClientLabel(null)).toBe("Unknown client");
+  });
+
+  it("labels ATIF sessions as ATIF / Harbor", function () {
+    expect(formatLandingClientLabel({ format: "atif" })).toBe("ATIF / Harbor");
+    expect(formatLandingClientLabel("atif")).toBe("ATIF / Harbor");
+  });
+});
+
+describe("LANDING_FORMAT_OPTIONS", function () {
+  it("includes an ATIF entry", function () {
+    var atif = LANDING_FORMAT_OPTIONS.find(function (o) { return o.id === "atif"; });
+    expect(atif).toBeDefined();
+    expect(atif.label).toBe("ATIF / Harbor");
   });
 });
 

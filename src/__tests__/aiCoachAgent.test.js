@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { buildCoachPrompt, parseRecommendations } from "../lib/aiCoachAgent.js";
+import { buildCoachPrompt, parseRecommendations, getConfigPathsForFormat } from "../lib/aiCoachAgent.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // buildCoachPrompt
@@ -158,5 +158,40 @@ describe("parseRecommendations", function () {
     var recs = parseRecommendations(JSON.stringify(items));
     expect(recs).toHaveLength(3);
     expect(recs[1].title).toBe("B");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// getConfigPathsForFormat
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("getConfigPathsForFormat", function () {
+  it("returns claude paths for claude-code", function () {
+    var paths = getConfigPathsForFormat("claude-code");
+    expect(paths).toContain("CLAUDE.md");
+    expect(paths).toContain(".claude/skills");
+  });
+
+  it("returns copilot paths for copilot-cli", function () {
+    var paths = getConfigPathsForFormat("copilot-cli");
+    expect(paths).toContain(".github/copilot-instructions.md");
+    expect(paths).toContain(".github/skills");
+  });
+
+  it("routes ATIF with copilot agent name to copilot paths", function () {
+    var paths = getConfigPathsForFormat("atif", "copilot");
+    expect(paths).toContain(".github/copilot-instructions.md");
+    expect(paths).not.toContain("CLAUDE.md");
+  });
+
+  it("routes ATIF with claude-code agent name to claude paths", function () {
+    var paths = getConfigPathsForFormat("atif", "claude-code");
+    expect(paths).toContain("CLAUDE.md");
+    expect(paths).not.toContain(".github/copilot-instructions.md");
+  });
+
+  it("defaults ATIF without agent name to copilot paths", function () {
+    var paths = getConfigPathsForFormat("atif", "");
+    expect(paths).toContain(".github/copilot-instructions.md");
   });
 });

@@ -16,6 +16,14 @@ function getTrackColor(track) {
   return theme.track[track] || theme.track.reasoning;
 }
 
+function safeStringify(value) {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
 function getAgentTypeColor(agentName) {
   return theme.agentType[agentName] || theme.agentType.default;
 }
@@ -703,7 +711,7 @@ function GraphInspector({ selectedNode }) {
               }}>
                 {typeof event.toolInput === "string"
                   ? event.toolInput
-                  : JSON.stringify(event.toolInput, null, 2)}
+                  : safeStringify(event.toolInput)}
               </pre>
             </div>
           )}

@@ -1,6 +1,6 @@
 # AGENTVIZ
 
-Session replay visualizer for AI agent workflows. Renders Claude Code, VS Code Copilot Chat, and Copilot CLI session logs as interactive timelines, with auto-detection of file format.
+Session replay visualizer for AI agent workflows. Renders Claude Code, VS Code Copilot Chat, Copilot CLI, and ATIF / Harbor session logs as interactive timelines, with auto-detection of file format.
 
 ## Stack
 - React 18 + Vite 6
@@ -34,6 +34,7 @@ src/
     parser.ts          # parseClaudeCodeJSONL() - Claude Code JSONL parser
     copilotCliParser.ts # parseCopilotCliJSONL() - Copilot CLI JSONL parser
     vscodeSessionParser.ts # parseVSCodeChatJSON() - VS Code Copilot Chat JSON parser
+    atifParser.ts       # parseAtifJSON() - ATIF / Harbor trajectory JSON parser (schema_version ATIF-v1.6)
     parseSession.ts    # Auto-detect format router: detectFormat() + parseSession()
     session.ts         # Pure helpers: getSessionTotal, buildFilteredEventEntries, buildTurnStartMap
     sessionLibrary.js  # localStorage-backed session library with content persistence
@@ -141,6 +142,7 @@ Vite proxies `/api/*` to the backend automatically.
 - Bookmarks and annotations (persisted to localStorage)
 - Vim-style keyboard navigation
 - Parsers for: LangSmith traces, OpenTelemetry
+- ATIF auto-discovery (Harbor has no canonical output directory yet)
 - Multi-agent hierarchy (parent/child agents, nested tracks)
 - Fork-from-any-point replay
 - Publish to npm (`npx agentviz`)

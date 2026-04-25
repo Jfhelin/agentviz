@@ -3,6 +3,7 @@ export var LANDING_FORMAT_OPTIONS = [
   { id: "claude-code", label: "Claude Code" },
   { id: "copilot-cli", label: "Copilot CLI" },
   { id: "vscode-chat", label: "VS Code" },
+  { id: "atif", label: "ATIF / Harbor" },
 ];
 
 export var LANDING_SORT_LABELS = {
@@ -26,6 +27,7 @@ export function formatLandingClientLabel(entry) {
   if (format === "claude-code") return "Claude Code";
   if (format === "copilot-cli") return "Copilot CLI";
   if (format === "vscode-chat") return isInsiders ? "VS Code Insiders" : "VS Code";
+  if (format === "atif") return "ATIF / Harbor";
   if (!format) return "Unknown client";
   return String(format);
 }

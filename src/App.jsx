@@ -13,21 +13,22 @@ import useLiveStream from "./hooks/useLiveStream.js";
 import useAsyncStatus from "./hooks/useAsyncStatus.js";
 import useDiscoveredSessions from "./hooks/useDiscoveredSessions.js";
 import useHashRouter from "./hooks/useHashRouter.js";
+import lazyImport, { clearChunkReloadFlag } from "./lib/lazyImport.js";
 import Timeline from "./components/Timeline.jsx";
 import ReplayView from "./components/ReplayView.jsx";
 import TracksView from "./components/TracksView.jsx";
 import StatsView from "./components/StatsView.jsx";
 import WaterfallView from "./components/WaterfallView.jsx";
-var GraphView = React.lazy(function () { return import("./components/GraphView.jsx"); });
+var GraphView = React.lazy(function () { return lazyImport(function () { return import("./components/GraphView.jsx"); }); });
 import CommandPalette from "./components/CommandPalette.jsx";
 import ShortcutsModal from "./components/ShortcutsModal.jsx";
 import AppHeader from "./components/app/AppHeader.jsx";
 import AppLandingState from "./components/app/AppLandingState.jsx";
 import AppLoadingState from "./components/app/AppLoadingState.jsx";
 import CompareLandingState from "./components/app/CompareLandingState.jsx";
-var CompareShell = React.lazy(function () { return import("./components/app/CompareShell.jsx"); });
+var CompareShell = React.lazy(function () { return lazyImport(function () { return import("./components/app/CompareShell.jsx"); }); });
 import { APP_VIEWS } from "./components/app/constants.js";
-var DebriefView = React.lazy(function () { return import("./components/DebriefView.jsx"); });
+var DebriefView = React.lazy(function () { return lazyImport(function () { return import("./components/DebriefView.jsx"); }); });
 import QADrawer from "./components/QADrawer.jsx";
 import useFeatureFlag from "./hooks/useFeatureFlag.js";
 import useQA from "./hooks/useQA.js";
@@ -121,6 +122,7 @@ function renderActiveView(activeView, props) {
 }
 
 export default function App() {
+  useEffect(function () { clearChunkReloadFlag(); }, []);
   var [view, setView] = usePersistentState("agentviz:view", "replay");
   var [themeModePreference, setThemeModePreference] = usePersistentState("agentviz:theme-mode", readStoredThemePreference);
   var [libraryEntries, setLibraryEntries] = useState(function () {

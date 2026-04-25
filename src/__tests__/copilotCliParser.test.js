@@ -1,4 +1,6 @@
 import { describe, it, expect } from "vitest";
+import fs from "fs";
+import path from "path";
 import { detectCopilotCli, parseCopilotCliJSONL } from "../lib/copilotCliParser";
 import { detectFormat, parseSession } from "../lib/parseSession";
 
@@ -160,6 +162,17 @@ describe("detectFormat", function () {
   it("routes unknown formats to claude-code", function () {
     var claudeLine = JSON.stringify({ type: "system", message: { role: "system" }, timestamp: ts(0) });
     expect(detectFormat(claudeLine)).toBe("claude-code");
+  });
+
+  it("detects ATIF single-doc JSON as atif", function () {
+    var minimal = fs.readFileSync(path.join(__dirname, "fixtures", "atif-minimal.json"), "utf8");
+    expect(detectFormat(minimal)).toBe("atif");
+  });
+
+  it("does not misdetect an ATIF session with copilot in agent.name as copilot-cli", function () {
+    var feal = fs.readFileSync(path.join(__dirname, "fixtures", "atif-tagged.json"), "utf8");
+    expect(detectFormat(feal)).toBe("atif");
+    expect(detectFormat(feal)).not.toBe("copilot-cli");
   });
 });
 

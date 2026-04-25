@@ -39,8 +39,13 @@ var CONFIG_PATHS_COPILOT = [
   ".github/copilot-instructions.md",
 ];
 
-export function getConfigPathsForFormat(format) {
+export function getConfigPathsForFormat(format, agentName) {
   if (format === "copilot-cli" || format === "vscode-chat") return CONFIG_PATHS_COPILOT;
+  if (format === "atif") {
+    if (/copilot/i.test(agentName || "")) return CONFIG_PATHS_COPILOT;
+    if (/claude/i.test(agentName || "")) return CONFIG_PATHS_CLAUDE;
+    return CONFIG_PATHS_COPILOT;
+  }
   return CONFIG_PATHS_CLAUDE; // claude-code default
 }
 
@@ -358,7 +363,8 @@ export function buildCoachPrompt(payload) {
   var agentType = format === "copilot-cli" ? "GitHub Copilot CLI"
     : format === "vscode-chat" ? "VS Code Copilot Chat"
     : "Claude Code";
-  var configPaths = getConfigPathsForFormat(format);
+  var agentName = payload.agentName || (payload.agent && payload.agent.name) || "";
+  var configPaths = getConfigPathsForFormat(format, agentName);
   var toolList = (topTools || []).slice(0, 10).map(function (t) { return t.name + " x" + t.count; }).join(", ");
   var errors = (errorSamples || []).slice(0, 6).map(function (e, i) { return (i + 1) + ". " + e; }).join("\n");
   var followUps = (userFollowUps || []).slice(0, 8).map(function (m) { return "- \"" + m + "\""; }).join("\n");
@@ -436,7 +442,8 @@ export async function runCoachAgent(payload, opts, _attempt) {
   var attempt = _attempt || 1;
 
   var format = payload.format || "claude-code";
-  var configPaths = getConfigPathsForFormat(format);
+  var agentName = payload.agentName || (payload.agent && payload.agent.name) || "";
+  var configPaths = getConfigPathsForFormat(format, agentName);
   var recommendations = [];
   var steps = [];
 

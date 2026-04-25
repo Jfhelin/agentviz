@@ -9,12 +9,14 @@
  * Returns: { events, turns, metadata } or null
  */
 
+import { detectAtif, parseAtifJSON } from "./atifParser";
 import { detectCopilotCli, parseCopilotCliJSONL } from "./copilotCliParser";
 import { parseClaudeCodeJSONL } from "./parser";
 import { detectVSCodeChat, parseVSCodeChatJSON } from "./vscodeSessionParser";
 import type { ParsedSession, SessionFormat } from "./sessionTypes";
 
 export function detectFormat(text: string): SessionFormat {
+  if (detectAtif(text)) return "atif";
   if (detectCopilotCli(text)) return "copilot-cli";
   if (detectVSCodeChat(text)) return "vscode-chat";
   return "claude-code";
@@ -23,6 +25,7 @@ export function detectFormat(text: string): SessionFormat {
 export function parseSession(text: string): ParsedSession | null {
   const format = detectFormat(text);
 
+  if (format === "atif") return parseAtifJSON(text);
   if (format === "copilot-cli") return parseCopilotCliJSONL(text);
   if (format === "vscode-chat") return parseVSCodeChatJSON(text);
   return parseClaudeCodeJSONL(text);
