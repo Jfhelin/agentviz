@@ -12,10 +12,10 @@ describe("autonomy metrics", function () {
     expect(getSessionCost({ format: "claude-code" })).toBeNull();
   });
 
-  it("returns null for non-Claude model (e.g. GPT)", function () {
+  it("returns null for unpriced model (e.g. Gemini)", function () {
     expect(getSessionCost({
       format: "claude-code",
-      primaryModel: "gpt-4o",
+      primaryModel: "gemini-pro",
       tokenUsage: { inputTokens: 1000, outputTokens: 1000 },
     })).toBeNull();
   });

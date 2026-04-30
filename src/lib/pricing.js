@@ -17,7 +17,16 @@ var PRICE_TABLE = [
   { match: "claude-3-opus",     input: 15.00, output: 75.00 },
   { match: "claude-3-sonnet",   input:  3.00, output: 15.00 },
   { match: "claude-3-haiku",    input:  0.25, output:  1.25 },
+  // GPT-4o family. Cache-read is 50% of input, cache-write equals input
+  // (OpenAI prompt caching has no write premium, unlike Anthropic).
+  { match: "gpt-4o-mini",       input:  0.15, output:  0.60, cacheReadRatio: 0.5,  cacheWriteRatio: 1.0 },
+  { match: "gpt-4o",            input:  2.50, output: 10.00, cacheReadRatio: 0.5,  cacheWriteRatio: 1.0 },
 ];
+
+// Default cache ratios: Anthropic-style (cache read = 10% of input, cache write = 125%).
+// Override per-model entry above when the provider differs (e.g. OpenAI).
+var DEFAULT_CACHE_READ_RATIO  = 0.1;
+var DEFAULT_CACHE_WRITE_RATIO = 1.25;
 
 // Fallback for unrecognized Claude model variants (new releases, etc.)
 var DEFAULT_CLAUDE_PRICE = { input: 3.00, output: 15.00 };
@@ -48,10 +57,12 @@ export function estimateCost(tokenUsage, modelName) {
   if (!tokenUsage) return 0;
   var price = lookupPrice(modelName);
   if (!price) return 0; // unknown model -- don't fabricate a number
+  var cacheReadRatio  = price.cacheReadRatio  != null ? price.cacheReadRatio  : DEFAULT_CACHE_READ_RATIO;
+  var cacheWriteRatio = price.cacheWriteRatio != null ? price.cacheWriteRatio : DEFAULT_CACHE_WRITE_RATIO;
   var inputCost  = (tokenUsage.inputTokens  || 0) / 1e6 * price.input;
   var outputCost = (tokenUsage.outputTokens || 0) / 1e6 * price.output;
-  var cacheReadCost  = (tokenUsage.cacheRead  || 0) / 1e6 * price.input * 0.1;
-  var cacheWriteCost = (tokenUsage.cacheWrite || 0) / 1e6 * price.input * 1.25;
+  var cacheReadCost  = (tokenUsage.cacheRead  || 0) / 1e6 * price.input * cacheReadRatio;
+  var cacheWriteCost = (tokenUsage.cacheWrite || 0) / 1e6 * price.input * cacheWriteRatio;
   return inputCost + outputCost + cacheReadCost + cacheWriteCost;
 }
 

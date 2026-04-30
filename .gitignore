@@ -38,3 +38,6 @@ ag.log
 ag-*.log
 ag.*.log
 *.ag.log
+
+# Local-only test fixtures (large copilot chat exports)
+test/fixtures/

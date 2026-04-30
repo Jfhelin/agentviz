@@ -17,6 +17,7 @@ import Timeline from "./components/Timeline.jsx";
 import ReplayView from "./components/ReplayView.jsx";
 import TracksView from "./components/TracksView.jsx";
 import StatsView from "./components/StatsView.jsx";
+import CostView from "./components/CostView.jsx";
 import WaterfallView from "./components/WaterfallView.jsx";
 var GraphView = React.lazy(function () { return import("./components/GraphView.jsx"); });
 import CommandPalette from "./components/CommandPalette.jsx";
@@ -90,6 +91,12 @@ function renderActiveView(activeView, props) {
           turns={props.session.turns}
         />
       </React.Suspense>
+    );
+  }
+
+  if (activeView === "cost") {
+    return (
+      <CostView analysis={props.session.metadata && props.session.metadata.costAnalysis} />
     );
   }
 
@@ -619,7 +626,10 @@ function AppSessionView({
       <AppHeader
         session={session}
         activeView={activeView}
-        views={APP_VIEWS}
+        views={APP_VIEWS.filter(function (v) {
+          if (v.id !== "cost") return true;
+          return !!(session && session.metadata && session.metadata.costAnalysis);
+        })}
         onSetView={setView}
         currentThemeMode={currentThemeMode}
         onSetThemeMode={onSetThemeMode}

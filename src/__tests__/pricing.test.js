@@ -7,7 +7,7 @@ describe("estimateCost", function () {
   });
 
   it("returns 0 for unknown model", function () {
-    expect(estimateCost({ inputTokens: 1000 }, "gpt-4o")).toBe(0);
+    expect(estimateCost({ inputTokens: 1000 }, "gemini-pro")).toBe(0);
   });
 
   it("prices Claude Haiku 4 correctly", function () {
@@ -61,9 +61,9 @@ describe("estimateMultiModelCost", function () {
   it("skips unknown models without erroring", function () {
     var cost = estimateMultiModelCost({
       "claude-sonnet-4": { inputTokens: 1000000, outputTokens: 100000 },
-      "gpt-4o":          { inputTokens: 500000, outputTokens: 50000 },
+      "gemini-pro":      { inputTokens: 500000, outputTokens: 50000 },
     });
-    // Only Sonnet is priced; GPT contributes 0
+    // Only Sonnet is priced; Gemini contributes 0
     expect(cost).toBeCloseTo(4.50, 2);
   });
 });
@@ -97,9 +97,13 @@ describe("hasModelPricing", function () {
     expect(hasModelPricing("claude-next-gen-99")).toBe(true);
   });
 
-  it("returns false for non-Claude models", function () {
-    expect(hasModelPricing("gpt-4o")).toBe(false);
+  it("returns false for non-Claude models without explicit pricing", function () {
     expect(hasModelPricing("gemini-pro")).toBe(false);
+    expect(hasModelPricing("llama-99b")).toBe(false);
+  });
+
+  it("returns true for explicitly priced GPT models", function () {
+    expect(hasModelPricing("gpt-4o")).toBe(true);
   });
 
   it("returns false for null/undefined", function () {
