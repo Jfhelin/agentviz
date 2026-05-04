@@ -1,7 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
-import { detectVSCodeChat, parseVSCodeChatJSON } from "../lib/vscodeSessionParser";
+import {
+  applyVSCodeJsonlPatch,
+  detectVSCodeChat,
+  parseVSCodeChatJSON,
+  parseVSCodeChatSession,
+} from "../lib/vscodeSessionParser";
 import { detectFormat, parseSession } from "../lib/parseSession";
 
 var FIXTURE = readFileSync(join(__dirname, "fixtures/test-vscode-chat.json"), "utf8");
@@ -214,6 +219,30 @@ describe("JSONL wrapper format", function () {
 });
 
 describe("JSONL incremental patches", function () {
+  it("parseVSCodeChatSession matches parseVSCodeChatJSON for plain session objects", function () {
+    var session = JSON.parse(FIXTURE);
+    expect(parseVSCodeChatSession(session)).toEqual(parseVSCodeChatJSON(FIXTURE));
+  });
+
+  it("applyVSCodeJsonlPatch preserves existing patch semantics", function () {
+    var session: any = {
+      version: 3,
+      sessionId: "patch-test",
+      creationDate: 1772000000000,
+      requests: [],
+    };
+    expect(applyVSCodeJsonlPatch(session, { kind: 1, k: ["customTitle"], v: "Patched Title" })).toBe(true);
+    expect(applyVSCodeJsonlPatch(session, { kind: 2, k: ["requests"], v: [{ requestId: "req-1", timestamp: 1772000010000, message: { text: "Hello" }, response: [] }] })).toBe(true);
+    expect(session.customTitle).toBe("Patched Title");
+    expect(session.requests.length).toBe(1);
+  });
+
+  it("applyVSCodeJsonlPatch rejects dangerous key segments", function () {
+    var session: any = { version: 3, sessionId: "safe", requests: [] };
+    expect(applyVSCodeJsonlPatch(session, { kind: 1, k: ["__proto__", "polluted"], v: true })).toBe(false);
+    expect(({} as any).polluted).toBeUndefined();
+  });
+
   it("applies kind:1 set and kind:2 append patches", function () {
     // Base session with empty requests
     var base = {
@@ -274,7 +303,33 @@ describe("JSONL incremental patches", function () {
     expect(result).toBeNull();
   });
 
-  it("ignores dangerous prototype pollution patch paths", function () {
+  it("returns false instead of throwing for invalid primitive traversal patches", function () {
+    var session = JSON.parse(FIXTURE);
+    expect(applyVSCodeJsonlPatch(session, { kind: 1, k: ["sessionId", "x"], v: "bad" })).toBe(false);
+    expect(applyVSCodeJsonlPatch(session, { kind: 2, k: ["sessionId"], v: ["bad"] })).toBe(false);
+  });
+
+  it("ignores invalid primitive traversal patches while parsing JSONL", function () {
+    var base = { version: 3, sessionId: "bad-patch", creationDate: 1772000000000, requests: [] };
+    var request = {
+      requestId: "req-1",
+      timestamp: 1772000010000,
+      message: { text: "still parses" },
+      response: [{ value: "ok" }],
+      result: { timings: { totalElapsed: 1000 } },
+    };
+    var text = [
+      JSON.stringify({ kind: 0, v: base }),
+      JSON.stringify({ kind: 1, k: ["sessionId", "x"], v: "bad" }),
+      JSON.stringify({ kind: 2, k: ["requests"], v: [request] }),
+    ].join("\n");
+    var parsed = parseVSCodeChatJSON(text);
+    expect(parsed).not.toBeNull();
+    expect(parsed?.metadata.sessionId).toBe("bad-patch");
+    expect(parsed?.events[0].text).toBe("still parses");
+  });
+
+  it("ignores prototype pollution patch paths", function () {
     var base = {
       version: 3,
       sessionId: "safe-session",

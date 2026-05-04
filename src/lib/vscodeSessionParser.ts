@@ -17,7 +17,7 @@ import type { TrackType } from "./theme";
 
 type ResponsePart = Record<string, any>;
 type VSCodeRequest = Record<string, any>;
-type VSCodeSession = Record<string, any>;
+export type VSCodeSession = Record<string, any>;
 
 const MAX_TEXT_LENGTH = 4000;
 const DANGEROUS_KEY_SEGMENTS = new Set(["__proto__", "constructor", "prototype"]);
@@ -34,6 +34,40 @@ import { truncateText as truncate } from "./formatTime.js";
  *   kind 1: {"kind":1,"k":["path","to","key"],"v":val}  -- set value at key path
  *   kind 2: {"kind":2,"k":["path","to","arr"],"v":[...]} -- append items to array
  */
+function canTraverse(value: unknown): value is Record<string | number, any> {
+  return Boolean((typeof value === "object" || typeof value === "function") && value !== null);
+}
+
+export function applyVSCodeJsonlPatch(session: VSCodeSession, patch: Record<string, any>): boolean {
+  const keyPath: (string | number)[] = patch.k;
+  if (!Array.isArray(keyPath) || keyPath.length === 0) return false;
+  if (keyPath.some(function (segment) { return DANGEROUS_KEY_SEGMENTS.has(String(segment)); })) return false;
+
+  if (patch.kind === 1) {
+    let target: any = session;
+    for (let index = 0; index < keyPath.length - 1; index += 1) {
+      if (!canTraverse(target)) return false;
+      target = target[keyPath[index]];
+    }
+    if (!canTraverse(target)) return false;
+    target[keyPath[keyPath.length - 1]] = patch.v;
+    return true;
+  }
+
+  if (patch.kind === 2) {
+    let target: any = session;
+    for (let index = 0; index < keyPath.length; index += 1) {
+      if (!canTraverse(target)) return false;
+      target = target[keyPath[index]];
+    }
+    if (!Array.isArray(target) || !Array.isArray(patch.v)) return false;
+    for (let index = 0; index < patch.v.length; index += 1) target.push(patch.v[index]);
+    return true;
+  }
+
+  return false;
+}
+
 function unwrapJsonl(text: string): VSCodeSession | null {
   const lines = text.split("\n").filter(function (l) { return l.trim().length > 0; });
   if (lines.length === 0) return null;
@@ -54,30 +88,7 @@ function unwrapJsonl(text: string): VSCodeSession | null {
   // Apply incremental patches from remaining lines
   for (let i = 1; i < lines.length; i++) {
     try {
-      const patch = JSON.parse(lines[i]);
-      const keyPath: (string | number)[] = patch.k;
-      if (!Array.isArray(keyPath) || keyPath.length === 0) continue;
-      if (keyPath.some(function (segment) { return DANGEROUS_KEY_SEGMENTS.has(String(segment)); })) continue;
-
-      if (patch.kind === 1) {
-        // Set: navigate to parent, set last key
-        let target: any = session;
-        for (let j = 0; j < keyPath.length - 1; j++) {
-          if (target == null) break;
-          target = target[keyPath[j]];
-        }
-        if (target != null) target[keyPath[keyPath.length - 1]] = patch.v;
-      } else if (patch.kind === 2) {
-        // Append: navigate to the array, push items
-        let target: any = session;
-        for (let j = 0; j < keyPath.length; j++) {
-          if (target == null) break;
-          target = target[keyPath[j]];
-        }
-        if (Array.isArray(target) && Array.isArray(patch.v)) {
-          for (let j = 0; j < patch.v.length; j++) target.push(patch.v[j]);
-        }
-      }
+      if (session) applyVSCodeJsonlPatch(session, JSON.parse(lines[i]));
     } catch {
       // skip malformed patch lines
     }
@@ -475,6 +486,17 @@ function buildMetadata(
 
 // ── Main parser ──────────────────────────────────────────────────────────────
 
+export function parseVSCodeChatSession(session: VSCodeSession): ParsedSession | null {
+  if (!isVSCodeSession(session)) return null;
+
+  const { events, turns } = buildTimeline(session);
+  if (events.length === 0) return null;
+
+  const metadata = buildMetadata(events, turns, session);
+
+  return { events, turns, metadata };
+}
+
 export function parseVSCodeChatJSON(text: string): ParsedSession | null {
   let session: VSCodeSession | null = null;
 
@@ -492,12 +514,6 @@ export function parseVSCodeChatJSON(text: string): ParsedSession | null {
     session = unwrapJsonl(text);
   }
 
-  if (!session || !isVSCodeSession(session)) return null;
-
-  const { events, turns } = buildTimeline(session);
-  if (events.length === 0) return null;
-
-  const metadata = buildMetadata(events, turns, session);
-
-  return { events, turns, metadata };
+  if (!session) return null;
+  return parseVSCodeChatSession(session);
 }
