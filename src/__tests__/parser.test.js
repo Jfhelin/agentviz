@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseClaudeCodeJSONL } from "../lib/parser";
+import { parseClaudeCodeJSONL, parseClaudeCodeRecords } from "../lib/parser";
 
 // ── Helpers ──
 
@@ -126,6 +126,14 @@ var NO_TS_ASSISTANT = {
 describe("parseClaudeCodeJSONL", function () {
 
   describe("basic parsing", function () {
+    it("parseClaudeCodeRecords matches parseClaudeCodeJSONL", function () {
+      var lines = [USER_MSG, ASSISTANT_THINKING, ASSISTANT_TEXT, ASSISTANT_TOOL_USE, TOOL_RESULT_OK];
+      var text = makeSession(lines);
+      var records = lines.map(function (item) { return JSON.parse(JSON.stringify(item)); });
+
+      expect(parseClaudeCodeRecords(records)).toEqual(parseClaudeCodeJSONL(text));
+    });
+
     it("returns null for empty input", function () {
       expect(parseClaudeCodeJSONL("")).toBeNull();
       expect(parseClaudeCodeJSONL("   \n  \n  ")).toBeNull();

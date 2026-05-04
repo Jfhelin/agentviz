@@ -34,6 +34,7 @@ src/
     parser.ts          # parseClaudeCodeJSONL() - Claude Code JSONL parser
     copilotCliParser.ts # parseCopilotCliJSONL() - Copilot CLI JSONL parser
     vscodeSessionParser.ts # parseVSCodeChatJSON() - VS Code Copilot Chat JSON parser
+    liveSessionParser.ts # Incremental live JSONL parser for appended session text
     parseSession.ts    # Auto-detect format router: detectFormat() + parseSession()
     session.ts         # Pure helpers: getSessionTotal, buildFilteredEventEntries, buildTurnStartMap
     sessionLibrary.js  # localStorage-backed session library with content persistence

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { detectCopilotCli, parseCopilotCliJSONL } from "../lib/copilotCliParser";
+import { detectCopilotCli, parseCopilotCliJSONL, parseCopilotCliRecords } from "../lib/copilotCliParser";
 import { detectFormat, parseSession } from "../lib/parseSession";
 
 // Helper to build a minimal Copilot CLI JSONL trace
@@ -166,6 +166,12 @@ describe("detectFormat", function () {
 // ---- Parser: basic structure ----
 
 describe("parseCopilotCliJSONL", function () {
+  it("parseCopilotCliRecords matches parseCopilotCliJSONL", function () {
+    var text = buildTrace(BASIC_TRACE);
+    var records = BASIC_TRACE.map(function (item) { return JSON.parse(JSON.stringify(item)); });
+    expect(parseCopilotCliRecords(records, 0)).toEqual(parseCopilotCliJSONL(text));
+  });
+
   it("returns events, turns, metadata", function () {
     var result = parseCopilotCliJSONL(buildTrace(BASIC_TRACE));
     expect(result).not.toBeNull();

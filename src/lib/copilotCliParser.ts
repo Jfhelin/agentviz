@@ -641,9 +641,7 @@ export function detectCopilotCli(text: string): boolean {
   }
 }
 
-export function parseCopilotCliJSONL(text: string): ParsedSession | null {
-  const parsed = parseRawRecords(text);
-  const records = parsed.records;
+export function parseCopilotCliRecords(records: RawRecord[], malformedLines: number): ParsedSession | null {
   if (records.length === 0) return null;
 
   let sessionStartSec: number | null = null;
@@ -668,7 +666,12 @@ export function parseCopilotCliJSONL(text: string): ParsedSession | null {
   if (events.length === 0) return null;
 
   const turns = buildTurns(records, events, sessionStartSec);
-  const metadata = buildMetadata(records, events, turns, parsed.malformedLines);
+  const metadata = buildMetadata(records, events, turns, malformedLines);
 
   return { events, turns, metadata };
+}
+
+export function parseCopilotCliJSONL(text: string): ParsedSession | null {
+  const parsed = parseRawRecords(text);
+  return parseCopilotCliRecords(parsed.records, parsed.malformedLines);
 }
