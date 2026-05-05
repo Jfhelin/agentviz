@@ -20,6 +20,7 @@ function call(over: Partial<CallInput> = {}): CallInput {
     },
     tools: over.tools ?? [],
     components: over.components ?? emptyComponents(),
+    componentChars: over.componentChars,
   };
 }
 
@@ -200,5 +201,42 @@ describe("analyzeSessionCalls -- recommit math", () => {
     expect(c2.newTotal).toBe(6000);
     expect(c2.trulyNew).toBe(1000);
     expect(c2.recommit).toBe(5000);
+  });
+});
+
+describe("analyzeSessionCalls -- per-bucket new attribution", () => {
+  it("attributes 0 new tokens to a bucket whose raw chars are unchanged", () => {
+    // Simulates the real-world bug: system text is bit-identical across two
+    // calls but the per-call rescaling makes the scaled `system` token count
+    // drift (8500 -> 9600). Without componentChars the diff would attribute
+    // ~1100 new tokens to system; with componentChars it should be 0.
+    const stableSystemChars = 34000; // unchanged across both calls
+    const result = analyzeSessionCalls([
+      {
+        cacheWriteSum: 0,
+        calls: [
+          call({
+            id: "a1",
+            usage: { prompt_tokens: 20000, completion_tokens: 0, cached_tokens: 0, cache_write: 20000 },
+            components: { system: 8500, tool_defs: 4000, history: 5000, tool_results: 2000, current: 500 },
+            componentChars: { system: stableSystemChars, tool_defs: 16000, history: 20000, tool_results: 8000, current: 2000 },
+          }),
+          call({
+            id: "a2",
+            usage: { prompt_tokens: 32400, completion_tokens: 0, cached_tokens: 28800, cache_write: 0 },
+            // Scaled system token estimate jumped purely due to rescaling.
+            components: { system: 10000, tool_defs: 4700, history: 12000, tool_results: 5200, current: 500 },
+            // But the actual system char count is unchanged. History and tool_results grew.
+            componentChars: { system: stableSystemChars, tool_defs: 16000, history: 48000, tool_results: 21000, current: 2000 },
+          }),
+        ],
+      },
+    ]);
+    const c2 = result[0].calls[1];
+    expect(c2.newPerBucket.system).toBe(0);
+    expect(c2.newPerBucket.tool_defs).toBe(0);
+    expect(c2.newPerBucket.current).toBe(0);
+    // All of newTotal (3600) should be in history + tool_results.
+    expect(c2.newPerBucket.history + c2.newPerBucket.tool_results).toBe(c2.newTotal);
   });
 });

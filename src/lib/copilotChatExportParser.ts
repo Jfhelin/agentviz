@@ -111,6 +111,7 @@ interface RawContentPart {
   type?: number | string;
   text?: string;
   cacheType?: string;
+  imageUrl?: { url?: string; detail?: string; mediaType?: string };
 }
 
 interface RawPrompt {
@@ -148,14 +149,29 @@ function messageText(msg: RawMessage): string {
   return out;
 }
 
+interface ImageAttachment {
+  url: string;
+  mediaType: string;
+  detail: string;
+}
+
 interface ClassifiedCall {
   components: ComponentBreakdown;
+  /** Raw character counts per bucket (pre-scaling). Used by cacheAnalysis to
+   * detect what content actually changed between calls without being fooled
+   * by the per-call rescaling that makes unchanged buckets like `system`
+   * appear to grow. */
+  componentChars: ComponentBreakdown;
   systemPreview: string;
   currentText: string;
   historyMsgs: { role: "user" | "assistant"; chars: number; tokens: number; preview: string }[];
   toolResultMsgs: { chars: number; tokens: number; preview: string }[];
   totalTools: number;
   toolGroups: { source: string; tools: { name: string; chars: number; tokens: number }[]; chars: number; tokens: number }[];
+  /** Image attachments referenced by this call's request messages. The export
+   * carries only a CDN URL, mediaType, and detail level -- no byte size,
+   * dimensions, or token cost. */
+  images: ImageAttachment[];
 }
 
 const TOOL_GROUP_PATTERNS: { match: (name: string) => boolean; label: string }[] = [
@@ -275,22 +291,77 @@ function classifyCall(log: RawLog): ClassifiedCall {
   });
   toolGroups.sort((a, c) => c.tokens - a.tokens);
 
+  // Extract image attachments. Images appear as content parts with
+  // `imageUrl: { url, mediaType, detail }`. The export carries no byte size.
+  const images: ImageAttachment[] = [];
+  for (const msg of messages) {
+    const c = msg.content;
+    if (!Array.isArray(c)) continue;
+    for (const p of c) {
+      if (p && typeof p === "object" && p.imageUrl && typeof p.imageUrl.url === "string") {
+        images.push({
+          url: p.imageUrl.url,
+          mediaType: p.imageUrl.mediaType || "image",
+          detail: p.imageUrl.detail || "",
+        });
+      }
+    }
+  }
+
   return {
     components,
+    componentChars: {
+      system: sysChars,
+      tool_defs: toolDefChars,
+      history: historyChars,
+      tool_results: toolResultsChars,
+      current: currentChars,
+    },
     systemPreview: systemText.slice(0, 400),
     currentText: currentText.slice(0, 600),
     historyMsgs,
     toolResultMsgs,
     totalTools: tools.length,
     toolGroups,
+    images,
   };
 }
 
 // ── Cost analysis (the data structure CostView consumes) ─────────────────────
 
+// Names of LLM calls that VS Code Copilot Chat issues for UI/telemetry
+// purposes (not the actual user-facing chat turn). They are still real LLM
+// calls and still cost tokens, but a user analyzing their session usually
+// wants to be able to hide them. See `categorizeCallName`.
+export const OVERHEAD_CALL_NAMES = new Set<string>([
+  "title",
+  "promptCategorization",
+]);
+
+export type CallCategory = "primary" | "overhead";
+
+export function categorizeCallName(name: string | undefined | null): CallCategory {
+  return name && OVERHEAD_CALL_NAMES.has(name) ? "overhead" : "primary";
+}
+
 export interface CostAnalysisCall {
   id: string;
   index: number;
+  /** Original `log.name` from the export (e.g. `panel/editAgent`, `title`,
+   * `promptCategorization`). Used as the row label and for overhead filtering. */
+  name: string;
+  /** Whether this call is the actual user-facing chat turn ("primary") or a
+   * UI/telemetry side call ("overhead"). Derived from `name`. */
+  category: CallCategory;
+  /** Short human-readable preview of `log.response` (joined `message[]` for
+   * the standard `{type:"success", message:[...]}` shape). Empty when the
+   * export had no response payload. */
+  responsePreview: string;
+  /** When the model emitted no text and only tool calls, this lists the
+   * tool names + short arg summary that immediately followed this LLM call
+   * in the export. Lets us show *what the model did* instead of an empty
+   * response box. */
+  producedToolCalls: { name: string; argsSummary: string }[];
   model: string;
   duration: number;
   promptTokens: number;
@@ -313,6 +384,14 @@ export interface CostAnalysisCall {
   toolGroups: ClassifiedCall["toolGroups"];
   historyMsgs: ClassifiedCall["historyMsgs"];
   toolResultMsgs: ClassifiedCall["toolResultMsgs"];
+  /** Image attachments referenced by this call. The export gives URL, media
+   * type, and detail level only -- no byte size, dimensions, or token cost. */
+  images: ClassifiedCall["images"];
+  /** Subset of `images` that were NOT present on the previous same-model call.
+   * Re-sending an image with the same URL is part of the cached prefix and
+   * does not contribute new content -- only first appearance (or first
+   * appearance after a model switch) counts as new. */
+  newImages: ClassifiedCall["images"];
   systemPreview: string;
   currentText: string;
   cumCostAfter: number;
@@ -329,6 +408,19 @@ export interface CostAnalysisToolCall {
   resultTokens: number;
   resultPreview: string;
   cumCostAfter: number;
+  /**
+   * For `runSubagent` calls only: extracted summary of the subagent invocation.
+   * The export does NOT include actual token counts for the subagent's own
+   * LLM calls, so promptTokensEst is a 4-chars/token estimate from
+   * `args.prompt` and the cost is estimated using `pricing.estimateCost`
+   * (input ≈ promptTokensEst, output ≈ resultTokens).
+   */
+  subagent?: {
+    description: string;
+    promptChars: number;
+    promptTokensEst: number;
+    modelName?: string;
+  };
 }
 
 export type CostAnalysisEvent =
@@ -397,6 +489,52 @@ function asString(args: unknown): string {
   return JSON.stringify(args);
 }
 
+function extractSubagent(log: RawLog): CostAnalysisToolCall["subagent"] | undefined {
+  if (log.tool !== "runSubagent") return undefined;
+  let args: Record<string, unknown> = {};
+  if (typeof log.args === "string") {
+    try { args = JSON.parse(log.args) as Record<string, unknown>; } catch { args = {}; }
+  } else if (log.args && typeof log.args === "object") {
+    args = log.args as Record<string, unknown>;
+  }
+  const prompt = typeof args.prompt === "string" ? args.prompt : "";
+  const description = typeof args.description === "string" ? args.description : "";
+  const meta = (log as unknown as { toolMetadata?: { modelName?: string } }).toolMetadata;
+  return {
+    description,
+    promptChars: prompt.length,
+    // Char/4 is the standard rough token estimate. Real cost will be off by
+    // ~25% but it's the best we can do without per-subagent usage data.
+    promptTokensEst: Math.ceil(prompt.length / 4),
+    modelName: meta?.modelName,
+  };
+}
+
+function summarizeResponse(response: unknown): string {
+  if (response == null) return "";
+  if (typeof response === "string") {
+    return response.length > 800 ? response.slice(0, 800) + "…" : response;
+  }
+  if (typeof response === "object") {
+    const obj = response as Record<string, unknown>;
+    // VS Code Copilot Chat shape: { type: "success" | "error", message: string[] }
+    if (Array.isArray(obj.message)) {
+      const joined = (obj.message as unknown[])
+        .filter((m) => typeof m === "string")
+        .join("\n")
+        .trim();
+      if (joined) return joined.length > 800 ? joined.slice(0, 800) + "…" : joined;
+    }
+    try {
+      const json = JSON.stringify(obj);
+      return json.length > 800 ? json.slice(0, 800) + "…" : json;
+    } catch {
+      return "";
+    }
+  }
+  return "";
+}
+
 function callUsage(log: RawLog): { prompt_tokens: number; cached_tokens: number; cache_write: number; completion_tokens: number } {
   const u = log.metadata?.usage ?? {};
   const ptd = u.prompt_tokens_details ?? {};
@@ -448,6 +586,7 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
         usage: { ...usage },
         tools: log.metadata?.tools ?? [],
         components: c.classified[classifiedIdx].components,
+        componentChars: c.classified[classifiedIdx].componentChars,
       });
       classifiedIdx++;
     }
@@ -465,6 +604,11 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
   let totalLlm = 0, totalTool = 0;
   let totalUnexpectedMissCount = 0, totalUnexpectedMissCost = 0;
   let timeCursor = 0;
+  // Per-model set of image URLs already sent in a prior call's prompt.
+  // Used to mark images as "newly added" only on the call where they first
+  // appear (or first appear after a model switch / cache miss). Re-sending
+  // the same imageUrl on subsequent calls is part of the cached prefix.
+  const prevImageUrlsByModel = new Map<string, Set<string>>();
 
   classifiedByPrompt.forEach((c, pi) => {
     const promptText = root.prompts[pi].prompt ?? "";
@@ -498,7 +642,8 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
       timeCursor += 1;
     }
 
-    for (const log of c.logs) {
+    for (let logIdx = 0; logIdx < c.logs.length; logIdx++) {
+      const log = c.logs[logIdx];
       if (log.kind === "toolCall") {
         const argStr = asString(log.args);
         const tc: CostAnalysisToolCall = {
@@ -512,6 +657,7 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
           resultTokens: 0,
           resultPreview: "",
           cumCostAfter: cumCost,
+          subagent: extractSubagent(log),
         };
         costEvents.push(tc);
         pendingToolCalls.push(tc);
@@ -570,10 +716,37 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
       });
       pendingToolCalls.length = 0;
 
+      // Look forward in this prompt's logs to the next request log; the
+      // toolCall logs in between are what this LLM call produced. This is
+      // critical for showing "what the model did" when its text response is
+      // empty (model emitted only tool_use blocks, no message content).
+      const producedToolCalls: { name: string; argsSummary: string }[] = [];
+      for (let lookIdx = logIdx + 1; lookIdx < c.logs.length; lookIdx++) {
+        const next = c.logs[lookIdx];
+        if (next.kind === "request") break;
+        if (next.kind === "toolCall") {
+          producedToolCalls.push({ name: next.tool ?? "", argsSummary: shortArgs(next.args) });
+        }
+      }
+
+      // Compute which images are newly added on this call vs. prior same-model
+      // history. Re-sending the same imageUrl on subsequent calls is part of
+      // the cached prefix and should not be flagged as new content. A model
+      // switch resets the per-model cache, so all images become new again.
+      let prevImgSet = ca.modelSwitched ? new Set<string>() : (prevImageUrlsByModel.get(model) ?? new Set<string>());
+      const newImages = cls.images.filter((img) => !prevImgSet.has(img.url));
+      const updatedSet = new Set<string>(prevImgSet);
+      for (const img of cls.images) updatedSet.add(img.url);
+      prevImageUrlsByModel.set(model, updatedSet);
+
       const callEvent: CostAnalysisCall & { kind: "llm" } = {
         kind: "llm",
         id: log.id ?? `p${pi}-call-${analysisCallIdx}`,
         index: analysisCallIdx,
+        name: log.name ?? "request",
+        category: categorizeCallName(log.name),
+        responsePreview: summarizeResponse(log.response),
+        producedToolCalls,
         model,
         duration: log.metadata?.duration ?? 0,
         promptTokens: usage.prompt_tokens,
@@ -596,6 +769,8 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
         toolGroups: cls.toolGroups,
         historyMsgs: cls.historyMsgs,
         toolResultMsgs: cls.toolResultMsgs,
+        images: cls.images,
+        newImages,
         systemPreview: cls.systemPreview,
         currentText: cls.currentText,
         cumCostAfter: cumCost,

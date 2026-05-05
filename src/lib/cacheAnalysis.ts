@@ -31,6 +31,11 @@ export interface CallInput {
   tools: ToolDef[];
   /** Component breakdown in tokens (may be approximate, scaled to prompt_tokens). */
   components: ComponentBreakdown;
+  /** Raw character counts per bucket. Stable across calls (independent of
+   * the per-call scale factor used to derive `components`), so diffing these
+   * gives an accurate "what content actually changed" signal for the
+   * per-bucket new-attribution. Optional for backward compatibility. */
+  componentChars?: ComponentBreakdown;
 }
 
 export interface ComponentBreakdown {
@@ -176,6 +181,7 @@ export function analyzeSessionCalls(
   prompts: { calls: CallInput[]; cacheWriteSum: number }[],
 ): { prompt: PromptAnalysis; calls: CallAnalysis[] }[] {
   const prevComponentsByModel = new Map<string, ComponentBreakdown>();
+  const prevCharsByModel = new Map<string, ComponentBreakdown>();
   const prevPtByModel = new Map<string, number>();
   const prevToolsByModel = new Map<string, ToolDef[]>();
   let prevModelGlobal: string | null = null;
@@ -219,14 +225,26 @@ export function analyzeSessionCalls(
         unexpectedMissTokens += u.prompt_tokens;
       }
 
-      // Per-bucket new attribution: diff this call's components against the
-      // previous same-model call's components, scale to actual newTotal.
+      // Per-bucket new attribution: diff this call's content against the
+      // previous same-model call's content, then scale to actual newTotal.
+      // We prefer raw character counts (`componentChars`) because they're
+      // stable across calls -- the scaled token `components` jitter as the
+      // per-call rescaling factor changes, which made unchanged buckets like
+      // `system` falsely appear to "grow" and get billed-as-new.
       const prevComps = prevComponentsByModel.get(call.model);
+      const prevChars = prevCharsByModel.get(call.model);
+      const useChars = !!(call.componentChars && prevChars);
       const estNew: ComponentBreakdown = emptyComponents();
       for (const k of INPUT_KEYS) {
-        const cur = call.components[k] ?? 0;
-        const prev = prevComps ? (prevComps[k] ?? 0) : 0;
-        estNew[k] = prevComps ? Math.max(0, cur - prev) : cur;
+        if (useChars) {
+          const cur = call.componentChars![k] ?? 0;
+          const prev = prevChars![k] ?? 0;
+          estNew[k] = Math.max(0, cur - prev);
+        } else {
+          const cur = call.components[k] ?? 0;
+          const prev = prevComps ? (prevComps[k] ?? 0) : 0;
+          estNew[k] = prevComps ? Math.max(0, cur - prev) : cur;
+        }
       }
       const estTotal = INPUT_KEYS.reduce((a, k) => a + estNew[k], 0) || 1;
       const scaled: ComponentBreakdown = emptyComponents();
@@ -259,6 +277,7 @@ export function analyzeSessionCalls(
 
       // advance baselines
       prevComponentsByModel.set(call.model, { ...call.components });
+      if (call.componentChars) prevCharsByModel.set(call.model, { ...call.componentChars });
       prevPtByModel.set(call.model, u.prompt_tokens);
       prevToolsByModel.set(call.model, call.tools);
       prevModelGlobal = call.model;

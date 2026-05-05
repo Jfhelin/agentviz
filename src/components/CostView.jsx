@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from "react";
 import { theme } from "../lib/theme.js";
+import { estimateCost, hasModelPricing } from "../lib/pricing.js";
 
 // Cost view uses theme.cost.* tokens (defined in src/lib/theme.js).
 // These are categorical color roles that change with light/dark mode.
@@ -39,6 +40,24 @@ var KIND_COLORS = {
   builtin:   theme.cost.kindBuiltin,
 };
 
+// Map VS Code Copilot Chat's internal call names to friendly labels.
+// The raw name is still shown as a small subtitle for power users.
+var CALL_NAME_LABELS = {
+  "panel/editAgent":      "Chat turn (with tools)",
+  "panel/request":        "Chat turn",
+  "panel/explain":        "Explain",
+  "panel/fix":            "Fix",
+  "title":                "Generate chat title",
+  "promptCategorization": "Categorize prompt",
+};
+function friendlyCallName(name) {
+  if (!name) return "Request";
+  if (CALL_NAME_LABELS[name]) return CALL_NAME_LABELS[name];
+  // panel/<something> → "Chat: something"
+  if (name.indexOf("panel/") === 0) return "Chat: " + name.slice(6);
+  return name;
+}
+
 function fmt$(n) {
   if (n == null || isNaN(n)) return "$0";
   return n < 0.01 ? "$" + n.toFixed(5) : "$" + n.toFixed(4);
@@ -67,12 +86,15 @@ function eventCumParts(ev, cumState) {
 }
 
 // Build cumulative cost timeline for stacked bars.
-function buildCumStates(prompts) {
+// When includeOverhead is false, overhead LLM calls (e.g. `title`,
+// `promptCategorization`) contribute zero so the cum bars on visible rows
+// reflect only the user-facing chat flow.
+function buildCumStates(prompts, includeOverhead) {
   var freshAcc = 0, cwriteAcc = 0, cachedAcc = 0, outputAcc = 0;
   var states = [];
   prompts.forEach(function (p) {
     p.events.forEach(function (ev) {
-      if (ev.kind === "llm") {
+      if (ev.kind === "llm" && (includeOverhead || ev.category !== "overhead")) {
         // Decompose this call's cost into its 4 cost components for the stacked
         // cum bar. We approximate by calling the same per-token rates.
         // Use the raw counts from the event (they sum to ev.cost).
@@ -309,7 +331,6 @@ function NewBlock(props) {
       </div>
       <div style={{ fontSize: theme.fontSize.sm, color: theme.text.secondary, lineHeight: 1.7 }}>
         {CTX_INPUT_KEYS.filter(function (k) { return (newPerBucket[k] || 0) > 0; })
-          .sort(function (a, b) { return (newPerBucket[b] || 0) - (newPerBucket[a] || 0); })
           .map(function (k) {
             return (
               <div key={k} style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 8, alignItems: "baseline" }}>
@@ -337,7 +358,7 @@ function DetailSection(props) {
           {CTX_LABELS[props.bucket]}
         </span>
         <span style={{ color: theme.text.secondary, fontVariantNumeric: "tabular-nums" }}>
-          {fmtT(props.value)} tok · {props.pct.toFixed(1)}% of input
+          {props.valuePrefix || ""}{fmtT(props.value)} tok{props.pctLabel ? " · " + props.pct.toFixed(1) + "% " + props.pctLabel : ""}
         </span>
       </div>
       {props.children}
@@ -399,11 +420,11 @@ function LLMDetail(props) {
       <h4 style={{ margin: "0 0 8px", color: theme.text.primary, fontSize: theme.fontSize.base, fontWeight: 600, letterSpacing: 0.4, textTransform: "uppercase" }}>
         What happened in this LLM call
       </h4>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 14 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10, marginBottom: 14 }}>
         <div style={{ background: theme.bg.surface, border: "1px solid " + theme.cost.switchBorder, borderRadius: 5, padding: "10px 12px" }}>
-          <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 5 }}>Context window (this call)</div>
+          <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 5 }}>▶ Input (context window)</div>
           <div style={{ fontSize: theme.fontSize.lg, color: theme.cost.cached, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{fmtT(ev.promptTokens)} tok</div>
-          <div style={{ fontSize: theme.fontSize.xs, color: theme.text.secondary, marginTop: 3 }}>+ {fmtT(ev.output)} output</div>
+          <div style={{ fontSize: theme.fontSize.xs, color: theme.text.secondary, marginTop: 3 }}>cache + new combined</div>
         </div>
         <div style={{ background: theme.bg.surface, border: "1px solid " + theme.cost.okBorder, borderRadius: 5, padding: "10px 12px" }}>
           <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 5 }}>▲ Net new vs previous call</div>
@@ -415,28 +436,133 @@ function LLMDetail(props) {
           <div style={{ fontSize: theme.fontSize.lg, color: theme.cost.cwrite, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{fmtT(ev.newTotal)} tok</div>
           <div style={{ fontSize: theme.fontSize.xs, color: theme.text.secondary, marginTop: 3 }}>{ev.recommit > 100 ? "incl. " + fmtT(ev.recommit) + " cache recommit" : "minimal recommit"}</div>
         </div>
+        {(function () {
+          var hasPx = ev.model && hasModelPricing(ev.model);
+          var inCost = hasPx ? estimateCost({ inputTokens: ev.newTotal || 0, outputTokens: 0, cacheRead: ev.cached || 0, cacheWrite: 0 }, ev.model) : null;
+          var outCost = hasPx ? estimateCost({ inputTokens: 0, outputTokens: ev.output || 0, cacheRead: 0, cacheWrite: 0 }, ev.model) : null;
+          return (
+            <div style={{ background: theme.bg.surface, border: "1px solid " + theme.border.default, borderRadius: 5, padding: "10px 12px" }}
+                 title={hasPx ? "Output is billed at the model's output rate (typically ~5x input). Already counted in Total cost." : "Pricing unknown for this model"}>
+              <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 5 }}>◀ Output (model wrote)</div>
+              <div style={{ fontSize: theme.fontSize.lg, color: theme.text.primary, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{fmtT(ev.output)} tok</div>
+              <div style={{ fontSize: theme.fontSize.xs, color: theme.text.secondary, marginTop: 3, fontVariantNumeric: "tabular-nums" }}>
+                {hasPx
+                  ? fmt$(outCost) + " output · " + fmt$(inCost) + " input · " + fmt$(ev.cost) + " total"
+                  : "this call: " + fmt$(ev.cost) + " total"}
+              </div>
+            </div>
+          );
+        })()}
       </div>
       {missCallout}
       {recommitCallout}
+      {ev.newImages && ev.newImages.length > 0 && (
+        <div style={{
+          background: theme.bg.surface, border: "1px solid " + theme.border.default,
+          borderRadius: 5, padding: "9px 12px", marginBottom: 12,
+          fontSize: theme.fontSize.sm, color: theme.text.secondary, lineHeight: 1.5,
+        }}>
+          <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 5, fontWeight: 600 }}>
+            📎 New image attachment{ev.newImages.length === 1 ? "" : "s"} ({ev.newImages.length})
+            {ev.images.length > ev.newImages.length && (
+              <span style={{ color: theme.text.muted, fontWeight: 400, textTransform: "none", letterSpacing: 0, marginLeft: 8 }}>
+                · {ev.images.length - ev.newImages.length} more carried from cache
+              </span>
+            )}
+          </div>
+          {ev.newImages.map(function (img, i) {
+            return (
+              <div key={i} style={{ display: "flex", gap: 10, alignItems: "baseline", fontFamily: theme.font.mono, fontSize: theme.fontSize.xs }}>
+                <span style={{ color: theme.text.primary }}>{img.mediaType}</span>
+                {img.detail && <span style={{ color: theme.text.muted }}>· detail: {img.detail}</span>}
+                <a href={img.url} target="_blank" rel="noreferrer" style={{ color: theme.text.muted, textDecoration: "underline", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={img.url}>
+                  {img.url.replace(/^https?:\/\//, "")}
+                </a>
+              </div>
+            );
+          })}
+          <div style={{ fontStyle: "italic", color: theme.text.muted, fontSize: theme.fontSize.xs, marginTop: 6 }}>
+            Token cost not estimated -- the export does not report image token usage, byte size, or dimensions.
+          </div>
+        </div>
+      )}
       <NewBlock newPerBucket={ev.newPerBucket} newTotal={ev.newTotal} totalIn={ev.promptTokens} label="this call" />
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-        <DetailSection bucket="tool_defs" value={c.tool_defs} pct={pct("tool_defs")}>
-          <div style={{ color: theme.text.secondary, fontSize: theme.fontSize.sm, marginBottom: 5 }}>{ev.totalTools} tools available, grouped by source</div>
-          <ToolGroups groups={ev.toolGroups} />
-        </DetailSection>
-        <DetailSection bucket="history" value={c.history} pct={pct("history")}>
-          <HistoryList msgs={ev.historyMsgs} />
-        </DetailSection>
-        <DetailSection bucket="tool_results" value={c.tool_results} pct={pct("tool_results")}>
-          <ToolResultList msgs={ev.toolResultMsgs} />
-        </DetailSection>
-        <DetailSection bucket="system" value={c.system} pct={pct("system")}>
-          <div style={textBlockStyle}>{ev.systemPreview}{ev.systemPreview && ev.systemPreview.length >= 300 ? "…" : ""}</div>
-        </DetailSection>
-        <DetailSection bucket="current" value={c.current} pct={pct("current")}>
-          <div style={textBlockStyle}>{ev.currentText || "(empty)"}{ev.currentText && ev.currentText.length >= 400 ? "…" : ""}</div>
-        </DetailSection>
-      </div>
+      {(function () {
+        var npb = ev.newPerBucket || {};
+        var newSum = CTX_INPUT_KEYS.reduce(function (a, k) { return a + (npb[k] || 0); }, 0) || 1;
+        var newPct = function (k) { return 100 * (npb[k] || 0) / newSum; };
+        var visible = CTX_INPUT_KEYS.filter(function (k) { return (npb[k] || 0) > 0; });
+        if (visible.length === 0) {
+          return (
+            <div style={{ fontSize: theme.fontSize.sm, color: theme.text.muted, fontStyle: "italic", padding: "8px 0" }}>
+              Nothing new in this call -- 100% of the input was served from cache.
+            </div>
+          );
+        }
+        var bodyForBucket = function (k) {
+          if (k === "system") return <div style={textBlockStyle}>{ev.systemPreview}{ev.systemPreview && ev.systemPreview.length >= 300 ? "…" : ""}</div>;
+          if (k === "tool_defs") return (
+            <>
+              <div style={{ color: theme.text.secondary, fontSize: theme.fontSize.sm, marginBottom: 5 }}>{ev.totalTools} tools available, grouped by source</div>
+              <ToolGroups groups={ev.toolGroups} />
+            </>
+          );
+          if (k === "history") return <HistoryList msgs={ev.historyMsgs} />;
+          if (k === "tool_results") return <ToolResultList msgs={ev.toolResultMsgs} />;
+          if (k === "current") return <div style={textBlockStyle}>{ev.currentText || "(empty)"}{ev.currentText && ev.currentText.length >= 400 ? "…" : ""}</div>;
+          return null;
+        };
+        return (
+          <>
+            <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, textTransform: "uppercase", letterSpacing: 0.5, margin: "4px 0 8px", fontWeight: 600 }}>
+              What's new in this call ({fmtT(ev.newTotal)} tok across {visible.length} bucket{visible.length === 1 ? "" : "s"})
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+              {visible.map(function (k) {
+                return (
+                  <DetailSection key={k} bucket={k} value={npb[k]} pct={newPct(k)} pctLabel="of new" valuePrefix="+">
+                    {bodyForBucket(k)}
+                  </DetailSection>
+                );
+              })}
+            </div>
+          </>
+        );
+      })()}
+      {(function () {
+        var hasText = ev.responsePreview && ev.responsePreview.trim().length > 0;
+        var calls = ev.producedToolCalls || [];
+        if (!hasText && calls.length === 0) return null;
+        return (
+          <div style={{ marginTop: 14 }}>
+            <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 5, fontWeight: 600 }}>
+              Response ({fmtT(ev.output)} output tok)
+            </div>
+            {hasText && <div style={textBlockStyle}>{ev.responsePreview}</div>}
+            {!hasText && calls.length > 0 && (
+              <div style={{ ...textBlockStyle, color: theme.text.secondary, fontStyle: "italic", marginBottom: 6 }}>
+                No text content -- the model spent its {fmtT(ev.output)} output tokens emitting {calls.length} tool call{calls.length === 1 ? "" : "s"}:
+              </div>
+            )}
+            {calls.length > 0 && (
+              <div style={{
+                background: theme.bg.base, border: "1px dashed " + theme.border.default,
+                borderRadius: 3, padding: "6px 10px", marginTop: hasText ? 6 : 0,
+              }}>
+                {calls.map(function (tc, i) {
+                  return (
+                    <div key={i} style={{ display: "flex", gap: 8, alignItems: "baseline", fontFamily: theme.font.mono, fontSize: theme.fontSize.xs, lineHeight: 1.7 }}>
+                      <span style={{ color: theme.text.muted }}>→</span>
+                      <span style={{ color: theme.text.primary, fontWeight: 600 }}>{tc.name || "(unnamed tool)"}</span>
+                      {tc.argsSummary && <span style={{ color: theme.text.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{tc.argsSummary}</span>}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -455,32 +581,106 @@ var textBlockStyle = {
   whiteSpace: "pre-wrap",
 };
 
+function detectResponseShape(preview) {
+  if (!preview) return "empty";
+  var s = preview.trimStart();
+  if (s.startsWith("{")) return "JSON object";
+  if (s.startsWith("[")) return "JSON array";
+  if (s.indexOf("```") >= 0) return "Markdown";
+  return "Text";
+}
+
 function ToolDetail(props) {
   var ev = props.event;
+  var sectionLabelStyle = {
+    fontSize: theme.fontSize.xs,
+    color: theme.text.muted,
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+    fontWeight: 600,
+    marginBottom: 5,
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+  };
+  var arrowChip = function (color, label) {
+    return (
+      <span style={{
+        background: theme.bg.raised,
+        color: color,
+        padding: "1px 6px",
+        borderRadius: 3,
+        fontSize: theme.fontSize.xs,
+        fontWeight: 700,
+        letterSpacing: 0.4,
+      }}>{label}</span>
+    );
+  };
+  var blockStyle = function (accentColor) {
+    return Object.assign({}, textBlockStyle, {
+      borderLeft: "3px solid " + accentColor,
+      borderTop: "1px solid " + theme.border.subtle,
+      borderRight: "1px solid " + theme.border.subtle,
+      borderBottom: "1px solid " + theme.border.subtle,
+      borderStyle: "solid",
+      maxHeight: 200,
+    });
+  };
+  var shape = detectResponseShape(ev.resultPreview);
   return (
     <div style={{ gridColumn: "1 / -1", background: theme.bg.base, borderBottom: "1px solid " + theme.border.subtle, padding: "14px 22px" }}>
-      <h4 style={{ margin: "0 0 8px", color: theme.text.primary, fontSize: theme.fontSize.base, fontWeight: 600, letterSpacing: 0.4, textTransform: "uppercase" }}>
-        What this tool adds to the next LLM call's context
+      <h4 style={{ margin: "0 0 10px", color: theme.text.primary, fontSize: theme.fontSize.base, fontWeight: 600, letterSpacing: 0.4, textTransform: "uppercase" }}>
+        Tool call · {ev.name}
       </h4>
-      <div style={{ background: theme.bg.surface, border: "1px solid " + theme.border.default, borderRadius: 4, padding: "10px 12px" }}>
-        <div style={{ marginBottom: 6, color: theme.text.primary, fontWeight: 600, fontSize: theme.fontSize.sm }}>{ev.name}</div>
-        {ev.argsSummary && <div style={{ color: theme.text.secondary, fontSize: theme.fontSize.sm, margin: "4px 0", fontStyle: "italic" }}>{ev.argsSummary}</div>}
-        <div style={{ color: theme.text.primary, fontSize: theme.fontSize.sm, margin: "6px 0", fontVariantNumeric: "tabular-nums" }}>
-          → Adds <b style={{ color: theme.cost.ctxHistory }}>{fmtT(ev.resultTokens || 0)} tokens</b> of <b style={{ color: theme.cost.ctxHistory }}>tool results</b> to the next LLM call's context ({(ev.resultChars || 0).toLocaleString()} chars).
+
+      {/* 1. Thinking */}
+      {ev.thinking && (
+        <div style={{ marginBottom: 12 }}>
+          <div style={sectionLabelStyle}>
+            {arrowChip(theme.text.muted, "1 · think")}
+            <span>Assistant thinking before the call</span>
+          </div>
+          <div style={Object.assign({}, blockStyle(theme.text.muted), { fontStyle: "italic" })}>
+            {ev.thinking.slice(0, 400)}{ev.thinking.length > 400 ? "…" : ""}
+          </div>
         </div>
-        {ev.resultPreview && (
-          <div style={textBlockStyle}>{ev.resultPreview}{ev.resultPreview.length >= 200 ? "…" : ""}</div>
-        )}
-        {ev.thinking && (
-          <>
-            <div style={{ marginTop: 8, color: theme.text.muted, fontSize: theme.fontSize.xs, textTransform: "uppercase", letterSpacing: 0.4 }}>
-              Assistant reasoning before the call
-            </div>
-            <div style={Object.assign({}, textBlockStyle, { fontStyle: "italic" })}>
-              {ev.thinking.slice(0, 400)}{ev.thinking.length > 400 ? "…" : ""}
-            </div>
-          </>
-        )}
+      )}
+
+      {/* 2. Input */}
+      <div style={{ marginBottom: 12 }}>
+        <div style={sectionLabelStyle}>
+          {arrowChip(theme.cost.fresh, "2 · input →")}
+          <span>Arguments sent to <code style={{ color: theme.text.primary }}>{ev.name}</code></span>
+        </div>
+        {ev.argsSummary
+          ? <div style={blockStyle(theme.cost.fresh)}>{ev.argsSummary}</div>
+          : <div style={{ color: theme.text.ghost, fontStyle: "italic", fontSize: theme.fontSize.sm }}>(no arguments)</div>}
+      </div>
+
+      {/* 3. Output */}
+      <div>
+        <div style={sectionLabelStyle}>
+          {arrowChip(theme.cost.ctxHistory, "3 · ← output")}
+          <span>Result returned by <code style={{ color: theme.text.primary }}>{ev.name}</code></span>
+          <span style={{
+            marginLeft: "auto",
+            background: theme.bg.raised,
+            color: theme.text.secondary,
+            padding: "1px 6px",
+            borderRadius: 3,
+            fontSize: theme.fontSize.xs,
+            fontWeight: 600,
+            border: "1px solid " + theme.border.subtle,
+          }}>
+            {shape} · {fmtT(ev.resultTokens || 0)} tok · {(ev.resultChars || 0).toLocaleString()} chars
+          </span>
+        </div>
+        <div style={{ color: theme.text.muted, fontSize: theme.fontSize.xs, marginBottom: 4 }}>
+          → Will be folded into the <b style={{ color: theme.cost.ctxHistory }}>tool_results</b> bucket of the next LLM call's context.
+        </div>
+        {ev.resultPreview
+          ? <div style={blockStyle(theme.cost.ctxHistory)}>{ev.resultPreview}{ev.resultPreview.length >= 200 ? "\n\n…(truncated preview)" : ""}</div>
+          : <div style={{ color: theme.text.ghost, fontStyle: "italic", fontSize: theme.fontSize.sm }}>(no preview captured)</div>}
       </div>
     </div>
   );
@@ -528,8 +728,32 @@ function PromptNewMini(props) {
 
 function Kpis(props) {
   var t = props.totals;
+  var sa = props.subagentEst || {};
+  var notes = [];
+  if (sa.overheadCount > 0) {
+    notes.push({
+      text: "incl. " + fmt$(sa.overheadCost) + " overhead (" + sa.overheadCount + " " + (sa.overheadCount === 1 ? "call" : "calls") + ")",
+      title: "Overhead calls (title generation, prompt categorization) are already counted in this total. Toggle 'Show overhead calls' above to filter them from the visualization.",
+      color: theme.text.muted,
+    });
+  }
+  if (sa.count > 0) {
+    notes.push({
+      text: "+ ~" + fmt$(sa.cost) + " est. subagent (" + sa.count + " " + (sa.count === 1 ? "call" : "calls") + ")",
+      title: "VS Code's export does not report subagent token usage. This is estimated from each subagent's args.prompt length (~4 chars/token) and its model price.",
+      color: theme.text.secondary,
+    });
+  }
+  if (sa.imageCount > 0) {
+    notes.push({
+      text: "+ image cost not measured (" + sa.imageCount + " " + (sa.imageCount === 1 ? "image" : "images") + ")",
+      title: "The export carries image URL + media type only. No byte size, dimensions, or token usage is reported, so image tokens are NOT included in this total.",
+      color: theme.text.muted,
+    });
+  }
+  var totalCostItem = { l: "Total cost", v: fmt$(t.cost), notes: notes };
   var items = [
-    { l: "Total cost", v: fmt$(t.cost) },
+    totalCostItem,
     { l: "Billed input", v: fmtT(t.promptTokens), d: fmtT(t.cached) + " cached (" + (100 * t.cacheHitRate).toFixed(0) + "%)" },
     { l: "Output", v: fmtT(t.output) },
     { l: "Cache write", v: fmtT(t.cacheWrite) },
@@ -551,6 +775,13 @@ function Kpis(props) {
             <div style={{ color: theme.text.muted, fontSize: theme.fontSize.xs, textTransform: "uppercase", letterSpacing: 0.6 }}>{k.l}</div>
             <div style={{ fontSize: theme.fontSize.xl, fontWeight: 600, color: k.warn ? theme.cost.missText : theme.text.primary, marginTop: 4, fontVariantNumeric: "tabular-nums" }}>{k.v}</div>
             {k.d && <div style={{ color: theme.semantic.success, fontSize: theme.fontSize.xs, marginTop: 2 }}>{k.d}</div>}
+            {k.notes && k.notes.map(function (n, ni) {
+              return (
+                <div key={ni} title={n.title} style={{ color: n.color, fontSize: theme.fontSize.xs, marginTop: 2, cursor: n.title ? "help" : "default", lineHeight: 1.35 }}>
+                  {n.text}
+                </div>
+              );
+            })}
           </div>
         );
       })}
@@ -599,6 +830,7 @@ function Legend() {
 export default function CostView(props) {
   var analysis = props.analysis;
   var [openRow, setOpenRow] = useState({});
+  var [showOverhead, setShowOverhead] = useState(true);
 
   if (!analysis || !analysis.prompts || !analysis.prompts.length) {
     return (
@@ -611,7 +843,7 @@ export default function CostView(props) {
   }
 
   // Pre-compute cumulative cost states (one per event in document order).
-  var cumStates = useMemo(function () { return buildCumStates(analysis.prompts); }, [analysis]);
+  var cumStates = useMemo(function () { return buildCumStates(analysis.prompts, showOverhead); }, [analysis, showOverhead]);
   var maxCost = cumStates.length
     ? cumStates[cumStates.length - 1].fresh + cumStates[cumStates.length - 1].cached + cumStates[cumStates.length - 1].cwrite + cumStates[cumStates.length - 1].output
     : 0.0001;
@@ -621,8 +853,53 @@ export default function CostView(props) {
   });
   var maxCtx = Math.max.apply(null, allLLM.map(function (e) { return e.promptTokens + (e.output || 0); }).concat([1]));
 
+  // Sum estimated subagent cost across the session. Estimates only apply to
+  // runSubagent calls when we know the subagent's model; others are skipped
+  // so the number stays honest.
+  // Also sum overhead-call cost (already included in totals) and count
+  // images (not measured at all -- export carries no token usage for them).
+  var subagentEst = useMemo(function () {
+    var saCount = 0, saCost = 0;
+    var ohCount = 0, ohCost = 0;
+    var imgCount = 0;
+    analysis.prompts.forEach(function (p) {
+      p.events.forEach(function (e) {
+        if (e.kind === "tool" && e.subagent) {
+          saCount += 1;
+          if (e.subagent.modelName && hasModelPricing(e.subagent.modelName)) {
+            saCost += estimateCost({
+              inputTokens: e.subagent.promptTokensEst || 0,
+              outputTokens: e.resultTokens || 0,
+              cacheRead: 0, cacheWrite: 0,
+            }, e.subagent.modelName);
+          }
+        } else if (e.kind === "llm") {
+          if (e.category === "overhead") {
+            ohCount += 1;
+            ohCost += e.cost || 0;
+          }
+          if (e.newImages && e.newImages.length > 0) {
+            imgCount += e.newImages.length;
+          }
+        }
+      });
+    });
+    return { count: saCount, cost: saCost, overheadCount: ohCount, overheadCost: ohCost, imageCount: imgCount };
+  }, [analysis]);
+
   var rowKey = function (pi, ei) { return pi + ":" + ei; };
   var toggle = function (pi, ei) { var k = rowKey(pi, ei); setOpenRow(Object.assign({}, openRow, { [k]: !openRow[k] })); };
+
+  // Count overhead calls across the whole session for the toolbar label.
+  var overheadCount = 0, overheadCost = 0;
+  analysis.prompts.forEach(function (p) {
+    p.events.forEach(function (e) {
+      if (e.kind === "llm" && e.category === "overhead") {
+        overheadCount += 1;
+        overheadCost += e.cost || 0;
+      }
+    });
+  });
 
   var globalEventIdx = 0;
 
@@ -636,9 +913,37 @@ export default function CostView(props) {
         Three different lenses on "input": context size, growth, and billing.
       </div>
 
-      <Kpis totals={analysis.totals} />
+      <Kpis totals={analysis.totals} subagentEst={subagentEst} />
       <Glossary />
       <Legend />
+
+      {overheadCount > 0 && (
+        <div style={{
+          display: "flex", alignItems: "center", gap: 8, margin: "0 0 12px",
+          padding: "8px 12px", background: theme.bg.surface,
+          border: "1px solid " + theme.border.default, borderRadius: 5,
+          fontSize: theme.fontSize.sm, color: theme.text.secondary,
+        }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              checked={showOverhead}
+              onChange={function (e) { setShowOverhead(e.target.checked); }}
+              style={{ cursor: "pointer" }}
+            />
+            <span>
+              Show overhead LLM calls
+              <span style={{ color: theme.text.muted, marginLeft: 6 }}>
+                ({overheadCount} {overheadCount === 1 ? "call" : "calls"} ·{" "}
+                {fmt$(overheadCost)} · e.g. <code>title</code>, <code>promptCategorization</code>)
+              </span>
+            </span>
+          </label>
+          <span style={{ marginLeft: "auto", color: theme.text.muted, fontSize: theme.fontSize.xs }}>
+            Totals always include all calls.
+          </span>
+        </div>
+      )}
 
       <div style={{
         display: "grid",
@@ -649,9 +954,31 @@ export default function CostView(props) {
         <div style={Object.assign({}, colHeadStyle, { borderLeft: "1px solid " + theme.border.default })}>Cumulative cost so far → max {fmt$(maxCost)}</div>
         <div style={Object.assign({}, colHeadStyle, { borderLeft: "1px solid " + theme.border.default })}>Context window for this call → max {fmtT(maxCtx)} tok</div>
 
-        {analysis.prompts.map(function (p, pi) {
+        {(function () {
+          var visiblePromptOrdinal = 0;
+          return analysis.prompts.map(function (p, pi) {
           var cachedPct = 100 * p.cacheHitRate;
           var pa = p.prompt;
+          // When hiding overhead calls, prompts whose only LLM activity is
+          // overhead (e.g. background `title` / `promptCategorization` calls)
+          // become empty. Skip rendering them entirely, but advance the
+          // cumulative-state cursor so other prompts stay aligned.
+          if (!showOverhead) {
+            var visible = 0;
+            p.events.forEach(function (e) {
+              if (e.kind === "llm") {
+                if (e.category !== "overhead") visible += 1;
+              } else {
+                visible += 1;
+              }
+            });
+            if (visible === 0) {
+              globalEventIdx += p.events.length;
+              return null;
+            }
+          }
+          visiblePromptOrdinal += 1;
+          var displayOrdinal = visiblePromptOrdinal;
           return (
             <React.Fragment key={pi}>
               {/* Prompt header spans all 3 columns */}
@@ -667,7 +994,7 @@ export default function CostView(props) {
                 alignItems: "center",
               }}>
                 <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, textAlign: "center" }}>
-                  <span style={{ fontSize: theme.fontSize.xxl, color: theme.text.primary, fontWeight: 700, display: "block", lineHeight: 1 }}>{pi + 1}</span>
+                  <span style={{ fontSize: theme.fontSize.xxl, color: theme.text.primary, fontWeight: 700, display: "block", lineHeight: 1 }}>{displayOrdinal}</span>
                   prompt
                 </div>
                 <div>
@@ -695,24 +1022,67 @@ export default function CostView(props) {
                 var open = !!openRow[k];
                 var cumState = cumStates[globalEventIdx];
                 globalEventIdx += 1;
+                // Hide overhead LLM rows when toggle is off, but keep
+                // cumulative bars and totals correct (we already incremented
+                // globalEventIdx above).
+                if (isLLM && ev.category === "overhead" && !showOverhead) {
+                  return null;
+                }
                 var cellBg = isLLM ? theme.bg.surface : theme.bg.raised;
                 var meta = isLLM ? (
                   <div style={{ color: theme.text.muted, fontSize: theme.fontSize.xs, marginTop: 3, display: "flex", gap: 10, flexWrap: "wrap" }}>
                     <span>{(ev.model || "").split("-").slice(0, 3).join("-")}</span>
-                    <span style={{ color: theme.cost.cached }}>⊞ <b style={{ color: theme.cost.cached }}>{fmtT(ev.promptTokens)}</b> ctx</span>
-                    <span style={{ color: theme.cost.fresh }}>▲ <b style={{ color: theme.cost.fresh }}>{fmtTSigned(ev.deltaVsPrev)}</b> net new</span>
-                    <span><b style={{ color: theme.text.primary }}>{fmtT(ev.cached)}</b> cached</span>
-                    <span style={{ color: theme.cost.cwrite }}>$ <b>{fmtT(ev.newTotal)}</b> billed-new</span>
+                    <span style={{ color: theme.cost.cached, cursor: "help" }}
+                          title="Total input sent to the LLM this call (the full prompt). = cached + billed-new.">
+                      ⊞ <b style={{ color: theme.cost.cached }}>{fmtT(ev.promptTokens)}</b> ctx
+                    </span>
+                    <span style={{ color: theme.cost.fresh, cursor: "help" }}
+                          title="How much the prompt grew vs the previous call's prompt size. Independent of caching -- just measures growth. On the first call this equals the full context.">
+                      ▲ <b style={{ color: theme.cost.fresh }}>{fmtTSigned(ev.deltaVsPrev)}</b> net new
+                    </span>
+                    <span style={{ cursor: "help" }}
+                          title="Tokens served from prompt cache at ~10% of the input rate. Copilot caches at the GitHub service layer (not just per-session), so even the first call in a session can hit cache for stable prefixes like the system prompt and tool defs.">
+                      <b style={{ color: theme.text.primary }}>{fmtT(ev.cached)}</b> cached
+                    </span>
+                    <span style={{ color: theme.cost.cwrite, cursor: "help" }}
+                          title="Tokens NOT served from cache, billed at full input rate (or cache-write rate ~1.25x). = ctx - cached.">
+                      $ <b>{fmtT(ev.newTotal)}</b> billed-new
+                    </span>
                     <span style={{ color: theme.text.secondary }}>{fmt$(ev.cost)}</span>
                     {ev.unexpectedMiss && (
                       <span style={{ color: theme.cost.missText, background: theme.cost.missBg, border: "1px solid " + theme.cost.missBorder, padding: "1px 6px", borderRadius: 3 }}>⚠ unexpected cache miss</span>
                     )}
                   </div>
                 ) : (
-                  <div style={{ color: theme.text.muted, fontSize: theme.fontSize.xs, marginTop: 3, display: "flex", gap: 10 }}>
-                    <span>tool call</span>
-                    {ev.resultTokens > 0 && <span>→ <b style={{ color: theme.text.primary }}>{fmtT(ev.resultTokens)}</b> tok of result</span>}
-                  </div>
+                  (function () {
+                    if (ev.subagent) {
+                      var sa = ev.subagent;
+                      var inputTok = sa.promptTokensEst || 0;
+                      var outputTok = ev.resultTokens || 0;
+                      var costEst = (sa.modelName && hasModelPricing(sa.modelName))
+                        ? estimateCost({ inputTokens: inputTok, outputTokens: outputTok, cacheRead: 0, cacheWrite: 0 }, sa.modelName)
+                        : null;
+                      return (
+                        <div style={{ color: theme.text.muted, fontSize: theme.fontSize.xs, marginTop: 3, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "baseline" }}>
+                          <span>subagent</span>
+                          {sa.modelName && <span style={{ color: theme.text.secondary }}>{sa.modelName}</span>}
+                          <span title="Estimated from args.prompt length (~4 chars/token); the export does not include subagent token usage">
+                            ▶ <b style={{ color: theme.cost.fresh }}>~{fmtT(inputTok)}</b> in
+                          </span>
+                          <span>◀ <b style={{ color: theme.cost.ctxHistory }}>{fmtT(outputTok)}</b> out</span>
+                          {costEst != null
+                            ? <span style={{ color: theme.text.secondary }} title="Estimated cost based on input/output token estimates and the subagent model price; not reported by VS Code">~{fmt$(costEst)}</span>
+                            : <span style={{ color: theme.text.ghost, fontStyle: "italic" }} title="Subagent cost is not reported in the Copilot Chat export">cost n/a</span>}
+                        </div>
+                      );
+                    }
+                    return (
+                      <div style={{ color: theme.text.muted, fontSize: theme.fontSize.xs, marginTop: 3, display: "flex", gap: 10 }}>
+                        <span>tool call</span>
+                        {ev.resultTokens > 0 && <span>→ <b style={{ color: theme.text.primary }}>{fmtT(ev.resultTokens)}</b> tok of result</span>}
+                      </div>
+                    );
+                  })()
                 );
 
                 return (
@@ -730,9 +1100,24 @@ export default function CostView(props) {
                           background: isLLM ? theme.cost.cached : theme.cost.ctxHistory,
                         }}>{isLLM ? "L" : "T"}</div>
                         <div>
-                          <div style={{ color: theme.text.primary, fontSize: theme.fontSize.base, fontWeight: 500, lineHeight: 1.4 }}>
-                            {isLLM ? (ev.model ? "panel/" + (ev.model.indexOf("claude") >= 0 ? "editAgent" : "request") : "request") : ev.name}
-                            {ev.argsSummary && <span style={{ color: theme.text.muted, fontWeight: 400, marginLeft: 6 }}>{ev.argsSummary}</span>}
+                          <div style={{ color: theme.text.primary, fontSize: theme.fontSize.base, fontWeight: 500, lineHeight: 1.4, display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap" }}>
+                            <span title={isLLM ? ev.name : undefined}>{isLLM ? friendlyCallName(ev.name) : ev.name}</span>
+                            {isLLM && ev.name && friendlyCallName(ev.name) !== ev.name && (
+                              <span style={{ color: theme.text.ghost, fontWeight: 400, fontSize: theme.fontSize.xs, fontFamily: theme.font.mono }}>
+                                {ev.name}
+                              </span>
+                            )}
+                            {isLLM && ev.category === "overhead" && (
+                              <span style={{
+                                fontSize: theme.fontSize.xs, fontWeight: 600, letterSpacing: 0.4,
+                                textTransform: "uppercase", padding: "1px 6px", borderRadius: 3,
+                                background: theme.bg.raised, color: theme.text.muted,
+                                border: "1px solid " + theme.border.subtle,
+                              }} title="UI/telemetry call, not the user-facing chat turn">overhead</span>
+                            )}
+                            {ev.subagent
+                              ? (ev.subagent.description && <span style={{ color: theme.text.secondary, fontWeight: 400, marginLeft: 4 }}>· {ev.subagent.description}</span>)
+                              : (ev.argsSummary && <span style={{ color: theme.text.muted, fontWeight: 400 }}>{ev.argsSummary}</span>)}
                           </div>
                           {meta}
                         </div>
@@ -752,7 +1137,8 @@ export default function CostView(props) {
               })}
             </React.Fragment>
           );
-        })}
+          });
+        })()}
       </div>
     </div>
     </div>
