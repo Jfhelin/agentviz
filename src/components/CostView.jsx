@@ -485,7 +485,9 @@ function LLMDetail(props) {
           <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 5 }}>▶ Input (context window)</div>
           <div style={{ fontSize: theme.fontSize.lg, color: theme.cost.cached, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{fmtT(ev.promptTokens)} tok</div>
           <div style={{ fontSize: theme.fontSize.xs, color: theme.text.secondary, marginTop: 3, fontVariantNumeric: "tabular-nums" }}>
-            {hasPx ? fmt$(inputCost) + " input cost" : "cache + new combined"}
+            {hasPx
+              ? fmt$(cachedCost) + " cached + " + fmt$(newBillCost) + " new = " + fmt$(inputCost)
+              : "cache + new combined"}
           </div>
         </div>
         <div style={{ background: theme.bg.surface, border: "1px solid " + theme.cost.okBorder, borderRadius: 5, padding: "10px 12px" }}
@@ -499,21 +501,21 @@ function LLMDetail(props) {
           </div>
         </div>
         <div style={{ background: theme.bg.surface, border: "1px solid " + theme.cost.recommitBorder, borderRadius: 5, padding: "10px 12px" }}
-             title="Tokens the API treated as new this call: fresh content plus any cache-write tokens (re-committed at premium rate).">
+             title="Tokens the API treated as new this call: fresh content plus any cache-write tokens (re-committed at premium rate). The cost shown is a SUBSET of input cost (already counted there).">
           <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 5 }}>$ Billed as new (full + premium)</div>
           <div style={{ fontSize: theme.fontSize.lg, color: theme.cost.cwrite, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{fmtT(ev.newTotal)} tok</div>
           <div style={{ fontSize: theme.fontSize.xs, color: theme.text.secondary, marginTop: 3, fontVariantNumeric: "tabular-nums" }}>
             {hasPx
-              ? fmt$(newBillCost) + " billed-new cost" + (ev.recommit > 100 ? " · incl. " + fmtT(ev.recommit) + " recommit" : "")
+              ? fmt$(newBillCost) + " (subset of input)" + (ev.recommit > 100 ? " · incl. " + fmtT(ev.recommit) + " recommit" : "")
               : (ev.recommit > 100 ? "incl. " + fmtT(ev.recommit) + " cache recommit" : "minimal recommit")}
           </div>
         </div>
         <div style={{ background: theme.bg.surface, border: "1px solid " + theme.border.default, borderRadius: 5, padding: "10px 12px" }}
-             title={hasPx ? "Output is billed at the model's output rate (typically ~5x input)." : "Pricing unknown for this model"}>
+             title={hasPx ? "Output is billed at the model's output rate (typically ~5x input). Input + Output = the row total." : "Pricing unknown for this model"}>
           <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 5 }}>◀ Output (model wrote)</div>
           <div style={{ fontSize: theme.fontSize.lg, color: theme.text.primary, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{fmtT(ev.output)} tok</div>
           <div style={{ fontSize: theme.fontSize.xs, color: theme.text.secondary, marginTop: 3, fontVariantNumeric: "tabular-nums" }}>
-            {hasPx ? fmt$(outputCost) + " output cost" : "this call: " + fmt$(ev.cost) + " total"}
+            {hasPx ? fmt$(outputCost) + " · input + output = " + fmt$(inputCost + outputCost) : "this call: " + fmt$(ev.cost) + " total"}
           </div>
         </div>
           </>
