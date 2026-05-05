@@ -111,6 +111,69 @@ interface RawMessage {
   // the message is replayed as history on the next call -- we MUST count them.
   toolCalls?: unknown;
   tool_calls?: unknown;
+  // Set on tool_result (role=3) messages, references the originating tool call
+  // by id. Lets us look up the tool name and primary argument so the UI can
+  // show "readFile: NavBar.tsx" instead of "result 1".
+  toolCallId?: string;
+  tool_call_id?: string;
+}
+
+interface ToolCallInfo { name: string; args: Record<string, unknown> | null; argsRaw: string }
+
+/** Pull a short, human-meaningful label out of a tool call's name + args.
+ *  Falls back gracefully when the tool is unknown or the args don't have a
+ *  recognized "primary" field -- never throws. */
+function toolResultLabel(info: ToolCallInfo | undefined, fallbackIdx: number): string {
+  if (!info) return "result " + (fallbackIdx + 1);
+  const name = info.name || "tool";
+  const args = info.args || {};
+  const pathLike = (args.filePath ?? args.path ?? args.file ?? args.filepath) as string | undefined;
+  if (typeof pathLike === "string" && pathLike.length > 0) {
+    const parts = pathLike.split(/[\\/]/);
+    const base = parts[parts.length - 1] || pathLike;
+    const short = (parts.length >= 2 && (base === "index.ts" || base === "index.tsx" || base === "index.js"))
+      ? parts.slice(-2).join("/")
+      : base;
+    return name + ": " + short;
+  }
+  const cmd = args.command as string | undefined;
+  if (typeof cmd === "string" && cmd.length > 0) {
+    return name + ": " + (cmd.length > 60 ? cmd.slice(0, 60) + "…" : cmd);
+  }
+  const query = (args.query ?? args.pattern ?? args.searchText) as string | undefined;
+  if (typeof query === "string" && query.length > 0) {
+    return name + ': "' + (query.length > 60 ? query.slice(0, 60) + "…" : query) + '"';
+  }
+  const url = args.url as string | undefined;
+  if (typeof url === "string" && url.length > 0) {
+    try { const u = new URL(url); return name + ": " + u.hostname + u.pathname; }
+    catch { return name + ": " + url.slice(0, 60); }
+  }
+  const desc = (args.description ?? args.title ?? args.name) as string | undefined;
+  if (typeof desc === "string" && desc.length > 0) {
+    return name + ": " + (desc.length > 60 ? desc.slice(0, 60) + "…" : desc);
+  }
+  return name;
+}
+
+function buildToolCallMap(messages: RawMessage[]): Map<string, ToolCallInfo> {
+  const map = new Map<string, ToolCallInfo>();
+  for (const m of messages) {
+    if (m.role !== 2) continue;
+    const tcs = (m.toolCalls ?? m.tool_calls) as unknown;
+    if (!Array.isArray(tcs)) continue;
+    for (const tc of tcs) {
+      if (!tc || typeof tc !== "object") continue;
+      const id = (tc as { id?: string }).id;
+      const fn = (tc as { function?: { name?: string; arguments?: string } }).function;
+      if (typeof id !== "string" || !fn) continue;
+      const argsRaw = typeof fn.arguments === "string" ? fn.arguments : "";
+      let args: Record<string, unknown> | null = null;
+      if (argsRaw) { try { args = JSON.parse(argsRaw); } catch { args = null; } }
+      map.set(id, { name: fn.name || "tool", args, argsRaw });
+    }
+  }
+  return map;
 }
 
 interface RawContentPart {
@@ -180,7 +243,7 @@ interface ClassifiedCall {
   systemPreview: string;
   currentText: string;
   historyMsgs: { role: "user" | "assistant"; chars: number; tokens: number; preview: string }[];
-  toolResultMsgs: { chars: number; tokens: number; preview: string }[];
+  toolResultMsgs: { chars: number; tokens: number; preview: string; label: string }[];
   totalTools: number;
   toolGroups: { source: string; tools: { name: string; chars: number; tokens: number }[]; chars: number; tokens: number }[];
   /** Image attachments referenced by this call's request messages. The export
@@ -218,6 +281,7 @@ function classifyCall(log: RawLog): ClassifiedCall {
   let systemText = "", currentText = "";
   const historyMsgs: ClassifiedCall["historyMsgs"] = [];
   const toolResultMsgs: ClassifiedCall["toolResultMsgs"] = [];
+  const toolCallMap = buildToolCallMap(messages);
 
   messages.forEach((msg, idx) => {
     const text = messageText(msg);
@@ -238,7 +302,10 @@ function classifyCall(log: RawLog): ClassifiedCall {
       historyMsgs.push({ role: "assistant", chars: len, tokens: 0, preview: text.slice(0, 160) });
     } else if (msg.role === 3) {
       toolResultsChars += len;
-      toolResultMsgs.push({ chars: len, tokens: 0, preview: text.slice(0, 240) });
+      const tcId = msg.toolCallId ?? msg.tool_call_id;
+      const info = tcId ? toolCallMap.get(tcId) : undefined;
+      const label = toolResultLabel(info, toolResultMsgs.length);
+      toolResultMsgs.push({ chars: len, tokens: 0, preview: text.slice(0, 240), label });
     }
   });
 

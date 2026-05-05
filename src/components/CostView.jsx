@@ -305,9 +305,13 @@ function ToolResultList(props) {
   return (
     <div>
       {msgs.map(function (m, i) {
+        var label = m.label || ("result " + (i + 1));
         return (
-          <div key={i} style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 8, fontSize: theme.fontSize.sm, padding: "3px 0", alignItems: "baseline", borderTop: i === 0 ? "none" : "1px solid " + theme.border.subtle }}>
-            <span style={{ fontSize: theme.fontSize.xs, padding: "1px 5px", borderRadius: 9, fontWeight: 600, letterSpacing: 0.4, background: theme.cost.chipBgResult, color: theme.cost.ctxToolResults }}>result {i + 1}</span>
+          <div key={i} style={{ display: "grid", gridTemplateColumns: "minmax(0, auto) 1fr auto", gap: 8, fontSize: theme.fontSize.sm, padding: "3px 0", alignItems: "baseline", borderTop: i === 0 ? "none" : "1px solid " + theme.border.subtle }}>
+            <span
+              title={label}
+              style={{ fontSize: theme.fontSize.xs, padding: "1px 6px", borderRadius: 9, fontWeight: 600, letterSpacing: 0.2, background: theme.cost.chipBgResult, color: theme.cost.ctxToolResults, maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+            >{label}</span>
             <span style={{ color: theme.text.secondary, fontStyle: "italic", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.preview}</span>
             <span style={{ color: theme.text.primary, fontVariantNumeric: "tabular-nums", textAlign: "right" }}>{fmtT(m.tokens || 0)}</span>
           </div>
