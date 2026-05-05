@@ -1,7 +1,17 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { theme } from "../lib/theme.js";
 import { estimateCost, hasModelPricing, getModelPrice } from "../lib/pricing.js";
 import { estimateImageTokens, imageDollarCost } from "../lib/imageTokenEstimate.js";
+import usePersistentState from "../hooks/usePersistentState.js";
+
+// Display unit for $ amounts. Module-level so the dozens of fmt$ call sites
+// don't all need a context/prop. The CostView root keeps it in sync with the
+// persistent toggle via setCostUnit() in a useEffect.
+//   currency:  "$0.0123"     (USD)
+//   credits:   "1.23 cr"     (1 credit = $0.01, per GitHub Copilot AI Credits)
+var _costUnit = "credits";
+function setCostUnit(u) { _costUnit = u === "currency" ? "currency" : "credits"; }
+function isCredits() { return _costUnit === "credits"; }
 
 // Cost view uses theme.cost.* tokens (defined in src/lib/theme.js).
 // These are categorical color roles that change with light/dark mode.
@@ -60,7 +70,17 @@ function friendlyCallName(name) {
 }
 
 function fmt$(n) {
-  if (n == null || isNaN(n)) return "$0";
+  if (n == null || isNaN(n)) return isCredits() ? "0 cr" : "$0";
+  if (isCredits()) {
+    var c = n * 100; // 100 credits = $1
+    var a = Math.abs(c);
+    var sign = c < 0 ? "-" : "";
+    if (a < 0.01) return sign + a.toFixed(3) + " cr";
+    if (a < 1) return sign + a.toFixed(2) + " cr";
+    if (a < 10) return sign + a.toFixed(2) + " cr";
+    if (a < 100) return sign + a.toFixed(1) + " cr";
+    return sign + Math.round(a).toLocaleString() + " cr";
+  }
   return n < 0.01 ? "$" + n.toFixed(5) : "$" + n.toFixed(4);
 }
 function fmtT(n) {
@@ -928,6 +948,11 @@ export default function CostView(props) {
   var analysis = props.analysis;
   var [openRow, setOpenRow] = useState({});
   var [showOverhead, setShowOverhead] = useState(false);
+  var [unit, setUnit] = usePersistentState("agentviz.cost.unit", "credits");
+  // Keep the module-level fmt$ helper in sync. Use a layout-time effect so the
+  // very first render after a unit change already formats with the new unit.
+  setCostUnit(unit);
+  useEffect(function () { setCostUnit(unit); }, [unit]);
 
   if (!analysis || !analysis.prompts || !analysis.prompts.length) {
     return (
@@ -1019,6 +1044,48 @@ export default function CostView(props) {
       <Kpis totals={analysis.totals} subagentEst={subagentEst} />
       <Glossary />
       <Legend />
+
+      <div style={{
+        display: "flex", alignItems: "center", gap: 12, margin: "0 0 12px",
+        padding: "8px 12px", background: theme.bg.surface,
+        border: "1px solid " + theme.border.default, borderRadius: 5,
+        fontSize: theme.fontSize.sm, color: theme.text.secondary,
+      }}>
+        <span style={{ color: theme.text.muted }}>Show costs as:</span>
+        <div role="radiogroup" aria-label="Cost display unit" style={{
+          display: "inline-flex", border: "1px solid " + theme.border.default,
+          borderRadius: 4, overflow: "hidden",
+        }}>
+          {[
+            { id: "credits", label: "AI Credits", title: "1 credit = $0.01 (GitHub Copilot AI Credits)" },
+            { id: "currency", label: "USD ($)", title: "Raw provider $ rates from pricing.js" },
+          ].map(function (opt) {
+            var active = unit === opt.id;
+            return (
+              <button
+                key={opt.id}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                title={opt.title}
+                onClick={function () { setUnit(opt.id); }}
+                style={{
+                  padding: "4px 10px", border: "none", cursor: "pointer",
+                  background: active ? theme.cost.fresh : "transparent",
+                  color: active ? theme.bg.base : theme.text.secondary,
+                  fontFamily: theme.font.mono, fontSize: theme.fontSize.sm,
+                  fontWeight: active ? 600 : 400,
+                }}
+              >{opt.label}</button>
+            );
+          })}
+        </div>
+        <span style={{ color: theme.text.muted, fontSize: theme.fontSize.xs }}>
+          {unit === "credits"
+            ? "100 cr = $1. Persists across sessions."
+            : "Raw USD from per-token rates. Persists across sessions."}
+        </span>
+      </div>
 
       {overheadCount > 0 && (
         <div style={{
