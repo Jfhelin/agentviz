@@ -253,6 +253,8 @@ Each LLM call surfaces three lenses on "input": **CTX** (full prompt size), **&#
 
 The Cost tab only appears when the loaded session is a Copilot Chat export. Drag and drop a `copilot_all_prompts_*.json` file onto the landing screen to use it.
 
+**Format support:** Cost view depends on per-call context breakdown (system prompt, tool definitions, history, tool results, current prompt as separate token counts) plus per-call cache-read / cache-write usage. Today only the VS Code Copilot Chat export carries that data; Claude Code JSONL and Copilot CLI JSONL surface aggregate `tokenUsage` totals but not the breakdown, so the Cost tab is hidden for those formats. The plan is to lift `contextBreakdown` into the normalized event/turn schema so any future parser can light up Cost view by populating the field when the source data exists.
+
 ### Coach View
 
 AI-powered session coaching available directly from any session. The coach reads your autonomy metrics, project config (`.github/copilot-instructions.md`, MCP servers, skills), and session patterns to produce evidence-backed recommendations for prompts, tooling, and workflow. Click **Analyze** to run, then accept or ignore each draft recommendation. Requires the CLI server -- run via `node bin/agentviz.js` or the MCP tool.
