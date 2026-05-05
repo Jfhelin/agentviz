@@ -148,3 +148,66 @@ Vite proxies `/api/*` to the backend automatically.
 - Multi-agent hierarchy (parent/child agents, nested tracks)
 - Fork-from-any-point replay
 - Publish to npm (`npx agentviz`)
+<!-- FORK-LOCAL START: do NOT cherry-pick into PR branches or upstream -->
+
+## Fork context (Jfhelin/agentviz)
+
+This checkout is a personal fork of `jayparikh/agentviz`. Upstream is the
+authoritative source; we contribute back via pull requests.
+
+- **Fork:** `Jfhelin/agentviz`
+- **Upstream:** `jayparikh/agentviz` (public, MIT)
+- **Local path:** `/Users/jfhelin/Code/GitHub/jfhelin/agentviz-fork`
+- **Remote setup:** `origin` -> fork, `upstream` -> jayparikh
+
+### Active feature: Cost view
+
+Branch `jfhelin/copilot-token-spend-tracking` adds a Cost view that
+visualizes token spend and context buildup for VS Code Copilot Chat
+exports (`copilot_all_prompts_*.json`). Current state:
+
+- Three commits, rebased onto `upstream/main`.
+- `npm run build`, `npx tsc --noEmit`, and `npm test` (677/677) pass.
+- Pushed to `origin`. PR to upstream NOT yet opened.
+- Prebuilt tarball published as GitHub Release `v0.7.0-cost-preview`
+  for colleagues to install with:
+  `npm install -g https://github.com/Jfhelin/agentviz/releases/download/v0.7.0-cost-preview/agentviz-0.7.0.tgz`
+
+Key files for the feature:
+- `src/components/CostView.jsx` -- view (uses `theme.cost.*` tokens)
+- `src/lib/cacheAnalysis.ts` -- per-call cache + cost analysis
+- `src/lib/copilotChatExportParser.ts` -- new parser, auto-detected
+- `src/__tests__/cacheAnalysis.test.ts` -- 16 unit tests
+- `src/__tests__/copilotChatExport.test.ts` -- parser tests
+- README.md (Cost View section), CLAUDE.md (file tree), `docs/ui-ux-style-guide.md` (Cost Colors), `docs/color-palette.html` (Cost View Palette)
+
+### Open architectural debt to track
+
+- Cost view depends on per-call context breakdown that today only the
+  VS Code Copilot Chat export carries. Plan: lift `contextBreakdown`
+  into the normalized event/turn schema so other parsers (Claude Code
+  JSONL, Copilot CLI JSONL) can populate it when the upstream format
+  exposes the data.
+- Compare view does not yet have a Cost tab.
+- Coach does not yet read `cacheAnalysis` findings.
+
+### Local-only fixture (gitignored)
+
+Real Copilot Chat export used during development:
+`/Users/jfhelin/.copilot/workspaces/<workspace-id>/attachments/copilot_all_prompts_2026-04-29T14-41-16.json`
+
+Do not commit it. The synthetic fixture in
+`src/__tests__/fixtures/copilot-chat-export-minimal.json` is what tests
+run against.
+
+### Working rules for this fork
+
+- Never commit fork-local sections (anything between FORK-LOCAL markers)
+  into the PR branch. They live on `main` of this fork only.
+- Before opening or updating the upstream PR, rebase the feature branch
+  onto `upstream/main`, run `npm run build && npx tsc --noEmit && npm test`,
+  then push `--force-with-lease`.
+- When syncing `main` from upstream: `git pull upstream main && git push origin main`.
+  This file should remain (upstream does not touch this section).
+
+<!-- FORK-LOCAL END -->
