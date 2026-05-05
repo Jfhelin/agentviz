@@ -37,6 +37,9 @@ interface PromptLike {
   promptTokens: number;
   llmCount: number;
   events: EventLike[];
+  /** User-facing prompt text (max ~200 chars) extracted from the export.
+   * For overhead calls this will be e.g. "title" / "categorization". */
+  label?: string;
 }
 interface EventLike {
   name: string;
@@ -50,6 +53,11 @@ interface EventLike {
   components?: Partial<Record<Bucket, number>>;
   responsePreview?: string;
   currentText?: string;
+  /** "primary" = real user-facing chat call. "overhead" = UI/telemetry side
+   * call (e.g. "title", "promptCategorization") that should be filtered out
+   * when summarizing per-turn user prompts. */
+  category?: "primary" | "overhead";
+  kind?: "llm" | "tool";
 }
 interface TotalsLike {
   promptTokens: number;
@@ -82,6 +90,9 @@ export interface RunSummary {
   primaryModel: string | null;               // model of most expensive call
   finalAnswer: string;                       // final assistant response across the whole run
   userPromptText: string;                    // last user prompt text (best-effort)
+  /** Per-user-prompt summary (skipping overhead prompts like "title" /
+   * "promptCategorization"). One entry per user-facing chat turn, in order. */
+  userPrompts: Array<{ label: string; finalAnswer: string }>;
 }
 
 export interface KpiPair {
@@ -136,6 +147,11 @@ export interface CostComparison {
   finalAnswerB: string;
   userTextA: string;
   userTextB: string;
+  /** Per-user-prompt detail per side (overhead prompts already filtered).
+   * Useful for runs with multiple chat turns where the I/O panel needs to
+   * show each prompt + response pair instead of just the last one. */
+  userPromptsA: Array<{ label: string; finalAnswer: string }>;
+  userPromptsB: Array<{ label: string; finalAnswer: string }>;
   /** Same number of LLM calls AND same call-name sequence. */
   sameShape: boolean;
   /** Headline verdict and tone. */
@@ -153,7 +169,7 @@ function summarizeRun(ca: CostAnalysisLike | null | undefined): RunSummary {
     fixedCost: 0, variableCost: 0, fixedShare: 0,
     componentTokens: zeroBuckets(), componentShare: zeroBuckets(),
     models: [], primaryModel: null,
-    finalAnswer: "", userPromptText: "",
+    finalAnswer: "", userPromptText: "", userPrompts: [],
   };
   if (!ca || !Array.isArray(ca.prompts) || ca.prompts.length === 0) return empty;
 
@@ -216,27 +232,30 @@ function summarizeRun(ca: CostAnalysisLike | null | undefined): RunSummary {
   const cacheDenom = totalCached + totalFresh + totalCacheWrite;
   const cacheHitRate = cacheDenom > 0 ? totalCached / cacheDenom : 0;
 
-  // Final answer = response preview of the LAST event of the LAST prompt
-  const lastPrompt = ca.prompts[ca.prompts.length - 1];
-  const lastEv = lastPrompt && lastPrompt.events && lastPrompt.events.length
-    ? lastPrompt.events[lastPrompt.events.length - 1]
-    : null;
-  const finalAnswer = (lastEv && lastEv.responsePreview) || "";
-
-  // Best-effort user prompt text: search the last prompt's events' currentText
-  // for "User message:\n" marker, falling back to last 200 chars of currentText.
-  let userPromptText = "";
-  if (lastPrompt && lastPrompt.events) {
-    for (let i = lastPrompt.events.length - 1; i >= 0; i--) {
-      const ct = lastPrompt.events[i].currentText || "";
-      const marker = "User message:\n";
-      const idx = ct.lastIndexOf(marker);
-      if (idx >= 0) {
-        userPromptText = ct.slice(idx + marker.length).trim();
-        break;
-      }
-    }
+  // Final answer = response preview of the LAST event of the LAST non-overhead
+  // prompt. Falls back to the very last event if every prompt is overhead.
+  function isOverheadPrompt(p: PromptLike): boolean {
+    const llmEvents = p.events.filter((e) => e.kind === "llm");
+    if (llmEvents.length === 0) return false;
+    return llmEvents.every((e) => e.category === "overhead");
   }
+  const userFacingPrompts = ca.prompts.filter((p) => !isOverheadPrompt(p));
+  const userPrompts: Array<{ label: string; finalAnswer: string }> = userFacingPrompts.map((p) => {
+    const lastE = p.events.length ? p.events[p.events.length - 1] : null;
+    return {
+      label: (p.label || "").trim(),
+      finalAnswer: (lastE && (lastE as any).responsePreview) || "",
+    };
+  });
+  const lastUserPrompt = userPrompts.length ? userPrompts[userPrompts.length - 1] : null;
+  const fallbackLast = ca.prompts[ca.prompts.length - 1];
+  const fallbackLastEv = fallbackLast && fallbackLast.events.length
+    ? fallbackLast.events[fallbackLast.events.length - 1]
+    : null;
+  const finalAnswer = lastUserPrompt
+    ? lastUserPrompt.finalAnswer
+    : ((fallbackLastEv && (fallbackLastEv as any).responsePreview) || "");
+  const userPromptText = lastUserPrompt ? lastUserPrompt.label : "";
 
   return {
     totalCost, totalInput, totalOutput, totalCached, totalFresh, totalCacheWrite,
@@ -246,7 +265,7 @@ function summarizeRun(ca: CostAnalysisLike | null | undefined): RunSummary {
     componentTokens: compTok, componentShare: compShare,
     models: Array.from(modelSet),
     primaryModel: mostExpensiveCall ? mostExpensiveCall.model : null,
-    finalAnswer, userPromptText,
+    finalAnswer, userPromptText, userPrompts,
   };
 }
 
@@ -427,6 +446,8 @@ export function compareRunsCost(
     finalAnswerB: b.finalAnswer,
     userTextA: a.userPromptText,
     userTextB: b.userPromptText,
+    userPromptsA: a.userPrompts,
+    userPromptsB: b.userPrompts,
     sameShape,
     verdict: buildVerdict(a, b, equivalent),
     recommendations: buildRecommendations(a, b, equivalent),

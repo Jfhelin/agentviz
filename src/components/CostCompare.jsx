@@ -333,22 +333,29 @@ function CallTable({ pairs }) {
   );
 }
 
-function IOSideBySide({ userA, userB, ansA, ansB, equivalent, nameA, nameB }) {
-  function side(name, color, prompt, answer) {
+function IOSideBySide({ userA, userB, ansA, ansB, equivalent, nameA, nameB, promptsA, promptsB }) {
+  const listA = promptsA && promptsA.length ? promptsA : [{ label: userA, finalAnswer: ansA }];
+  const listB = promptsB && promptsB.length ? promptsB : [{ label: userB, finalAnswer: ansB }];
+  const rowCount = Math.max(listA.length, listB.length);
+  const isMulti = rowCount > 1;
+
+  function pane(name, color, prompt, answer) {
     return (
       <div style={{
         background: theme.bg.raised, border: "1px solid " + theme.border.default,
         borderLeft: "3px solid " + color,
         borderRadius: theme.radius.md, padding: "12px 14px",
       }}>
-        <div style={{ fontSize: 10, color: theme.text.dim, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>{name}</div>
+        {name && (
+          <div style={{ fontSize: 10, color: theme.text.dim, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>{name}</div>
+        )}
         <div style={{ fontSize: theme.fontSize.xs, color: theme.text.secondary, marginBottom: 4 }}>You asked:</div>
         <div style={{
           background: theme.bg.base, padding: "8px 10px", borderRadius: theme.radius.sm,
           fontSize: theme.fontSize.sm, color: theme.text.primary, marginBottom: 8,
           maxHeight: 120, overflow: "auto", lineHeight: 1.5,
         }}>
-          {prompt || <em style={{ color: theme.text.dim }}>(no user prompt extracted)</em>}
+          {prompt || <em style={{ color: theme.text.dim }}>(no user-facing prompt in this run)</em>}
         </div>
         <div style={{ fontSize: theme.fontSize.xs, color: theme.text.secondary, marginBottom: 4 }}>Model answered:</div>
         <div style={{
@@ -363,26 +370,80 @@ function IOSideBySide({ userA, userB, ansA, ansB, equivalent, nameA, nameB }) {
       </div>
     );
   }
+
+  function rowEquivalent(a, b) {
+    const na = (a || "").trim().toLowerCase().replace(/\s+/g, " ");
+    const nb = (b || "").trim().toLowerCase().replace(/\s+/g, " ");
+    return na.length > 0 && nb.length > 0 && na === nb;
+  }
+
   return (
     <div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-        {side(nameA, COLOR_A, userA, ansA)}
-        {side(nameB, COLOR_B, userB, ansB)}
-      </div>
-      <div style={{
-        marginTop: 10, padding: "8px 12px",
-        background: equivalent ? alpha(theme.semantic.success, 0.08) : alpha(theme.semantic.warning, 0.08),
-        border: "1px solid " + alpha(equivalent ? theme.semantic.success : theme.semantic.warning, 0.30),
-        borderRadius: theme.radius.sm, color: equivalent ? theme.semantic.success : theme.semantic.warning,
-        fontSize: theme.fontSize.xs, display: "flex", alignItems: "center", gap: 8,
-      }}>
-        <span style={{ fontSize: 14 }}>{equivalent ? "✓" : "⚠"}</span>
-        <span>
-          {equivalent
-            ? "Answer equivalence detected. Both runs produced byte-identical final responses (after normalization)."
-            : "Final responses differ. Review the answers above before drawing conclusions about cost differences."}
-        </span>
-      </div>
+      {Array.from({ length: rowCount }).map((_, i) => {
+        const a = listA[i];
+        const b = listB[i];
+        const promptA = a ? a.label : "";
+        const promptB = b ? b.label : "";
+        const answerA = a ? a.finalAnswer : "";
+        const answerB = b ? b.finalAnswer : "";
+        const eq = a && b ? rowEquivalent(answerA, answerB) : false;
+        const showRowEq = isMulti && a && b;
+        return (
+          <div key={i} style={{ marginBottom: i < rowCount - 1 ? 16 : 0 }}>
+            {isMulti && (
+              <div style={{
+                fontSize: 11, color: theme.text.muted, marginBottom: 6,
+                textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 600,
+              }}>
+                Turn {i + 1}
+                {showRowEq && (
+                  <span style={{
+                    marginLeft: 8, padding: "1px 6px", borderRadius: 999,
+                    background: alpha(eq ? theme.semantic.success : theme.semantic.warning, 0.12),
+                    color: eq ? theme.semantic.success : theme.semantic.warning,
+                    fontSize: 10, letterSpacing: "0.04em",
+                  }}>
+                    {eq ? "✓ same answer" : "⚠ different answer"}
+                  </span>
+                )}
+              </div>
+            )}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              {a ? pane(i === 0 ? nameA : null, COLOR_A, promptA, answerA)
+                 : pane(i === 0 ? nameA : null, COLOR_A, "", "")}
+              {b ? pane(i === 0 ? nameB : null, COLOR_B, promptB, answerB)
+                 : pane(i === 0 ? nameB : null, COLOR_B, "", "")}
+            </div>
+          </div>
+        );
+      })}
+      {!isMulti && (
+        <div style={{
+          marginTop: 10, padding: "8px 12px",
+          background: equivalent ? alpha(theme.semantic.success, 0.08) : alpha(theme.semantic.warning, 0.08),
+          border: "1px solid " + alpha(equivalent ? theme.semantic.success : theme.semantic.warning, 0.30),
+          borderRadius: theme.radius.sm, color: equivalent ? theme.semantic.success : theme.semantic.warning,
+          fontSize: theme.fontSize.xs, display: "flex", alignItems: "center", gap: 8,
+        }}>
+          <span style={{ fontSize: 14 }}>{equivalent ? "✓" : "⚠"}</span>
+          <span>
+            {equivalent
+              ? "Answer equivalence detected. Both runs produced byte-identical final responses (after normalization)."
+              : "Final responses differ. Review the answers above before drawing conclusions about cost differences."}
+          </span>
+        </div>
+      )}
+      {isMulti && listA.length !== listB.length && (
+        <div style={{
+          marginTop: 10, padding: "8px 12px",
+          background: alpha(theme.semantic.warning, 0.08),
+          border: "1px solid " + alpha(theme.semantic.warning, 0.30),
+          borderRadius: theme.radius.sm, color: theme.semantic.warning,
+          fontSize: theme.fontSize.xs,
+        }}>
+          ⚠ The two runs have different turn counts ({listA.length} vs {listB.length}). Unpaired turns are shown blank on the missing side.
+        </div>
+      )}
     </div>
   );
 }
@@ -485,6 +546,7 @@ export default function CostCompare({ sessionA, sessionB, fileA, fileB }) {
       <IOSideBySide
         userA={cmp.userTextA} userB={cmp.userTextB}
         ansA={cmp.finalAnswerA} ansB={cmp.finalAnswerB}
+        promptsA={cmp.userPromptsA} promptsB={cmp.userPromptsB}
         equivalent={cmp.answersEquivalent}
         nameA={nameA} nameB={nameB}
       />

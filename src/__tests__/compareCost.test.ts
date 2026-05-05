@@ -64,6 +64,43 @@ describe("compareRunsCost (synthetic minimal)", () => {
     const r = compareRunsCost(mk(0.0410), mk(0.0411));
     expect(r!.verdict.kind).toBe("noise");
   });
+
+  it("filters overhead prompts and exposes per-turn user prompts", () => {
+    // Two prompts: one overhead-only (e.g. 'title' / 'promptCategorization')
+    // and one real user-facing turn. compareRunsCost should expose only the
+    // real turn in userPrompts, and the convenience userPromptText/finalAnswer
+    // should reflect the real turn's last LLM call.
+    const mk = (label: string) => ({
+      prompts: [
+        {
+          index: 0, label: "title", cost: 0.001, output: 2, cached: 0, fresh: 50,
+          cacheWrite: 0, promptTokens: 50, llmCount: 1,
+          events: [{
+            kind: "llm", category: "overhead", name: "title", model: "m",
+            cost: 0.001, output: 2, cached: 0, fresh: 50, cacheWrite: 0,
+            promptTokens: 50, components: { system: 50 },
+            responsePreview: "Generated title text",
+          }],
+        },
+        {
+          index: 1, label, cost: 0.04, output: 5, cached: 0, fresh: 200,
+          cacheWrite: 0, promptTokens: 200, llmCount: 1,
+          events: [{
+            kind: "llm", category: "primary", name: "panel/editAgent", model: "m",
+            cost: 0.04, output: 5, cached: 0, fresh: 200, cacheWrite: 0,
+            promptTokens: 200, components: { system: 200 },
+            responsePreview: "Paris.",
+          }],
+        },
+      ],
+      totals: { promptTokens: 250, output: 7, cached: 0, fresh: 250, cacheWrite: 0, cost: 0.041, llmCalls: 2, toolCalls: 0, cacheHitRate: 0 },
+    });
+    const r = compareRunsCost(mk("Capitol France?"), mk("Capitol France?"))!;
+    // Only the user-facing prompt is exposed; the "title" overhead is filtered.
+    expect(r.userPromptsA).toEqual([{ label: "Capitol France?", finalAnswer: "Paris." }]);
+    expect(r.userTextA).toBe("Capitol France?");
+    expect(r.finalAnswerA).toBe("Paris.");
+  });
 });
 
 const describeReal = haveFixtures ? describe : describe.skip;
@@ -83,6 +120,15 @@ describeReal("compareRunsCost (real fixtures: caveman vs polite)", () => {
     expect(r.answersEquivalent).toBe(true);
     expect(r.finalAnswerA).toBe("Paris.");
     expect(r.finalAnswerB).toBe("Paris.");
+    // Bug fix: userPromptText should now be populated from prompt.label
+    // (previously it searched for a non-existent "User message:\n" marker
+    // and was always empty).
+    expect(r.userTextA).toBe("Capitol France?");
+    expect(r.userTextB.toLowerCase()).toContain("capit");
+    expect(r.userPromptsA.length).toBe(1);
+    expect(r.userPromptsB.length).toBe(1);
+    expect(r.userPromptsA[0].label).toBe("Capitol France?");
+    expect(r.userPromptsA[0].finalAnswer).toBe("Paris.");
     expect(r.verdict.kind).toBe("noise");
     // Fixed share should be very high (>80%) for these tiny questions
     expect(r.a.fixedShare).toBeGreaterThan(0.80);
