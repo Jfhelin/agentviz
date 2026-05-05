@@ -100,6 +100,28 @@ Balanced luminance so no track visually dominates another.
 | `theme.track.output` | `#10d97a` | `#0ea86b` | Output/results |
 | `theme.track.agent` | `#06b6d4` | `#0891b2` | Agent/subagent events |
 
+### Cost Colors
+
+Used by `CostView` for token-cost categorical data and the cache-miss / recommit / model-switch callouts. These are mode-aware tokens defined in `theme.cost.*`. Do not introduce new hex literals for cost categories: extend `theme.cost` and document them here instead.
+
+| Token | Dark | Light | Use |
+| --- | --- | --- | --- |
+| `theme.cost.fresh` | `#56d364` | `#0ea86b` | Cumulative cost: fresh input tokens |
+| `theme.cost.cwrite` | `#f4b340` | `#ca8a04` | Cumulative cost: cache writes |
+| `theme.cost.cached` | `#3DA9D4` | `#1e88c4` | Cumulative cost: cached reads |
+| `theme.cost.output` | `#a371f7` | `#7c5ce6` | Cumulative cost: output tokens |
+| `theme.cost.ctxSystem` | `#7A8B9E` | `#5a6b80` | Per-call context: system prompt |
+| `theme.cost.ctxToolDefs` | `#4A5568` | `#2d3748` | Per-call context: tool definitions |
+| `theme.cost.ctxHistory` | `#E6A847` | `#b87a1a` | Per-call context: conversation history |
+| `theme.cost.ctxToolResults` | `#B8642F` | `#8a4a1f` | Per-call context: tool results |
+| `theme.cost.ctxCurrent` | `#3DA9D4` | `#1e88c4` | Per-call context: current prompt |
+| `theme.cost.ctxOutput` | `#2C7A99` | `#1c5f78` | Per-call context: response |
+| `theme.cost.kindMcp` / `kindExtension` / `kindBuiltin` | mode-aware | mode-aware | Tool group source chips |
+| `theme.cost.miss*` | red tints | red tints | Unexpected cache miss callouts and code chips |
+| `theme.cost.recommit*` | yellow tints | yellow tints | Cache recommit callouts |
+| `theme.cost.switch*` | blue tints | blue tints | Model-switch callouts |
+| `theme.cost.ok*` | green tints | green tints | Net-new / fresh content blocks |
+
 ### Data Visualization Scales
 
 Track colors (above) work for categorical data. For sequential/intensity data (heatmaps,

@@ -177,7 +177,7 @@ function classifyToolGroup(name: string): string {
 
 function classifyCall(log: RawLog): ClassifiedCall {
   const messages = log.requestMessages?.messages ?? [];
-  // Find the LAST user message — that's "current prompt"; earlier user
+  // Find the LAST user message -- that's "current prompt"; earlier user
   // messages are pre-prompt context (env_info / workspace_info / etc) treated
   // here as part of the history bucket. (Future: split into dedicated bucket.)
   let lastUserIdx = -1;
@@ -705,7 +705,7 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
       cacheWrite: cumCwrite,
       cacheHitRate: totalDenom > 0 ? cumCached / totalDenom : 0,
     },
-    format: "copilot-chat-export" as any,
+    format: "copilot-chat-export",
     costAnalysis,
   };
 

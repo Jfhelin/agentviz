@@ -63,7 +63,7 @@ export interface CallAnalysis {
    * when context is trimmed; we surface them as-is so users see the trim.
    */
   deltaVsPrev: number;
-  /** fresh + cache_write — what the API treats as "new" billing this call. */
+  /** fresh + cache_write -- what the API treats as "new" billing this call. */
   newTotal: number;
   /** Of newTotal, how much is genuinely new vs cache-recommit overhead. */
   trulyNew: number;

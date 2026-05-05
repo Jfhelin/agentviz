@@ -1,13 +1,13 @@
 import React, { useState, useMemo } from "react";
 import { theme } from "../lib/theme.js";
 
-// Cost type colors (specific to this view — not in the global theme tokens
-// because these are categorical labels rather than UI surface roles).
+// Cost view uses theme.cost.* tokens (defined in src/lib/theme.js).
+// These are categorical color roles that change with light/dark mode.
 var COST_COLORS = {
-  fresh: "#56d364",
-  cwrite: "#f4b340",
-  cached: "#3DA9D4",
-  output: "#a371f7",
+  fresh:  theme.cost.fresh,
+  cwrite: theme.cost.cwrite,
+  cached: theme.cost.cached,
+  output: theme.cost.output,
 };
 var COST_LABELS = {
   fresh: "Fresh input",
@@ -18,12 +18,12 @@ var COST_LABELS = {
 var CTX_KEYS = ["system", "tool_defs", "history", "tool_results", "current", "output"];
 var CTX_INPUT_KEYS = ["system", "tool_defs", "history", "tool_results", "current"];
 var CTX_COLORS = {
-  system: "#7A8B9E",
-  tool_defs: "#4A5568",
-  history: "#E6A847",
-  tool_results: "#B8642F",
-  current: "#3DA9D4",
-  output: "#2C7A99",
+  system:       theme.cost.ctxSystem,
+  tool_defs:    theme.cost.ctxToolDefs,
+  history:      theme.cost.ctxHistory,
+  tool_results: theme.cost.ctxToolResults,
+  current:      theme.cost.ctxCurrent,
+  output:       theme.cost.ctxOutput,
 };
 var CTX_LABELS = {
   system: "System",
@@ -33,7 +33,11 @@ var CTX_LABELS = {
   current: "Current prompt",
   output: "Response",
 };
-var KIND_COLORS = { mcp: "#a371f7", extension: "#f4b340", builtin: "#3DA9D4" };
+var KIND_COLORS = {
+  mcp:       theme.cost.kindMcp,
+  extension: theme.cost.kindExtension,
+  builtin:   theme.cost.kindBuiltin,
+};
 
 function fmt$(n) {
   if (n == null || isNaN(n)) return "$0";
@@ -114,7 +118,7 @@ function StackBar(props) {
   if (sum === 0) {
     return (
       <div style={{ position: "relative", width: "100%", height: 18, background: theme.bg.base, borderRadius: 2, overflow: "hidden" }}>
-        <span style={{ color: theme.text.ghost, fontSize: 10, fontStyle: "italic", paddingLeft: 6, lineHeight: "18px" }}>—</span>
+        <span style={{ color: theme.text.ghost, fontSize: theme.fontSize.xs, fontStyle: "italic", paddingLeft: 6, lineHeight: "18px" }}>--</span>
       </div>
     );
   }
@@ -142,7 +146,7 @@ function StackBar(props) {
           left: fillPct < 35 ? (fillPct + 1) + "%" : "auto",
           top: "50%",
           transform: "translateY(-50%)",
-          fontSize: 9.5,
+          fontSize: theme.fontSize.xs,
           color: theme.text.primary,
           fontVariantNumeric: "tabular-nums",
           textShadow: "0 0 3px " + theme.bg.base + ",0 0 6px " + theme.bg.base,
@@ -191,12 +195,12 @@ function ToolGroups(props) {
         return (
           <div key={i}>
             <div onClick={function () { setExpanded(Object.assign({}, expanded, { [i]: !open })); }}
-              style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: 10, fontSize: 10.5, padding: "3px 0", alignItems: "center", cursor: "pointer" }}>
+              style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: 10, fontSize: theme.fontSize.sm, padding: "3px 0", alignItems: "center", cursor: "pointer" }}>
               <div style={{ color: theme.text.primary }}>
                 <span style={{
-                  display: "inline-block", fontSize: 9, padding: "1px 5px", borderRadius: 9,
+                  display: "inline-block", fontSize: theme.fontSize.xs, padding: "1px 5px", borderRadius: 9,
                   marginRight: 6, fontWeight: 600, letterSpacing: 0.4,
-                  background: g.kind === "mcp" ? "#3a2f4d" : g.kind === "extension" ? "#3a3318" : "#1f2a3a",
+                  background: g.kind === "mcp" ? theme.cost.chipBgMcp : g.kind === "extension" ? theme.cost.chipBgExtension : theme.cost.chipBgBuiltin,
                   color: KIND_COLORS[g.kind],
                 }}>{g.kind.toUpperCase()}</span>
                 {g.label}
@@ -209,7 +213,7 @@ function ToolGroups(props) {
               </div>
             </div>
             {open && (
-              <div style={{ paddingLeft: 10, color: theme.text.muted, fontSize: 10, borderLeft: "1px solid " + theme.border.default, marginBottom: 4 }}>
+              <div style={{ paddingLeft: 10, color: theme.text.muted, fontSize: theme.fontSize.xs, borderLeft: "1px solid " + theme.border.default, marginBottom: 4 }}>
                 {g.top.map(function (t, j) {
                   return (
                     <div key={j} style={{ padding: "2px 0", display: "grid", gridTemplateColumns: "1fr auto", gap: 6, fontVariantNumeric: "tabular-nums" }}>
@@ -232,16 +236,16 @@ function ToolGroups(props) {
 
 function HistoryList(props) {
   var msgs = props.msgs || [];
-  if (!msgs.length) return <div style={{ color: theme.text.ghost, fontSize: 10, fontStyle: "italic" }}>no prior conversation</div>;
+  if (!msgs.length) return <div style={{ color: theme.text.ghost, fontSize: theme.fontSize.xs, fontStyle: "italic" }}>no prior conversation</div>;
   return (
     <div>
       {msgs.map(function (m, i) {
         return (
-          <div key={i} style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 8, fontSize: 10.5, padding: "3px 0", alignItems: "baseline", borderTop: i === 0 ? "none" : "1px solid " + theme.border.subtle }}>
+          <div key={i} style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 8, fontSize: theme.fontSize.sm, padding: "3px 0", alignItems: "baseline", borderTop: i === 0 ? "none" : "1px solid " + theme.border.subtle }}>
             <span style={{
-              fontSize: 9, padding: "1px 5px", borderRadius: 9, fontWeight: 600, letterSpacing: 0.4,
-              background: m.role === "user" ? "#3a3318" : "#1f3a2c",
-              color: m.role === "user" ? "#f4b340" : "#56d364",
+              fontSize: theme.fontSize.xs, padding: "1px 5px", borderRadius: 9, fontWeight: 600, letterSpacing: 0.4,
+              background: m.role === "user" ? theme.cost.chipBgExtension : theme.cost.chipBgAssistant,
+              color: m.role === "user" ? theme.cost.cwrite : theme.cost.fresh,
             }}>{m.role}</span>
             <span style={{ color: theme.text.secondary, fontStyle: "italic", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.preview}</span>
             <span style={{ color: theme.text.primary, fontVariantNumeric: "tabular-nums", textAlign: "right" }}>{fmtT(m.tokens || 0)}</span>
@@ -254,13 +258,13 @@ function HistoryList(props) {
 
 function ToolResultList(props) {
   var msgs = props.msgs || [];
-  if (!msgs.length) return <div style={{ color: theme.text.ghost, fontSize: 10, fontStyle: "italic" }}>none in this call</div>;
+  if (!msgs.length) return <div style={{ color: theme.text.ghost, fontSize: theme.fontSize.xs, fontStyle: "italic" }}>none in this call</div>;
   return (
     <div>
       {msgs.map(function (m, i) {
         return (
-          <div key={i} style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 8, fontSize: 10.5, padding: "3px 0", alignItems: "baseline", borderTop: i === 0 ? "none" : "1px solid " + theme.border.subtle }}>
-            <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 9, fontWeight: 600, letterSpacing: 0.4, background: "#3a2418", color: "#B8642F" }}>result {i + 1}</span>
+          <div key={i} style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 8, fontSize: theme.fontSize.sm, padding: "3px 0", alignItems: "baseline", borderTop: i === 0 ? "none" : "1px solid " + theme.border.subtle }}>
+            <span style={{ fontSize: theme.fontSize.xs, padding: "1px 5px", borderRadius: 9, fontWeight: 600, letterSpacing: 0.4, background: theme.cost.chipBgResult, color: theme.cost.ctxToolResults }}>result {i + 1}</span>
             <span style={{ color: theme.text.secondary, fontStyle: "italic", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.preview}</span>
             <span style={{ color: theme.text.primary, fontVariantNumeric: "tabular-nums", textAlign: "right" }}>{fmtT(m.tokens || 0)}</span>
           </div>
@@ -279,18 +283,18 @@ function NewBlock(props) {
   var pct = totalIn ? 100 * newTotal / totalIn : 0;
   return (
     <div style={{
-      background: "#0e1f14", border: "1px solid #163b22", borderRadius: 5,
+      background: theme.cost.okBg, border: "1px solid " + theme.cost.okBorder, borderRadius: 5,
       padding: "11px 13px", marginBottom: 14,
     }}>
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 8 }}>
-        <div style={{ color: "#56d364", fontSize: 11, fontWeight: 600, letterSpacing: 0.4, textTransform: "uppercase" }}>
+        <div style={{ color: theme.cost.fresh, fontSize: theme.fontSize.sm, fontWeight: 600, letterSpacing: 0.4, textTransform: "uppercase" }}>
           ▲ Billed as new {label}: {fmtT(newTotal)} tok ({pct.toFixed(1)}% of input)
         </div>
-        <div style={{ color: theme.text.secondary, fontSize: 10.5, fontVariantNumeric: "tabular-nums" }}>
+        <div style={{ color: theme.text.secondary, fontSize: theme.fontSize.sm, fontVariantNumeric: "tabular-nums" }}>
           {(100 - pct).toFixed(1)}% reused from cache · {fmtT(totalIn - newTotal)} cached tok
         </div>
       </div>
-      <div style={{ height: 14, background: "#0a1410", borderRadius: 2, overflow: "hidden", display: "flex", marginBottom: 8 }}>
+      <div style={{ height: 14, background: theme.cost.okBarTrack, borderRadius: 2, overflow: "hidden", display: "flex", marginBottom: 8 }}>
         {CTX_INPUT_KEYS.map(function (k) {
           var v = newPerBucket[k] || 0;
           if (v === 0) return null;
@@ -303,7 +307,7 @@ function NewBlock(props) {
         })}
         {!sum && <div style={{ height: "100%", background: theme.bg.raised, width: "100%" }} />}
       </div>
-      <div style={{ fontSize: 10.5, color: theme.text.secondary, lineHeight: 1.7 }}>
+      <div style={{ fontSize: theme.fontSize.sm, color: theme.text.secondary, lineHeight: 1.7 }}>
         {CTX_INPUT_KEYS.filter(function (k) { return (newPerBucket[k] || 0) > 0; })
           .sort(function (a, b) { return (newPerBucket[b] || 0) - (newPerBucket[a] || 0); })
           .map(function (k) {
@@ -314,7 +318,7 @@ function NewBlock(props) {
                   <b style={{ color: theme.text.primary, fontWeight: 500 }}>{CTX_LABELS[k]}</b>
                 </span>
                 <span />
-                <span style={{ color: "#56d364", fontVariantNumeric: "tabular-nums", fontWeight: 600 }}>+{fmtT(newPerBucket[k])} tok</span>
+                <span style={{ color: theme.cost.fresh, fontVariantNumeric: "tabular-nums", fontWeight: 600 }}>+{fmtT(newPerBucket[k])} tok</span>
               </div>
             );
           })}
@@ -327,7 +331,7 @@ function NewBlock(props) {
 function DetailSection(props) {
   return (
     <div style={{ background: theme.bg.surface, border: "1px solid " + theme.border.default, borderRadius: 4, padding: "10px 12px" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8, fontSize: 11 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8, fontSize: theme.fontSize.sm }}>
         <span style={{ color: theme.text.primary, fontWeight: 600 }}>
           <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 1, marginRight: 6, background: CTX_COLORS[props.bucket] }} />
           {CTX_LABELS[props.bucket]}
@@ -353,21 +357,21 @@ function LLMDetail(props) {
     var reasons = [];
     if (d.toolDefsChanged > 0) {
       reasons.push(<span key="r1"><b>{d.toolDefsChanged} of {d.totalToolDefs || d.n_total} tool definitions changed</b> since the previous call. Even one byte difference invalidates the cached prefix. Changed: {(d.changedSample || []).map(function (n, i) {
-        return <code key={i} style={{ background: "#1a0d12", border: "1px solid #3a1820", padding: "1px 5px", borderRadius: 2, color: "#ffc4d4", fontSize: 10, marginRight: 4 }}>{n}</code>;
+        return <code key={i} style={{ background: theme.cost.missCodeBg, border: "1px solid " + theme.cost.missCodeBorder, padding: "1px 5px", borderRadius: 2, color: theme.cost.missCodeText, fontSize: theme.fontSize.xs, marginRight: 4 }}>{n}</code>;
       })}{(d.changedSample || []).length < d.toolDefsChanged ? "…" : ""}</span>);
     }
-    if ((d.added || []).length) reasons.push(<span key="r2">Tools added: {d.added.map(function (n, i) { return <code key={i} style={{ background: "#1a0d12", border: "1px solid #3a1820", padding: "1px 5px", borderRadius: 2, color: "#ffc4d4", fontSize: 10, marginRight: 4 }}>{n}</code>; })}</span>);
-    if ((d.removed || []).length) reasons.push(<span key="r3">Tools removed: {d.removed.map(function (n, i) { return <code key={i} style={{ background: "#1a0d12", border: "1px solid #3a1820", padding: "1px 5px", borderRadius: 2, color: "#ffc4d4", fontSize: 10, marginRight: 4 }}>{n}</code>; })}</span>);
+    if ((d.added || []).length) reasons.push(<span key="r2">Tools added: {d.added.map(function (n, i) { return <code key={i} style={{ background: theme.cost.missCodeBg, border: "1px solid " + theme.cost.missCodeBorder, padding: "1px 5px", borderRadius: 2, color: theme.cost.missCodeText, fontSize: theme.fontSize.xs, marginRight: 4 }}>{n}</code>; })}</span>);
+    if ((d.removed || []).length) reasons.push(<span key="r3">Tools removed: {d.removed.map(function (n, i) { return <code key={i} style={{ background: theme.cost.missCodeBg, border: "1px solid " + theme.cost.missCodeBorder, padding: "1px 5px", borderRadius: 2, color: theme.cost.missCodeText, fontSize: theme.fontSize.xs, marginRight: 4 }}>{n}</code>; })}</span>);
     if (reasons.length === 0) reasons.push(<span key="r4">Tools are identical to the previous call. The cache likely <b>expired</b> (Anthropic ephemeral cache TTL is ~5 min) or the cache_control breakpoint placement changed in the messages array.</span>);
     missCallout = (
       <div style={{
-        background: "#2a141c", border: "1px solid #5a2030", color: "#fb8aa8",
-        padding: "10px 13px", margin: "0 0 12px", borderRadius: 4, fontSize: 10.5, lineHeight: 1.6,
+        background: theme.cost.missBg, border: "1px solid " + theme.cost.missBorder, color: theme.cost.missText,
+        padding: "10px 13px", margin: "0 0 12px", borderRadius: 4, fontSize: theme.fontSize.sm, lineHeight: 1.6,
       }}>
-        <div style={{ fontWeight: 600, color: "#ff9bb6", fontSize: 11.5, letterSpacing: 0.4, textTransform: "uppercase", marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
-          <span style={{ background: "#5a2030", color: "#fff", padding: "2px 7px", borderRadius: 3, fontSize: 9.5, letterSpacing: 0.5 }}>⚠ Unexpected cache miss</span>
+        <div style={{ fontWeight: 600, color: theme.cost.missAccent, fontSize: theme.fontSize.base, letterSpacing: 0.4, textTransform: "uppercase", marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={{ background: theme.cost.missBorder, color: theme.text.primary, padding: "2px 7px", borderRadius: 3, fontSize: theme.fontSize.xs, letterSpacing: 0.5 }}>⚠ Unexpected cache miss</span>
         </div>
-        We expected this call to hit the cache (<b style={{ color: "#fff" }}>{fmtT(ev.prevPt || 0)} tok</b> were cached on this model just before), but the API returned <b style={{ color: "#fff" }}>0 cached tokens</b>. The full <b style={{ color: "#fff" }}>{fmtT(ev.promptTokens)} tok</b> prefix was re-billed at premium write rate (~<b style={{ color: "#fff" }}>{fmt$(ev.cost)}</b>). Likely cause:
+        We expected this call to hit the cache (<b style={{ color: theme.text.primary }}>{fmtT(ev.prevPt || 0)} tok</b> were cached on this model just before), but the API returned <b style={{ color: theme.text.primary }}>0 cached tokens</b>. The full <b style={{ color: theme.text.primary }}>{fmtT(ev.promptTokens)} tok</b> prefix was re-billed at premium write rate (~<b style={{ color: theme.text.primary }}>{fmt$(ev.cost)}</b>). Likely cause:
         <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
           {reasons.map(function (r, i) { return <li key={i} style={{ marginBottom: 2 }}>{r}</li>; })}
         </ul>
@@ -378,38 +382,38 @@ function LLMDetail(props) {
   var recommitCallout = null;
   if (ev.modelSwitched) {
     recommitCallout = (
-      <div style={{ background: "#0f1a22", border: "1px solid #1f3a4d", color: "#7dd3fc", padding: "8px 11px", margin: "0 0 12px", borderRadius: 4, fontSize: 10.5, lineHeight: 1.55 }}>
-        ⇄ <b style={{ color: "#fff" }}>Model switch</b> — this call is on <b style={{ color: "#fff" }}>{ev.model}</b>, a different model than the previous call. The cache is per-model, so all <b style={{ color: "#fff" }}>{fmtT(ev.promptTokens)} tok</b> are genuinely new context for this model (no recommit possible — there was no prior cache to recommit from).
+      <div style={{ background: theme.cost.switchBg, border: "1px solid " + theme.cost.switchBorder, color: theme.cost.switchText, padding: "8px 11px", margin: "0 0 12px", borderRadius: 4, fontSize: theme.fontSize.sm, lineHeight: 1.55 }}>
+        ⇄ <b style={{ color: theme.text.primary }}>Model switch</b> -- this call is on <b style={{ color: theme.text.primary }}>{ev.model}</b>, a different model than the previous call. The cache is per-model, so all <b style={{ color: theme.text.primary }}>{fmtT(ev.promptTokens)} tok</b> are genuinely new context for this model (no recommit possible -- there was no prior cache to recommit from).
       </div>
     );
   } else if (ev.recommit > 100) {
     recommitCallout = (
-      <div style={{ background: "#1a1d12", border: "1px solid #3a3318", color: "#f4b340", padding: "8px 11px", margin: "0 0 12px", borderRadius: 4, fontSize: 10.5, lineHeight: 1.55 }}>
-        ↻ <b style={{ color: "#fff" }}>{fmtT(ev.recommit)} tok</b> of this call's billed-as-new content was actually <b>cache recommit</b> — material the agent already had, but the cache expired so it had to be re-sent at premium rate. Net new context this call vs the previous one: <b style={{ color: "#fff" }}>{fmtTSigned(ev.deltaVsPrev)} tok</b>.
+      <div style={{ background: theme.cost.recommitBg, border: "1px solid " + theme.cost.recommitBorder, color: theme.cost.cwrite, padding: "8px 11px", margin: "0 0 12px", borderRadius: 4, fontSize: theme.fontSize.sm, lineHeight: 1.55 }}>
+        ↻ <b style={{ color: theme.text.primary }}>{fmtT(ev.recommit)} tok</b> of this call's billed-as-new content was actually <b>cache recommit</b> -- material the agent already had, but the cache expired so it had to be re-sent at premium rate. Net new context this call vs the previous one: <b style={{ color: theme.text.primary }}>{fmtTSigned(ev.deltaVsPrev)} tok</b>.
       </div>
     );
   }
 
   return (
     <div style={{ gridColumn: "1 / -1", background: theme.bg.base, borderBottom: "1px solid " + theme.border.subtle, padding: "14px 22px" }}>
-      <h4 style={{ margin: "0 0 8px", color: theme.text.primary, fontSize: 11.5, fontWeight: 600, letterSpacing: 0.4, textTransform: "uppercase" }}>
+      <h4 style={{ margin: "0 0 8px", color: theme.text.primary, fontSize: theme.fontSize.base, fontWeight: 600, letterSpacing: 0.4, textTransform: "uppercase" }}>
         What happened in this LLM call
       </h4>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 14 }}>
-        <div style={{ background: theme.bg.surface, border: "1px solid #1f3a52", borderRadius: 5, padding: "10px 12px" }}>
-          <div style={{ fontSize: 9.5, color: theme.text.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 5 }}>Context window (this call)</div>
-          <div style={{ fontSize: 15, color: "#7CC8E5", fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{fmtT(ev.promptTokens)} tok</div>
-          <div style={{ fontSize: 10, color: theme.text.secondary, marginTop: 3 }}>+ {fmtT(ev.output)} output</div>
+        <div style={{ background: theme.bg.surface, border: "1px solid " + theme.cost.switchBorder, borderRadius: 5, padding: "10px 12px" }}>
+          <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 5 }}>Context window (this call)</div>
+          <div style={{ fontSize: theme.fontSize.lg, color: theme.cost.cached, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{fmtT(ev.promptTokens)} tok</div>
+          <div style={{ fontSize: theme.fontSize.xs, color: theme.text.secondary, marginTop: 3 }}>+ {fmtT(ev.output)} output</div>
         </div>
-        <div style={{ background: theme.bg.surface, border: "1px solid #163b22", borderRadius: 5, padding: "10px 12px" }}>
-          <div style={{ fontSize: 9.5, color: theme.text.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 5 }}>▲ Net new vs previous call</div>
-          <div style={{ fontSize: 15, color: "#7CDC85", fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{fmtTSigned(ev.deltaVsPrev)} tok</div>
-          <div style={{ fontSize: 10, color: theme.text.secondary, marginTop: 3 }}>{ev.modelSwitched ? "new model — cache reset" : (ev.prevPt ? "prev call had " + fmtT(ev.prevPt) + " ctx" : "first call in session")}</div>
+        <div style={{ background: theme.bg.surface, border: "1px solid " + theme.cost.okBorder, borderRadius: 5, padding: "10px 12px" }}>
+          <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 5 }}>▲ Net new vs previous call</div>
+          <div style={{ fontSize: theme.fontSize.lg, color: theme.cost.fresh, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{fmtTSigned(ev.deltaVsPrev)} tok</div>
+          <div style={{ fontSize: theme.fontSize.xs, color: theme.text.secondary, marginTop: 3 }}>{ev.modelSwitched ? "new model -- cache reset" : (ev.prevPt ? "prev call had " + fmtT(ev.prevPt) + " ctx" : "first call in session")}</div>
         </div>
-        <div style={{ background: theme.bg.surface, border: "1px solid #3a3318", borderRadius: 5, padding: "10px 12px" }}>
-          <div style={{ fontSize: 9.5, color: theme.text.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 5 }}>$ Billed as new (full + premium)</div>
-          <div style={{ fontSize: 15, color: "#f4b340", fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{fmtT(ev.newTotal)} tok</div>
-          <div style={{ fontSize: 10, color: theme.text.secondary, marginTop: 3 }}>{ev.recommit > 100 ? "incl. " + fmtT(ev.recommit) + " cache recommit" : "minimal recommit"}</div>
+        <div style={{ background: theme.bg.surface, border: "1px solid " + theme.cost.recommitBorder, borderRadius: 5, padding: "10px 12px" }}>
+          <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 5 }}>$ Billed as new (full + premium)</div>
+          <div style={{ fontSize: theme.fontSize.lg, color: theme.cost.cwrite, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{fmtT(ev.newTotal)} tok</div>
+          <div style={{ fontSize: theme.fontSize.xs, color: theme.text.secondary, marginTop: 3 }}>{ev.recommit > 100 ? "incl. " + fmtT(ev.recommit) + " cache recommit" : "minimal recommit"}</div>
         </div>
       </div>
       {missCallout}
@@ -417,7 +421,7 @@ function LLMDetail(props) {
       <NewBlock newPerBucket={ev.newPerBucket} newTotal={ev.newTotal} totalIn={ev.promptTokens} label="this call" />
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
         <DetailSection bucket="tool_defs" value={c.tool_defs} pct={pct("tool_defs")}>
-          <div style={{ color: theme.text.secondary, fontSize: 10.5, marginBottom: 5 }}>{ev.totalTools} tools available, grouped by source</div>
+          <div style={{ color: theme.text.secondary, fontSize: theme.fontSize.sm, marginBottom: 5 }}>{ev.totalTools} tools available, grouped by source</div>
           <ToolGroups groups={ev.toolGroups} />
         </DetailSection>
         <DetailSection bucket="history" value={c.history} pct={pct("history")}>
@@ -444,7 +448,7 @@ var textBlockStyle = {
   padding: "8px 10px",
   marginTop: 6,
   color: theme.text.primary,
-  fontSize: 10.5,
+  fontSize: theme.fontSize.sm,
   lineHeight: 1.55,
   maxHeight: 120,
   overflow: "auto",
@@ -455,21 +459,21 @@ function ToolDetail(props) {
   var ev = props.event;
   return (
     <div style={{ gridColumn: "1 / -1", background: theme.bg.base, borderBottom: "1px solid " + theme.border.subtle, padding: "14px 22px" }}>
-      <h4 style={{ margin: "0 0 8px", color: theme.text.primary, fontSize: 11.5, fontWeight: 600, letterSpacing: 0.4, textTransform: "uppercase" }}>
+      <h4 style={{ margin: "0 0 8px", color: theme.text.primary, fontSize: theme.fontSize.base, fontWeight: 600, letterSpacing: 0.4, textTransform: "uppercase" }}>
         What this tool adds to the next LLM call's context
       </h4>
       <div style={{ background: theme.bg.surface, border: "1px solid " + theme.border.default, borderRadius: 4, padding: "10px 12px" }}>
-        <div style={{ marginBottom: 6, color: theme.text.primary, fontWeight: 600, fontSize: 11 }}>{ev.name}</div>
-        {ev.argsSummary && <div style={{ color: theme.text.secondary, fontSize: 10.5, margin: "4px 0", fontStyle: "italic" }}>{ev.argsSummary}</div>}
-        <div style={{ color: theme.text.primary, fontSize: 11, margin: "6px 0", fontVariantNumeric: "tabular-nums" }}>
-          → Adds <b style={{ color: "#E6A847" }}>{fmtT(ev.resultTokens || 0)} tokens</b> of <b style={{ color: "#E6A847" }}>tool results</b> to the next LLM call's context ({(ev.resultChars || 0).toLocaleString()} chars).
+        <div style={{ marginBottom: 6, color: theme.text.primary, fontWeight: 600, fontSize: theme.fontSize.sm }}>{ev.name}</div>
+        {ev.argsSummary && <div style={{ color: theme.text.secondary, fontSize: theme.fontSize.sm, margin: "4px 0", fontStyle: "italic" }}>{ev.argsSummary}</div>}
+        <div style={{ color: theme.text.primary, fontSize: theme.fontSize.sm, margin: "6px 0", fontVariantNumeric: "tabular-nums" }}>
+          → Adds <b style={{ color: theme.cost.ctxHistory }}>{fmtT(ev.resultTokens || 0)} tokens</b> of <b style={{ color: theme.cost.ctxHistory }}>tool results</b> to the next LLM call's context ({(ev.resultChars || 0).toLocaleString()} chars).
         </div>
         {ev.resultPreview && (
           <div style={textBlockStyle}>{ev.resultPreview}{ev.resultPreview.length >= 200 ? "…" : ""}</div>
         )}
         {ev.thinking && (
           <>
-            <div style={{ marginTop: 8, color: theme.text.muted, fontSize: 10, textTransform: "uppercase", letterSpacing: 0.4 }}>
+            <div style={{ marginTop: 8, color: theme.text.muted, fontSize: theme.fontSize.xs, textTransform: "uppercase", letterSpacing: 0.4 }}>
               Assistant reasoning before the call
             </div>
             <div style={Object.assign({}, textBlockStyle, { fontStyle: "italic" })}>
@@ -492,9 +496,9 @@ function PromptNewMini(props) {
   var missCost = missCalls.reduce(function (a, e) { return a + (e.cost || 0); }, 0);
   return (
     <div style={{ background: theme.bg.base, border: "1px solid " + theme.border.default, borderRadius: 4, padding: "6px 9px" }}>
-      <div style={{ fontSize: 9, color: theme.text.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4, display: "flex", justifyContent: "space-between" }}>
+      <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4, display: "flex", justifyContent: "space-between" }}>
         <span>Billed as new this prompt</span>
-        <b style={{ color: "#56d364" }}>{fmtT(pa.newTotal)}</b>
+        <b style={{ color: theme.cost.fresh }}>{fmtT(pa.newTotal)}</b>
       </div>
       <div style={{ height: 10, background: theme.bg.surface, borderRadius: 1, overflow: "hidden", display: "flex" }}>
         {sum > 1 ? CTX_INPUT_KEYS.map(function (k) {
@@ -505,16 +509,16 @@ function PromptNewMini(props) {
         }) : <div style={{ height: "100%", background: theme.border.default, width: "100%" }} />}
       </div>
       {missCalls.length > 0 && (
-        <div style={{ fontSize: 9.5, color: "#fb8aa8", marginTop: 4, fontStyle: "italic", lineHeight: 1.3 }}>
-          ⚠ {missCalls.length} unexpected cache miss{missCalls.length > 1 ? "es" : ""} — {fmtT(missTotal)} tok re-billed at premium (~{fmt$(missCost)})
+        <div style={{ fontSize: theme.fontSize.xs, color: theme.cost.missText, marginTop: 4, fontStyle: "italic", lineHeight: 1.3 }}>
+          ⚠ {missCalls.length} unexpected cache miss{missCalls.length > 1 ? "es" : ""} -- {fmtT(missTotal)} tok re-billed at premium (~{fmt$(missCost)})
         </div>
       )}
       {pa.modelSwitchedIn ? (
-        <div style={{ fontSize: 9, color: "#7dd3fc", marginTop: 4, fontStyle: "italic", lineHeight: 1.3 }}>
-          ⇄ Model switch — fresh cache, all context is genuinely new to this model
+        <div style={{ fontSize: theme.fontSize.xs, color: theme.cost.switchText, marginTop: 4, fontStyle: "italic", lineHeight: 1.3 }}>
+          ⇄ Model switch -- fresh cache, all context is genuinely new to this model
         </div>
       ) : (pa.cacheRecommit > 200 && (
-        <div style={{ fontSize: 9, color: "#f4b340", marginTop: 4, fontStyle: "italic", lineHeight: 1.3 }}>
+        <div style={{ fontSize: theme.fontSize.xs, color: theme.cost.cwrite, marginTop: 4, fontStyle: "italic", lineHeight: 1.3 }}>
           ↻ {fmtT(pa.cacheRecommit)} of this is cache recommit (already in context, cache expired)
         </div>
       ))}
@@ -541,12 +545,12 @@ function Kpis(props) {
         return (
           <div key={i} style={{
             background: theme.bg.surface,
-            border: "1px solid " + (k.warn ? "#5a2030" : theme.border.default),
+            border: "1px solid " + (k.warn ? theme.cost.missBorder : theme.border.default),
             borderRadius: theme.radius.md, padding: "12px 14px",
           }}>
-            <div style={{ color: theme.text.muted, fontSize: 10, textTransform: "uppercase", letterSpacing: 0.6 }}>{k.l}</div>
-            <div style={{ fontSize: 18, fontWeight: 600, color: k.warn ? "#fb8aa8" : theme.text.primary, marginTop: 4, fontVariantNumeric: "tabular-nums" }}>{k.v}</div>
-            {k.d && <div style={{ color: theme.semantic.success, fontSize: 10, marginTop: 2 }}>{k.d}</div>}
+            <div style={{ color: theme.text.muted, fontSize: theme.fontSize.xs, textTransform: "uppercase", letterSpacing: 0.6 }}>{k.l}</div>
+            <div style={{ fontSize: theme.fontSize.xl, fontWeight: 600, color: k.warn ? theme.cost.missText : theme.text.primary, marginTop: 4, fontVariantNumeric: "tabular-nums" }}>{k.v}</div>
+            {k.d && <div style={{ color: theme.semantic.success, fontSize: theme.fontSize.xs, marginTop: 2 }}>{k.d}</div>}
           </div>
         );
       })}
@@ -558,15 +562,15 @@ function Glossary() {
   var term = function (color, bg) {
     return {
       display: "inline-block", background: bg || theme.bg.surface, color: color, padding: "1px 7px",
-      borderRadius: 9, fontSize: 10, fontWeight: 600, letterSpacing: 0.4, marginRight: 4,
+      borderRadius: 9, fontSize: theme.fontSize.xs, fontWeight: 600, letterSpacing: 0.4, marginRight: 4,
     };
   };
   return (
-    <div style={{ background: theme.bg.base, border: "1px solid " + theme.border.default, borderRadius: 5, padding: "11px 14px", marginBottom: 20, fontSize: 11, color: theme.text.secondary, lineHeight: 1.7 }}>
-      <span style={term("#56d364")}>CTX</span><b style={{ color: theme.text.primary }}>Context window</b> — actual size of one LLM call's input (= API <code>prompt_tokens</code>).
-      &nbsp;&nbsp;<span style={term("#7CDC85")}>▲ NET</span><b style={{ color: theme.text.primary }}>Net new context</b> — how much working memory actually grew vs the previous call.
-      &nbsp;&nbsp;<span style={term("#f4b340", "#3a3318")}>$ BILLED</span><b style={{ color: theme.text.primary }}>Billed input</b> — sum of <code>prompt_tokens</code> across calls (cache reads still cost; cache writes cost more).
-      &nbsp;&nbsp;<span style={term("#f4b340", "#3a3318")}>↻ RECOMMIT</span><b style={{ color: theme.text.primary }}>Cache recommit</b> — content the agent already had to send again because the cache expired.
+    <div style={{ background: theme.bg.base, border: "1px solid " + theme.border.default, borderRadius: 5, padding: "11px 14px", marginBottom: 20, fontSize: theme.fontSize.sm, color: theme.text.secondary, lineHeight: 1.7 }}>
+      <span style={term(theme.cost.fresh)}>CTX</span><b style={{ color: theme.text.primary }}>Context window</b> -- actual size of one LLM call's input (= API <code>prompt_tokens</code>).
+      &nbsp;&nbsp;<span style={term(theme.cost.fresh)}>▲ NET</span><b style={{ color: theme.text.primary }}>Net new context</b> -- how much working memory actually grew vs the previous call.
+      &nbsp;&nbsp;<span style={term(theme.cost.cwrite, theme.cost.chipBgExtension)}>$ BILLED</span><b style={{ color: theme.text.primary }}>Billed input</b> -- sum of <code>prompt_tokens</code> across calls (cache reads still cost; cache writes cost more).
+      &nbsp;&nbsp;<span style={term(theme.cost.cwrite, theme.cost.chipBgExtension)}>↻ RECOMMIT</span><b style={{ color: theme.text.primary }}>Cache recommit</b> -- content the agent already had to send again because the cache expired.
     </div>
   );
 }
@@ -574,9 +578,9 @@ function Glossary() {
 function Legend() {
   var swatchStyle = function (color) { return { display: "inline-block", width: 10, height: 10, marginRight: 5, borderRadius: 2, verticalAlign: "-1px", background: color }; };
   var groupStyle = { padding: "6px 10px", background: theme.bg.base, border: "1px solid " + theme.border.default, borderRadius: 4, display: "flex", flexWrap: "wrap", gap: 10 };
-  var labelStyle = { color: theme.text.muted, textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600, fontSize: 10, marginRight: 4 };
+  var labelStyle = { color: theme.text.muted, textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600, fontSize: theme.fontSize.xs, marginRight: 4 };
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: 14, margin: "8px 0 20px", fontSize: 11, color: theme.text.secondary }}>
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 14, margin: "8px 0 20px", fontSize: theme.fontSize.sm, color: theme.text.secondary }}>
       <div style={groupStyle}>
         <b style={labelStyle}>cost type</b>
         <span><span style={swatchStyle(COST_COLORS.fresh)} />fresh input</span>
@@ -623,11 +627,12 @@ export default function CostView(props) {
   var globalEventIdx = 0;
 
   return (
-    <div style={{ maxWidth: 1700, margin: "0 auto", padding: "32px 28px 80px", fontFamily: theme.font.mono, fontSize: 13, color: theme.text.primary, background: theme.bg.base, minHeight: "100%" }}>
-      <h1 style={{ fontSize: 20, fontWeight: 600, margin: "0 0 4px", color: theme.text.primary, letterSpacing: 0.4 }}>
+    <div style={{ height: "100%", overflowY: "auto", overflowX: "hidden", background: theme.bg.base }}>
+    <div style={{ maxWidth: 1700, margin: "0 auto", padding: "32px 28px 80px", fontFamily: theme.font.mono, fontSize: theme.fontSize.md, color: theme.text.primary }}>
+      <h1 style={{ fontSize: theme.fontSize.xl, fontWeight: 600, margin: "0 0 4px", color: theme.text.primary, letterSpacing: 0.4 }}>
         Token cost &amp; context buildup
       </h1>
-      <div style={{ color: theme.text.muted, fontSize: 12, marginBottom: 24 }}>
+      <div style={{ color: theme.text.muted, fontSize: theme.fontSize.base, marginBottom: 24 }}>
         Three different lenses on "input": context size, growth, and billing.
       </div>
 
@@ -652,7 +657,7 @@ export default function CostView(props) {
               {/* Prompt header spans all 3 columns */}
               <div style={{
                 gridColumn: "1 / -1",
-                background: "linear-gradient(180deg,#1a2230 0%,#141a22 100%)",
+                background: theme.bg.raised,
                 borderTop: pi > 0 ? "1px solid " + theme.border.default : "none",
                 borderBottom: "1px solid " + theme.border.default,
                 padding: "14px 18px",
@@ -661,27 +666,27 @@ export default function CostView(props) {
                 gap: 14,
                 alignItems: "center",
               }}>
-                <div style={{ fontSize: 10, color: theme.text.muted, textAlign: "center" }}>
-                  <span style={{ fontSize: 22, color: theme.text.primary, fontWeight: 700, display: "block", lineHeight: 1 }}>{pi + 1}</span>
+                <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, textAlign: "center" }}>
+                  <span style={{ fontSize: theme.fontSize.xxl, color: theme.text.primary, fontWeight: 700, display: "block", lineHeight: 1 }}>{pi + 1}</span>
                   prompt
                 </div>
                 <div>
-                  <div style={{ color: theme.text.primary, fontSize: 14, fontWeight: 500, lineHeight: 1.4 }}>{p.label || "(empty)"}</div>
-                  <div style={{ color: theme.text.secondary, fontSize: 10.5, marginTop: 6, display: "grid", gap: 4 }}>
+                  <div style={{ color: theme.text.primary, fontSize: theme.fontSize.md, fontWeight: 500, lineHeight: 1.4 }}>{p.label || "(empty)"}</div>
+                  <div style={{ color: theme.text.secondary, fontSize: theme.fontSize.sm, marginTop: 6, display: "grid", gap: 4 }}>
                     <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "baseline" }}>
-                      <span style={{ color: "#3DA9D4" }}>⊞ Context: <b style={{ color: "#7CC8E5", fontWeight: 600 }}>{fmtT(pa.contextInitial)} → {fmtT(pa.contextFinal)}</b></span>
-                      <span style={{ color: "#56d364", fontWeight: 600 }}>▲ {fmtTSigned(pa.contextGrowth)} tok net new this prompt</span>
+                      <span style={{ color: theme.cost.cached }}>⊞ Context: <b style={{ color: theme.cost.cached, fontWeight: 600 }}>{fmtT(pa.contextInitial)} → {fmtT(pa.contextFinal)}</b></span>
+                      <span style={{ color: theme.cost.fresh, fontWeight: 600 }}>▲ {fmtTSigned(pa.contextGrowth)} tok net new this prompt</span>
                       <span><b style={{ color: theme.text.primary, fontWeight: 500 }}>{p.llmCount}</b> LLM</span>
                       <span><b style={{ color: theme.text.primary, fontWeight: 500 }}>{p.toolCount}</b> tools</span>
                     </div>
-                    <div style={{ color: theme.text.muted, fontSize: 10, display: "flex", gap: 14, flexWrap: "wrap" }}>
+                    <div style={{ color: theme.text.muted, fontSize: theme.fontSize.xs, display: "flex", gap: 14, flexWrap: "wrap" }}>
                       <span>$ Billed: <b style={{ color: theme.text.secondary }}>{fmtT(p.promptTokens)}</b> input · <b style={{ color: theme.text.secondary }}>{fmtT(p.output)}</b> output · <b style={{ color: theme.text.secondary }}>{cachedPct.toFixed(0)}%</b> cached · <b style={{ color: theme.text.secondary }}>{fmtT(pa.newTotal)}</b> billed-as-new</span>
-                      {pa.cacheRecommit > 200 && <span style={{ color: "#f4b340" }}>↻ <b>{fmtT(pa.cacheRecommit)}</b> recommit</span>}
+                      {pa.cacheRecommit > 200 && <span style={{ color: theme.cost.cwrite }}>↻ <b>{fmtT(pa.cacheRecommit)}</b> recommit</span>}
                     </div>
                   </div>
                 </div>
                 <div><PromptNewMini prompt={p} /></div>
-                <div style={{ fontSize: 16, fontWeight: 600, color: theme.text.primary, fontVariantNumeric: "tabular-nums", textAlign: "right" }}>{fmt$(p.cost)}</div>
+                <div style={{ fontSize: theme.fontSize.lg, fontWeight: 600, color: theme.text.primary, fontVariantNumeric: "tabular-nums", textAlign: "right" }}>{fmt$(p.cost)}</div>
               </div>
 
               {p.events.map(function (ev, ei) {
@@ -692,19 +697,19 @@ export default function CostView(props) {
                 globalEventIdx += 1;
                 var cellBg = isLLM ? theme.bg.surface : theme.bg.raised;
                 var meta = isLLM ? (
-                  <div style={{ color: theme.text.muted, fontSize: 10, marginTop: 3, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  <div style={{ color: theme.text.muted, fontSize: theme.fontSize.xs, marginTop: 3, display: "flex", gap: 10, flexWrap: "wrap" }}>
                     <span>{(ev.model || "").split("-").slice(0, 3).join("-")}</span>
-                    <span style={{ color: "#3DA9D4" }}>⊞ <b style={{ color: "#7CC8E5" }}>{fmtT(ev.promptTokens)}</b> ctx</span>
-                    <span style={{ color: "#56d364" }}>▲ <b style={{ color: "#7CDC85" }}>{fmtTSigned(ev.deltaVsPrev)}</b> net new</span>
+                    <span style={{ color: theme.cost.cached }}>⊞ <b style={{ color: theme.cost.cached }}>{fmtT(ev.promptTokens)}</b> ctx</span>
+                    <span style={{ color: theme.cost.fresh }}>▲ <b style={{ color: theme.cost.fresh }}>{fmtTSigned(ev.deltaVsPrev)}</b> net new</span>
                     <span><b style={{ color: theme.text.primary }}>{fmtT(ev.cached)}</b> cached</span>
-                    <span style={{ color: "#f4b340" }}>$ <b>{fmtT(ev.newTotal)}</b> billed-new</span>
+                    <span style={{ color: theme.cost.cwrite }}>$ <b>{fmtT(ev.newTotal)}</b> billed-new</span>
                     <span style={{ color: theme.text.secondary }}>{fmt$(ev.cost)}</span>
                     {ev.unexpectedMiss && (
-                      <span style={{ color: "#fb8aa8", background: "#2a141c", border: "1px solid #5a2030", padding: "1px 6px", borderRadius: 3 }}>⚠ unexpected cache miss</span>
+                      <span style={{ color: theme.cost.missText, background: theme.cost.missBg, border: "1px solid " + theme.cost.missBorder, padding: "1px 6px", borderRadius: 3 }}>⚠ unexpected cache miss</span>
                     )}
                   </div>
                 ) : (
-                  <div style={{ color: theme.text.muted, fontSize: 10, marginTop: 3, display: "flex", gap: 10 }}>
+                  <div style={{ color: theme.text.muted, fontSize: theme.fontSize.xs, marginTop: 3, display: "flex", gap: 10 }}>
                     <span>tool call</span>
                     {ev.resultTokens > 0 && <span>→ <b style={{ color: theme.text.primary }}>{fmtT(ev.resultTokens)}</b> tok of result</span>}
                   </div>
@@ -718,14 +723,14 @@ export default function CostView(props) {
                         background: cellBg, display: "flex", alignItems: "center", minHeight: 38, cursor: "pointer",
                       }}>
                       <div style={{ display: "grid", gridTemplateColumns: "18px 18px 1fr", gap: 8, alignItems: "start", width: "100%" }}>
-                        <div style={{ color: theme.text.muted, fontSize: 10, width: 14, textAlign: "center", marginTop: 3, transition: "transform .15s", transform: open ? "rotate(90deg)" : "none" }}>▶</div>
+                        <div style={{ color: theme.text.muted, fontSize: theme.fontSize.xs, width: 14, textAlign: "center", marginTop: 3, transition: "transform .15s", transform: open ? "rotate(90deg)" : "none" }}>▶</div>
                         <div style={{
-                          fontSize: 10, fontWeight: 600, width: 18, height: 18, borderRadius: 9,
-                          display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", marginTop: 1,
-                          background: isLLM ? "#3DA9D4" : "#E6A847",
+                          fontSize: theme.fontSize.xs, fontWeight: 600, width: 18, height: 18, borderRadius: 9,
+                          display: "flex", alignItems: "center", justifyContent: "center", color: theme.text.primary, marginTop: 1,
+                          background: isLLM ? theme.cost.cached : theme.cost.ctxHistory,
                         }}>{isLLM ? "L" : "T"}</div>
                         <div>
-                          <div style={{ color: theme.text.primary, fontSize: 11.5, fontWeight: 500, lineHeight: 1.4 }}>
+                          <div style={{ color: theme.text.primary, fontSize: theme.fontSize.base, fontWeight: 500, lineHeight: 1.4 }}>
                             {isLLM ? (ev.model ? "panel/" + (ev.model.indexOf("claude") >= 0 ? "editAgent" : "request") : "request") : ev.name}
                             {ev.argsSummary && <span style={{ color: theme.text.muted, fontWeight: 400, marginLeft: 6 }}>{ev.argsSummary}</span>}
                           </div>
@@ -739,7 +744,7 @@ export default function CostView(props) {
                     <div style={{ padding: "8px 12px", borderBottom: "1px solid " + theme.border.subtle, background: cellBg, borderLeft: "1px solid " + theme.border.default, display: "flex", alignItems: "center" }}>
                       {isLLM
                         ? <StackBar parts={ev.components} keys={CTX_KEYS} colors={CTX_COLORS} labels={CTX_LABELS} maxVal={maxCtx} withLabel />
-                        : <span style={{ color: theme.text.ghost, fontSize: 10, fontStyle: "italic" }}>→ result lands in next LLM call</span>}
+                        : <span style={{ color: theme.text.ghost, fontSize: theme.fontSize.xs, fontStyle: "italic" }}>→ result lands in next LLM call</span>}
                     </div>
                     {open && (isLLM ? <LLMDetail event={ev} /> : <ToolDetail event={ev} />)}
                   </React.Fragment>
@@ -750,13 +755,14 @@ export default function CostView(props) {
         })}
       </div>
     </div>
+    </div>
   );
 }
 
 var colHeadStyle = {
   background: theme.bg.base,
   padding: "11px 14px",
-  fontSize: 10,
+  fontSize: theme.fontSize.xs,
   color: theme.text.muted,
   textTransform: "uppercase",
   letterSpacing: 0.6,

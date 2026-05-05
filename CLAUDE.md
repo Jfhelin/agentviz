@@ -52,7 +52,9 @@ src/
     diffUtils.js       # Diff detection (isFileEditEvent) + Myers line diff algorithm
     waterfall.ts       # Waterfall view helpers: item building, stats, layout, windowing
     graphLayout.js     # Graph view helpers: ELKjs DAG builder, layout runner, position merger
-    pricing.js         # Claude model pricing table and cost estimation
+    pricing.js         # Claude + GPT-4o model pricing table and cost estimation (per-model cache ratios)
+    cacheAnalysis.ts   # Per-model cache scoping, recommit math, unexpected-miss diagnosis
+    copilotChatExportParser.ts # Parser + cost analysis builder for VS Code Copilot Chat exports
     exportHtml.js      # Self-contained HTML export for single sessions and comparisons
     dataInspector.js   # Payload summary and preview helpers for inspector panels
     formatTime.js      # Duration and date formatting utilities
@@ -69,6 +71,7 @@ src/
     WaterfallView.jsx  # Tool execution waterfall with nesting, inspector sidebar
     GraphView.jsx      # Interactive DAG of turns/tool calls with ELKjs layout, pan/zoom, animations
     StatsView.jsx      # Aggregate metrics, tool ranking, turn summary
+    CostView.jsx       # Token cost & context buildup view (Copilot Chat exports only); 3-column timeline with CTX/NET/BILLED lenses
     CompareView.jsx    # Side-by-side session comparison: Scorecard + Tools tabs
     CommandPalette.jsx # Cmd+K fuzzy search overlay (events, turns, views)
     DiffViewer.jsx     # Inline unified diff view for file-editing tool calls
