@@ -799,6 +799,77 @@ function ToolDetail(props) {
   );
 }
 
+// Per-prompt cost breakdown by bucket. Honest decomposition that ties back to
+// p.cost: for each LLM call we know per-bucket TOTAL input split (components),
+// per-bucket BILLED-AS-NEW split (newPerBucket), and call-level fresh vs
+// cache_write split. We attribute:
+//   cached_in_bucket = max(0, components[b] - newPerBucket[b])  -> cacheRead
+//   new_in_bucket    = newPerBucket[b]
+//     -> split fresh / cwrite proportionally to call-level fresh / cwrite
+// then sum estimateCost() per bucket. Output cost goes to its own bucket.
+// Sum of bucket costs ≈ sum of per-call ev.cost (within ~0.5% rounding).
+function computePromptCostByBucket(p) {
+  var byBucket = { system: 0, tool_defs: 0, history: 0, tool_results: 0, current: 0, output: 0 };
+  if (!p || !p.events) return byBucket;
+  for (var i = 0; i < p.events.length; i++) {
+    var ev = p.events[i];
+    if (ev.kind !== "llm") continue;
+    if (!ev.model || !hasModelPricing(ev.model)) continue;
+    var comp = ev.components || {};
+    var npb = ev.newPerBucket || {};
+    var newTotal = (ev.fresh || 0) + (ev.cacheWrite || 0);
+    var freshShare = newTotal > 0 ? (ev.fresh || 0) / newTotal : 1;
+    for (var ki = 0; ki < CTX_INPUT_KEYS.length; ki++) {
+      var k = CTX_INPUT_KEYS[ki];
+      var totalIn = comp[k] || 0;
+      var newB = npb[k] || 0;
+      var cachedB = Math.max(0, totalIn - newB);
+      var freshB = newB * freshShare;
+      var cwB = newB * (1 - freshShare);
+      byBucket[k] += estimateCost({ inputTokens: freshB, cacheRead: cachedB, cacheWrite: cwB }, ev.model);
+    }
+    byBucket.output += estimateCost({ outputTokens: ev.output || 0 }, ev.model);
+  }
+  return byBucket;
+}
+
+function PromptCostMini(props) {
+  var p = props.prompt;
+  var byBucket = useMemo(function () { return computePromptCostByBucket(p); }, [p]);
+  var total = CTX_KEYS.reduce(function (a, k) { return a + (byBucket[k] || 0); }, 0);
+  if (total <= 0) return null;
+  return (
+    <div style={{ background: theme.bg.base, border: "1px solid " + theme.border.default, borderRadius: 4, padding: "6px 9px" }}>
+      <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4, display: "flex", justifyContent: "space-between" }}>
+        <span>Cost by component</span>
+        <b style={{ color: theme.text.primary }}>{fmt$(total)}</b>
+      </div>
+      <div style={{ height: 10, background: theme.bg.surface, borderRadius: 1, overflow: "hidden", display: "flex" }}>
+        {CTX_KEYS.map(function (k) {
+          var v = byBucket[k] || 0;
+          if (v <= 0) return null;
+          var w = 100 * v / total;
+          return (
+            <div key={k}
+              title={CTX_LABELS[k] + ": " + fmt$(v) + " (" + w.toFixed(1) + "%)"}
+              style={{ height: "100%", background: CTX_COLORS[k], width: w + "%" }} />
+          );
+        })}
+      </div>
+      <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, marginTop: 4, lineHeight: 1.4, display: "flex", flexWrap: "wrap", gap: "0 10px" }}>
+        {CTX_KEYS.filter(function (k) { return (byBucket[k] || 0) / total >= 0.03; }).map(function (k) {
+          return (
+            <span key={k} title={CTX_LABELS[k] + ": " + fmt$(byBucket[k])}>
+              <span style={{ display: "inline-block", width: 7, height: 7, background: CTX_COLORS[k], borderRadius: 1, marginRight: 4, verticalAlign: "middle" }} />
+              {CTX_LABELS[k]} {(100 * byBucket[k] / total).toFixed(0)}%
+            </span>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function PromptNewMini(props) {
   var p = props.prompt;
   var pa = p.prompt; // PromptAnalysis
@@ -1165,7 +1236,7 @@ export default function CostView(props) {
                 borderBottom: "1px solid " + theme.border.default,
                 padding: "14px 18px",
                 display: "grid",
-                gridTemplateColumns: "48px 1fr 220px auto",
+                gridTemplateColumns: "48px 1fr 220px 220px auto",
                 gap: 14,
                 alignItems: "center",
               }}>
@@ -1189,6 +1260,7 @@ export default function CostView(props) {
                   </div>
                 </div>
                 <div><PromptNewMini prompt={p} /></div>
+                <div><PromptCostMini prompt={p} /></div>
                 <div style={{ fontSize: theme.fontSize.lg, fontWeight: 600, color: theme.text.primary, fontVariantNumeric: "tabular-nums", textAlign: "right" }}>{fmt$(p.cost)}</div>
               </div>
 
