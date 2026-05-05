@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from "react";
 import { theme } from "../lib/theme.js";
-import { estimateCost, hasModelPricing } from "../lib/pricing.js";
+import { estimateCost, hasModelPricing, getModelPrice } from "../lib/pricing.js";
+import { estimateImageTokens, imageDollarCost } from "../lib/imageTokenEstimate.js";
 
 // Cost view uses theme.cost.* tokens (defined in src/lib/theme.js).
 // These are categorical color roles that change with light/dark mode.
@@ -402,9 +403,31 @@ function LLMDetail(props) {
 
   var recommitCallout = null;
   if (ev.modelSwitched) {
+    var fresh = Math.max(0, ev.promptTokens - (ev.cached || 0));
+    var hasServiceCache = (ev.cached || 0) > 0;
+    var isSubagent = (ev.name || "").indexOf("runSubagent") !== -1;
+    var hadPriorSameModel = (ev.priorSameModelPt || 0) > 0;
+
+    var headline, body;
+    if (isSubagent) {
+      headline = <>⇄ <b style={{ color: theme.text.primary }}>Subagent invocation</b></>;
+      body = <>this is a fresh conversation thread spawned by a tool call. Subagents do <b>not</b> inherit the parent agent's per-session cache, even when they run on the same model ({ev.model}).</>;
+    } else if (hadPriorSameModel) {
+      headline = <>↺ <b style={{ color: theme.text.primary }}>Cache reset</b></>;
+      body = <>your previous call on <b style={{ color: theme.text.primary }}>{ev.model}</b> had <b style={{ color: theme.text.primary }}>{fmtT(ev.priorSameModelPt)} tok</b> of context, but the immediately prior LLM call used a different model (typically a small overhead call like <code>title</code> or <code>promptCategorization</code>). Per-session cache is short-lived across model bounces, so most of it was evicted.</>;
+    } else {
+      headline = <>⇄ <b style={{ color: theme.text.primary }}>Model switch</b></>;
+      body = <>this call is on <b style={{ color: theme.text.primary }}>{ev.model}</b>, which has not been used in this session before. Per-session cache from prior models does not carry over.</>;
+    }
+
     recommitCallout = (
       <div style={{ background: theme.cost.switchBg, border: "1px solid " + theme.cost.switchBorder, color: theme.cost.switchText, padding: "8px 11px", margin: "0 0 12px", borderRadius: 4, fontSize: theme.fontSize.sm, lineHeight: 1.55 }}>
-        ⇄ <b style={{ color: theme.text.primary }}>Model switch</b> -- this call is on <b style={{ color: theme.text.primary }}>{ev.model}</b>, a different model than the previous call. The cache is per-model, so all <b style={{ color: theme.text.primary }}>{fmtT(ev.promptTokens)} tok</b> are genuinely new context for this model (no recommit possible -- there was no prior cache to recommit from).
+        {headline} -- {body}
+        {hasServiceCache ? (
+          <> Of the <b style={{ color: theme.text.primary }}>{fmtT(ev.promptTokens)} tok</b> sent, <b style={{ color: theme.text.primary }}>{fmtT(ev.cached)} tok</b> still hit cache -- these come from Copilot's <b>shared service-side cache</b> (common system prompt and tool defs that are warm across sessions and users). The remaining <b style={{ color: theme.text.primary }}>{fmtT(fresh)} tok</b> are billed as new.</>
+        ) : (
+          <> All <b style={{ color: theme.text.primary }}>{fmtT(ev.promptTokens)} tok</b> are billed as new for this call.</>
+        )}
       </div>
     );
   } else if (ev.recommit > 100) {
@@ -421,42 +444,75 @@ function LLMDetail(props) {
         What happened in this LLM call
       </h4>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10, marginBottom: 14 }}>
-        <div style={{ background: theme.bg.surface, border: "1px solid " + theme.cost.switchBorder, borderRadius: 5, padding: "10px 12px" }}>
-          <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 5 }}>▶ Input (context window)</div>
-          <div style={{ fontSize: theme.fontSize.lg, color: theme.cost.cached, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{fmtT(ev.promptTokens)} tok</div>
-          <div style={{ fontSize: theme.fontSize.xs, color: theme.text.secondary, marginTop: 3 }}>cache + new combined</div>
-        </div>
-        <div style={{ background: theme.bg.surface, border: "1px solid " + theme.cost.okBorder, borderRadius: 5, padding: "10px 12px" }}>
-          <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 5 }}>▲ Net new vs previous call</div>
-          <div style={{ fontSize: theme.fontSize.lg, color: theme.cost.fresh, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{fmtTSigned(ev.deltaVsPrev)} tok</div>
-          <div style={{ fontSize: theme.fontSize.xs, color: theme.text.secondary, marginTop: 3 }}>{ev.modelSwitched ? "new model -- cache reset" : (ev.prevPt ? "prev call had " + fmtT(ev.prevPt) + " ctx" : "first call in session")}</div>
-        </div>
-        <div style={{ background: theme.bg.surface, border: "1px solid " + theme.cost.recommitBorder, borderRadius: 5, padding: "10px 12px" }}>
-          <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 5 }}>$ Billed as new (full + premium)</div>
-          <div style={{ fontSize: theme.fontSize.lg, color: theme.cost.cwrite, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{fmtT(ev.newTotal)} tok</div>
-          <div style={{ fontSize: theme.fontSize.xs, color: theme.text.secondary, marginTop: 3 }}>{ev.recommit > 100 ? "incl. " + fmtT(ev.recommit) + " cache recommit" : "minimal recommit"}</div>
-        </div>
         {(function () {
           var hasPx = ev.model && hasModelPricing(ev.model);
-          var inCost = hasPx ? estimateCost({ inputTokens: ev.newTotal || 0, outputTokens: 0, cacheRead: ev.cached || 0, cacheWrite: 0 }, ev.model) : null;
-          var outCost = hasPx ? estimateCost({ inputTokens: 0, outputTokens: ev.output || 0, cacheRead: 0, cacheWrite: 0 }, ev.model) : null;
+          // Granular cost components -- estimateCost handles the per-model
+          // ratios (cache-read at ~10% of input for Anthropic / 50% for GPT,
+          // cache-write at 125% / 100%, etc.). Decomposing lets us label each
+          // KPI card with the dollars it contributed.
+          var cachedCost = hasPx ? estimateCost({ inputTokens: 0, outputTokens: 0, cacheRead: ev.cached || 0, cacheWrite: 0 }, ev.model) : 0;
+          var freshCost  = hasPx ? estimateCost({ inputTokens: ev.fresh || 0, outputTokens: 0, cacheRead: 0, cacheWrite: 0 }, ev.model) : 0;
+          var cwriteCost = hasPx ? estimateCost({ inputTokens: 0, outputTokens: 0, cacheRead: 0, cacheWrite: ev.cacheWrite || 0 }, ev.model) : 0;
+          var newBillCost = freshCost + cwriteCost;
+          var inputCost = cachedCost + newBillCost;
+          var outputCost = hasPx ? estimateCost({ inputTokens: 0, outputTokens: ev.output || 0, cacheRead: 0, cacheWrite: 0 }, ev.model) : 0;
+          var pctNew = inputCost > 0 ? Math.round(100 * newBillCost / inputCost) : 0;
+          var pctCache = 100 - pctNew;
           return (
-            <div style={{ background: theme.bg.surface, border: "1px solid " + theme.border.default, borderRadius: 5, padding: "10px 12px" }}
-                 title={hasPx ? "Output is billed at the model's output rate (typically ~5x input). Already counted in Total cost." : "Pricing unknown for this model"}>
-              <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 5 }}>◀ Output (model wrote)</div>
-              <div style={{ fontSize: theme.fontSize.lg, color: theme.text.primary, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{fmtT(ev.output)} tok</div>
-              <div style={{ fontSize: theme.fontSize.xs, color: theme.text.secondary, marginTop: 3, fontVariantNumeric: "tabular-nums" }}>
-                {hasPx
-                  ? fmt$(outCost) + " output · " + fmt$(inCost) + " input · " + fmt$(ev.cost) + " total"
-                  : "this call: " + fmt$(ev.cost) + " total"}
-              </div>
-            </div>
+          <>
+        <div style={{ background: theme.bg.surface, border: "1px solid " + theme.cost.switchBorder, borderRadius: 5, padding: "10px 12px" }}
+             title={hasPx ? "Total input cost = cache-read + billed-as-new (fresh + cache-write). Cache reads are charged at the model's discounted cache rate." : ""}>
+          <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 5 }}>▶ Input (context window)</div>
+          <div style={{ fontSize: theme.fontSize.lg, color: theme.cost.cached, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{fmtT(ev.promptTokens)} tok</div>
+          <div style={{ fontSize: theme.fontSize.xs, color: theme.text.secondary, marginTop: 3, fontVariantNumeric: "tabular-nums" }}>
+            {hasPx ? fmt$(inputCost) + " input cost" : "cache + new combined"}
+          </div>
+        </div>
+        <div style={{ background: theme.bg.surface, border: "1px solid " + theme.cost.okBorder, borderRadius: 5, padding: "10px 12px" }}
+             title="Net new = how much the context grew vs the previous call on this model (in tokens). The cost split shows what share of this call's input dollars went to cache reads vs billed-as-new content.">
+          <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 5 }}>▲ Net new vs previous call</div>
+          <div style={{ fontSize: theme.fontSize.lg, color: theme.cost.fresh, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{fmtTSigned(ev.deltaVsPrev)} tok</div>
+          <div style={{ fontSize: theme.fontSize.xs, color: theme.text.secondary, marginTop: 3, fontVariantNumeric: "tabular-nums" }}>
+            {hasPx && inputCost > 0
+              ? pctCache + "% from cache · " + pctNew + "% billed-new"
+              : (ev.modelSwitched ? "new model -- cache reset" : (ev.prevPt ? "prev call had " + fmtT(ev.prevPt) + " ctx" : "first call in session"))}
+          </div>
+        </div>
+        <div style={{ background: theme.bg.surface, border: "1px solid " + theme.cost.recommitBorder, borderRadius: 5, padding: "10px 12px" }}
+             title="Tokens the API treated as new this call: fresh content plus any cache-write tokens (re-committed at premium rate).">
+          <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 5 }}>$ Billed as new (full + premium)</div>
+          <div style={{ fontSize: theme.fontSize.lg, color: theme.cost.cwrite, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{fmtT(ev.newTotal)} tok</div>
+          <div style={{ fontSize: theme.fontSize.xs, color: theme.text.secondary, marginTop: 3, fontVariantNumeric: "tabular-nums" }}>
+            {hasPx
+              ? fmt$(newBillCost) + " billed-new cost" + (ev.recommit > 100 ? " · incl. " + fmtT(ev.recommit) + " recommit" : "")
+              : (ev.recommit > 100 ? "incl. " + fmtT(ev.recommit) + " cache recommit" : "minimal recommit")}
+          </div>
+        </div>
+        <div style={{ background: theme.bg.surface, border: "1px solid " + theme.border.default, borderRadius: 5, padding: "10px 12px" }}
+             title={hasPx ? "Output is billed at the model's output rate (typically ~5x input)." : "Pricing unknown for this model"}>
+          <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 5 }}>◀ Output (model wrote)</div>
+          <div style={{ fontSize: theme.fontSize.lg, color: theme.text.primary, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{fmtT(ev.output)} tok</div>
+          <div style={{ fontSize: theme.fontSize.xs, color: theme.text.secondary, marginTop: 3, fontVariantNumeric: "tabular-nums" }}>
+            {hasPx ? fmt$(outputCost) + " output cost" : "this call: " + fmt$(ev.cost) + " total"}
+          </div>
+        </div>
+          </>
           );
         })()}
       </div>
       {missCallout}
       {recommitCallout}
-      {ev.newImages && ev.newImages.length > 0 && (
+      {ev.newImages && ev.newImages.length > 0 && (() => {
+        var price = ev.model ? getModelPrice(ev.model) : null;
+        var imgRows = ev.newImages.map(function (img) {
+          var tok = estimateImageTokens(ev.model, img.detail);
+          var dollars = imageDollarCost(price, tok);
+          return { img: img, tok: tok, dollars: dollars };
+        });
+        var totalTok = imgRows.reduce(function (s, r) { return s + r.tok; }, 0);
+        var totalDollars = imgRows.reduce(function (s, r) { return s + r.dollars; }, 0);
+        var anyKnown = imgRows.some(function (r) { return r.tok > 0; });
+        return (
         <div style={{
           background: theme.bg.surface, border: "1px solid " + theme.border.default,
           borderRadius: 5, padding: "9px 12px", marginBottom: 12,
@@ -470,22 +526,30 @@ function LLMDetail(props) {
               </span>
             )}
           </div>
-          {ev.newImages.map(function (img, i) {
+          {imgRows.map(function (r, i) {
             return (
               <div key={i} style={{ display: "flex", gap: 10, alignItems: "baseline", fontFamily: theme.font.mono, fontSize: theme.fontSize.xs }}>
-                <span style={{ color: theme.text.primary }}>{img.mediaType}</span>
-                {img.detail && <span style={{ color: theme.text.muted }}>· detail: {img.detail}</span>}
-                <a href={img.url} target="_blank" rel="noreferrer" style={{ color: theme.text.muted, textDecoration: "underline", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={img.url}>
-                  {img.url.replace(/^https?:\/\//, "")}
+                <span style={{ color: theme.text.primary }}>{r.img.mediaType}</span>
+                {r.img.detail && <span style={{ color: theme.text.muted }}>· detail: {r.img.detail}</span>}
+                {r.tok > 0 && (
+                  <span style={{ color: theme.text.muted }} title="Estimated from model + detail field. The export does not report image token usage; this is a documented vendor approximation.">
+                    · ~{fmtT(r.tok)} tok{r.dollars > 0 ? " (~" + fmt$(r.dollars) + ")" : ""}
+                  </span>
+                )}
+                <a href={r.img.url} target="_blank" rel="noreferrer" style={{ color: theme.text.muted, textDecoration: "underline", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.img.url}>
+                  {r.img.url.replace(/^https?:\/\//, "")}
                 </a>
               </div>
             );
           })}
           <div style={{ fontStyle: "italic", color: theme.text.muted, fontSize: theme.fontSize.xs, marginTop: 6 }}>
-            Token cost not estimated -- the export does not report image token usage, byte size, or dimensions.
+            {anyKnown
+              ? "Total est. ~" + fmtT(totalTok) + " tok" + (totalDollars > 0 ? " (~" + fmt$(totalDollars) + ")" : "") + " -- estimated from model + detail field; the export does not report exact image tokens."
+              : "Token cost not estimated -- no documented image cost rule for this model."}
           </div>
         </div>
-      )}
+        );
+      })()}
       <NewBlock newPerBucket={ev.newPerBucket} newTotal={ev.newTotal} totalIn={ev.promptTokens} label="this call" />
       {(function () {
         var npb = ev.newPerBucket || {};
@@ -507,9 +571,32 @@ function LLMDetail(props) {
               <ToolGroups groups={ev.toolGroups} />
             </>
           );
-          if (k === "history") return <HistoryList msgs={ev.historyMsgs} />;
-          if (k === "tool_results") return <ToolResultList msgs={ev.toolResultMsgs} />;
-          if (k === "current") return <div style={textBlockStyle}>{ev.currentText || "(empty)"}{ev.currentText && ev.currentText.length >= 400 ? "…" : ""}</div>;
+          if (k === "history") return (
+            <>
+              <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, marginBottom: 4 }}>
+                {ev.newHistoryMsgs.length} new message{ev.newHistoryMsgs.length === 1 ? "" : "s"} appended (of {ev.historyMsgs.length} total in history)
+              </div>
+              <HistoryList msgs={ev.newHistoryMsgs} />
+            </>
+          );
+          if (k === "tool_results") return (
+            <>
+              <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, marginBottom: 4 }}>
+                {ev.newToolResultMsgs.length} new tool result{ev.newToolResultMsgs.length === 1 ? "" : "s"} appended (of {ev.toolResultMsgs.length} total)
+              </div>
+              <ToolResultList msgs={ev.newToolResultMsgs} />
+            </>
+          );
+          if (k === "current") return (
+            <>
+              <div style={textBlockStyle}>{ev.currentText || "(empty)"}{ev.currentText && ev.currentText.length >= 400 ? "…" : ""}</div>
+              {ev.imageTokensEst > 0 && (
+                <div style={{ marginTop: 6, fontSize: theme.fontSize.xs, color: theme.text.muted, fontStyle: "italic" }}>
+                  Includes ~{fmtT(ev.imageTokensEst)} estimated image tokens (see 📎 attachment block above for per-image breakdown).
+                </div>
+              )}
+            </>
+          );
           return null;
         };
         return (
@@ -745,21 +832,31 @@ function Kpis(props) {
     });
   }
   if (sa.imageCount > 0) {
-    notes.push({
-      text: "+ image cost not measured (" + sa.imageCount + " " + (sa.imageCount === 1 ? "image" : "images") + ")",
-      title: "The export carries image URL + media type only. No byte size, dimensions, or token usage is reported, so image tokens are NOT included in this total.",
-      color: theme.text.muted,
-    });
+    if (sa.imageCost > 0) {
+      notes.push({
+        text: "+ ~" + fmt$(sa.imageCost) + " est. images (" + sa.imageCount + " " + (sa.imageCount === 1 ? "image" : "images") + ", ~" + fmtT(sa.imageTokens) + " tok)",
+        title: "Image input tokens are estimated from each attachment's `detail` field and the model's documented vision pricing rule. The export does not report exact image tokens, so this is an approximation that is NOT included in the headline Total cost.",
+        color: theme.text.secondary,
+      });
+    } else {
+      notes.push({
+        text: "+ image cost not measured (" + sa.imageCount + " " + (sa.imageCount === 1 ? "image" : "images") + ")",
+        title: "Images are attached but no documented vision-pricing rule is available for this model, so token cost can't be estimated.",
+        color: theme.text.muted,
+      });
+    }
   }
   var totalCostItem = { l: "Total cost", v: fmt$(t.cost), notes: notes };
   var items = [
     totalCostItem,
     { l: "Billed input", v: fmtT(t.promptTokens), d: fmtT(t.cached) + " cached (" + (100 * t.cacheHitRate).toFixed(0) + "%)" },
     { l: "Output", v: fmtT(t.output) },
-    { l: "Cache write", v: fmtT(t.cacheWrite) },
     { l: "LLM calls", v: "" + t.llmCalls },
     { l: "Tool calls", v: "" + t.toolCalls },
   ];
+  if (t.cacheWrite > 0) {
+    items.splice(3, 0, { l: "Cache write", v: fmtT(t.cacheWrite) });
+  }
   if (t.unexpectedMissCount > 0) {
     items.push({ l: "⚠ Unexpected misses", v: "" + t.unexpectedMissCount, d: "wasted ~" + fmt$(t.unexpectedMissCost), warn: true });
   }
@@ -830,7 +927,7 @@ function Legend() {
 export default function CostView(props) {
   var analysis = props.analysis;
   var [openRow, setOpenRow] = useState({});
-  var [showOverhead, setShowOverhead] = useState(true);
+  var [showOverhead, setShowOverhead] = useState(false);
 
   if (!analysis || !analysis.prompts || !analysis.prompts.length) {
     return (
@@ -861,7 +958,7 @@ export default function CostView(props) {
   var subagentEst = useMemo(function () {
     var saCount = 0, saCost = 0;
     var ohCount = 0, ohCost = 0;
-    var imgCount = 0;
+    var imgCount = 0, imgCost = 0, imgTokens = 0;
     analysis.prompts.forEach(function (p) {
       p.events.forEach(function (e) {
         if (e.kind === "tool" && e.subagent) {
@@ -880,11 +977,17 @@ export default function CostView(props) {
           }
           if (e.newImages && e.newImages.length > 0) {
             imgCount += e.newImages.length;
+            var price = e.model ? getModelPrice(e.model) : null;
+            for (var ii = 0; ii < e.newImages.length; ii++) {
+              var tok = estimateImageTokens(e.model, e.newImages[ii].detail);
+              imgCost += imageDollarCost(price, tok);
+              imgTokens += tok;
+            }
           }
         }
       });
     });
-    return { count: saCount, cost: saCost, overheadCount: ohCount, overheadCost: ohCost, imageCount: imgCount };
+    return { count: saCount, cost: saCost, overheadCount: ohCount, overheadCost: ohCost, imageCount: imgCount, imageCost: imgCost, imageTokens: imgTokens };
   }, [analysis]);
 
   var rowKey = function (pi, ei) { return pi + ":" + ei; };

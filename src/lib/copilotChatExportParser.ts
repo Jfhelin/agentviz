@@ -38,6 +38,7 @@ import {
   type ToolDef,
 } from "./cacheAnalysis";
 import { estimateCost } from "./pricing.js";
+import { estimateImageTokens } from "./imageTokenEstimate.js";
 import type {
   NormalizedEvent,
   ParsedSession,
@@ -105,6 +106,11 @@ interface RawLog {
 interface RawMessage {
   role: 0 | 1 | 2 | 3;
   content: string | RawContentPart[];
+  // Assistant tool-call payload (Copilot Chat export uses camelCase). Their
+  // JSON-serialized arguments contribute meaningfully to `prompt_tokens` when
+  // the message is replayed as history on the next call -- we MUST count them.
+  toolCalls?: unknown;
+  tool_calls?: unknown;
 }
 
 interface RawContentPart {
@@ -140,11 +146,20 @@ function chars_to_tokens(chars: number): number {
 
 function messageText(msg: RawMessage): string {
   const c = msg.content;
-  if (typeof c === "string") return c;
-  if (!Array.isArray(c)) return "";
   let out = "";
-  for (const p of c) {
-    if (p && typeof p === "object" && typeof p.text === "string") out += p.text;
+  if (typeof c === "string") out = c;
+  else if (Array.isArray(c)) {
+    for (const p of c) {
+      if (p && typeof p === "object" && typeof p.text === "string") out += p.text;
+    }
+  }
+  // Include serialized tool_calls -- the API counts these toward prompt_tokens
+  // when the assistant message is replayed as history. Without this, big
+  // tool_call argument payloads (e.g. file edits) appear as "unaccounted"
+  // growth and get falsely attributed to other buckets by the scaling step.
+  const tc = msg.toolCalls ?? msg.tool_calls;
+  if (tc) {
+    try { out += JSON.stringify(tc); } catch { /* ignore */ }
   }
   return out;
 }
@@ -371,6 +386,10 @@ export interface CostAnalysisCall {
   output: number;
   cost: number;
   prevPt: number;
+  /** prompt_tokens of the previous call ON THE SAME MODEL, even when
+   * modelSwitched=true. 0 only when the model has never appeared before
+   * in this session. */
+  priorSameModelPt: number;
   deltaVsPrev: number;
   modelSwitched: boolean;
   newTotal: number;
@@ -380,6 +399,11 @@ export interface CostAnalysisCall {
   cacheMissDiag: CallAnalysis["cacheMissDiag"];
   newPerBucket: ComponentBreakdown;
   components: ComponentBreakdown;
+  /** Estimated input tokens for the new images on this call (added to the
+   * `current` bucket of `components` for display). 0 when no images are new
+   * or the model has no documented image-token rule. Approximation only --
+   * the export does not report exact image token usage. */
+  imageTokensEst: number;
   totalTools: number;
   toolGroups: ClassifiedCall["toolGroups"];
   historyMsgs: ClassifiedCall["historyMsgs"];
@@ -392,6 +416,12 @@ export interface CostAnalysisCall {
    * does not contribute new content -- only first appearance (or first
    * appearance after a model switch) counts as new. */
   newImages: ClassifiedCall["images"];
+  /** Subset of `historyMsgs` that were appended since the previous same-model
+   * call (chat history is append-only, so the suffix). On a model switch or
+   * the very first call, this is the full history. */
+  newHistoryMsgs: ClassifiedCall["historyMsgs"];
+  /** Subset of `toolResultMsgs` appended since the previous same-model call. */
+  newToolResultMsgs: ClassifiedCall["toolResultMsgs"];
   systemPreview: string;
   currentText: string;
   cumCostAfter: number;
@@ -609,6 +639,12 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
   // appear (or first appear after a model switch / cache miss). Re-sending
   // the same imageUrl on subsequent calls is part of the cached prefix.
   const prevImageUrlsByModel = new Map<string, Set<string>>();
+  // Per-model count of history / tool-result messages on the previous same-
+  // model call. History grows append-only (chat semantics), so anything past
+  // the prior count on this call is genuinely new content. Reset on model
+  // switch (handled inline by clearing on first call to a new model).
+  const prevHistoryCountByModel = new Map<string, number>();
+  const prevToolResultCountByModel = new Map<string, number>();
 
   classifiedByPrompt.forEach((c, pi) => {
     const promptText = root.prompts[pi].prompt ?? "";
@@ -739,6 +775,33 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
       for (const img of cls.images) updatedSet.add(img.url);
       prevImageUrlsByModel.set(model, updatedSet);
 
+      // History and tool-results are append-only across calls in a chat
+      // session. The "new" suffix is everything past the previous same-model
+      // call's message count. A model switch resets this baseline.
+      const prevHistCount = ca.modelSwitched ? 0 : (prevHistoryCountByModel.get(model) ?? 0);
+      const prevTrCount = ca.modelSwitched ? 0 : (prevToolResultCountByModel.get(model) ?? 0);
+      const newHistoryMsgs = cls.historyMsgs.slice(prevHistCount);
+      const newToolResultMsgs = cls.toolResultMsgs.slice(prevTrCount);
+      prevHistoryCountByModel.set(model, cls.historyMsgs.length);
+      prevToolResultCountByModel.set(model, cls.toolResultMsgs.length);
+
+      // Estimated image-input tokens for the new images on this call.
+      // export does not report exact image token usage, so we use a documented
+      // vendor approximation from `imageTokenEstimate`. These are added to the
+      // `current` bucket of the displayed components so the stack bar reflects
+      // image weight, but cacheAnalysis has already finished using the
+      // un-bumped values: the API's `prompt_tokens` already includes vision
+      // tokens for capable models, so cacheAnalysis correctly attributes them
+      // to existing buckets via the rescale factor. The bump here is
+      // visualization-only.
+      let imageTokensEst = 0;
+      for (const img of newImages) {
+        imageTokensEst += estimateImageTokens(model, img.detail);
+      }
+      const componentsForDisplay: ComponentBreakdown = imageTokensEst > 0
+        ? { ...cls.components, current: cls.components.current + imageTokensEst }
+        : cls.components;
+
       const callEvent: CostAnalysisCall & { kind: "llm" } = {
         kind: "llm",
         id: log.id ?? `p${pi}-call-${analysisCallIdx}`,
@@ -756,6 +819,7 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
         output: out_t,
         cost,
         prevPt: ca.prevPt,
+        priorSameModelPt: ca.priorSameModelPt,
         deltaVsPrev: ca.deltaVsPrev,
         modelSwitched: ca.modelSwitched,
         newTotal: ca.newTotal,
@@ -764,13 +828,16 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
         unexpectedMiss: ca.unexpectedMiss,
         cacheMissDiag: ca.cacheMissDiag,
         newPerBucket: ca.newPerBucket,
-        components: cls.components,
+        components: componentsForDisplay,
+        imageTokensEst,
         totalTools: cls.totalTools,
         toolGroups: cls.toolGroups,
         historyMsgs: cls.historyMsgs,
         toolResultMsgs: cls.toolResultMsgs,
         images: cls.images,
         newImages,
+        newHistoryMsgs,
+        newToolResultMsgs,
         systemPreview: cls.systemPreview,
         currentText: cls.currentText,
         cumCostAfter: cumCost,

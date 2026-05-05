@@ -48,6 +48,13 @@ export function hasModelPricing(modelName) {
   return lookupPrice(modelName) !== null;
 }
 
+/** Returns the raw price row for a model (or null). Useful for callers that
+ * need the per-input rate to estimate ad-hoc costs (e.g. image attachments
+ * billed at standard input rate but counted outside `tokenUsage`). */
+export function getModelPrice(modelName) {
+  return lookupPrice(modelName);
+}
+
 /**
  * Estimate cost in USD for a tokenUsage object.
  * tokenUsage: { inputTokens, outputTokens, cacheRead, cacheWrite }

@@ -61,6 +61,11 @@ export interface CallAnalysis {
   id: string;
   model: string;
   modelSwitched: boolean;
+  /** prompt_tokens of the previous call ON THE SAME MODEL, even when
+   * modelSwitched is true. Lets the UI tell apart "first time on this model"
+   * from "we used this model earlier and lost the cache". 0 only when this
+   * really is the first call on this model in the session. */
+  priorSameModelPt: number;
   /** prompt_tokens of the previous call ON THE SAME MODEL (0 if first). */
   prevPt: number;
   /**
@@ -265,6 +270,7 @@ export function analyzeSessionCalls(
         id: call.id,
         model: call.model,
         modelSwitched,
+        priorSameModelPt,
         prevPt,
         deltaVsPrev,
         newTotal,
