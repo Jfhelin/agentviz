@@ -799,54 +799,131 @@ function ToolDetail(props) {
   );
 }
 
-// Per-prompt cost breakdown by bucket. Honest decomposition that ties back to
-// p.cost: for each LLM call we know per-bucket TOTAL input split (components),
-// per-bucket BILLED-AS-NEW split (newPerBucket), and call-level fresh vs
-// cache_write split. We attribute:
-//   cached_in_bucket = max(0, components[b] - newPerBucket[b])  -> cacheRead
-//   new_in_bucket    = newPerBucket[b]
-//     -> split fresh / cwrite proportionally to call-level fresh / cwrite
-// then sum estimateCost() per bucket. Output cost goes to its own bucket.
-// Sum of bucket costs ≈ sum of per-call ev.cost (within ~0.5% rounding).
 function computePromptCostByBucket(p) {
-  var byBucket = { system: 0, tool_defs: 0, history: 0, tool_results: 0, current: 0, output: 0 };
+  // returns: { [bucket]: { cost, cachedTok, newTok, savings, sample, calls? } }
+  // sample = string summary for the inline label
+  // calls = array of per-call breakdown for the tooltip
+  var byBucket = {};
+  CTX_KEYS.forEach(function (k) {
+    byBucket[k] = { cost: 0, cachedTok: 0, newTok: 0, savings: 0, sample: "", tooltip: "" };
+  });
   if (!p || !p.events) return byBucket;
-  for (var i = 0; i < p.events.length; i++) {
-    var ev = p.events[i];
-    if (ev.kind !== "llm") continue;
-    if (!ev.model || !hasModelPricing(ev.model)) continue;
+  var llmEvents = p.events.filter(function (e) { return e.kind === "llm"; });
+  if (!llmEvents.length) return byBucket;
+  var lastLLM = llmEvents[llmEvents.length - 1];
+  var totalOutputTok = 0;
+
+  llmEvents.forEach(function (ev) {
+    if (!ev.model || !hasModelPricing(ev.model)) return;
+    var price = getModelPrice(ev.model);
+    if (!price) return;
+    var cacheReadRatio = price.cacheReadRatio != null ? price.cacheReadRatio : 0.1;
     var comp = ev.components || {};
     var npb = ev.newPerBucket || {};
     var newTotal = (ev.fresh || 0) + (ev.cacheWrite || 0);
     var freshShare = newTotal > 0 ? (ev.fresh || 0) / newTotal : 1;
-    for (var ki = 0; ki < CTX_INPUT_KEYS.length; ki++) {
-      var k = CTX_INPUT_KEYS[ki];
+    CTX_INPUT_KEYS.forEach(function (k) {
       var totalIn = comp[k] || 0;
       var newB = npb[k] || 0;
       var cachedB = Math.max(0, totalIn - newB);
       var freshB = newB * freshShare;
       var cwB = newB * (1 - freshShare);
-      byBucket[k] += estimateCost({ inputTokens: freshB, cacheRead: cachedB, cacheWrite: cwB }, ev.model);
-    }
-    byBucket.output += estimateCost({ outputTokens: ev.output || 0 }, ev.model);
+      byBucket[k].cost    += estimateCost({ inputTokens: freshB, cacheRead: cachedB, cacheWrite: cwB }, ev.model);
+      byBucket[k].cachedTok += cachedB;
+      byBucket[k].newTok    += newB;
+      // Savings = what cached_tokens would have cost at full input rate, minus
+      // what they actually cost at the cache-read rate.
+      byBucket[k].savings += cachedB * price.input * (1 - cacheReadRatio) / 1e6;
+    });
+    byBucket.output.cost += estimateCost({ outputTokens: ev.output || 0 }, ev.model);
+    byBucket.output.newTok += ev.output || 0;
+    totalOutputTok += ev.output || 0;
+  });
+
+  // Per-bucket inline samples (one short line) + tooltips (multi-line).
+  // System: stable across calls; report the prompt size from any call.
+  var sysTok = (lastLLM.components || {}).system || 0;
+  byBucket.system.sample = sysTok > 0 ? "1 system prompt (" + fmtT(sysTok) + " tok)" : "";
+  byBucket.system.tooltip = lastLLM.systemPreview ? "First 400 chars:\n" + lastLLM.systemPreview : "";
+
+  // Tool defs: aggregate from last call (tools are stable per session).
+  var groups = lastLLM.toolGroups || [];
+  var totalTools = groups.reduce(function (a, g) { return a + (g.tools ? g.tools.length : 0); }, 0);
+  byBucket.tool_defs.sample = totalTools > 0
+    ? totalTools + " tools (" + groups.map(function (g) { return (g.tools ? g.tools.length : 0) + " " + g.source; }).join(", ") + ")"
+    : "";
+  if (groups.length) {
+    var topTools = [].concat.apply([], groups.map(function (g) { return g.tools || []; }))
+      .sort(function (a, b) { return (b.tokens || 0) - (a.tokens || 0); }).slice(0, 8);
+    byBucket.tool_defs.tooltip = "Top tools by size:\n" + topTools.map(function (t) {
+      return "  " + t.name + " · " + fmtT(t.tokens || 0) + " tok";
+    }).join("\n");
   }
+
+  // History: count user vs assistant from last call (history grows monotonically).
+  var hms = lastLLM.historyMsgs || [];
+  var nUser = hms.filter(function (m) { return m.role === "user"; }).length;
+  var nAsst = hms.filter(function (m) { return m.role === "assistant"; }).length;
+  byBucket.history.sample = hms.length > 0
+    ? hms.length + " message" + (hms.length === 1 ? "" : "s") + " (" + nUser + " user, " + nAsst + " assistant)"
+    : "";
+
+  // Tool results: group by tool name (first word before ":" in label).
+  var trms = lastLLM.toolResultMsgs || [];
+  if (trms.length) {
+    var byTool = {};
+    trms.forEach(function (m) {
+      var label = m.label || "result";
+      var idx = label.indexOf(":");
+      var name = idx > 0 ? label.slice(0, idx) : label;
+      byTool[name] = (byTool[name] || 0) + 1;
+    });
+    var pairs = Object.keys(byTool).map(function (n) { return { n: n, c: byTool[n] }; })
+      .sort(function (a, b) { return b.c - a.c; });
+    byBucket.tool_results.sample = trms.length + " result" + (trms.length === 1 ? "" : "s")
+      + " (" + pairs.slice(0, 3).map(function (p) { return p.c + "× " + p.n; }).join(", ")
+      + (pairs.length > 3 ? ", …" : "") + ")";
+    byBucket.tool_results.tooltip = "By tool:\n" + pairs.map(function (p) { return "  " + p.c + "× " + p.n; }).join("\n");
+  }
+
+  // Current prompt: just chars/tokens of the user's actual ask.
+  var curTok = (lastLLM.components || {}).current || 0;
+  byBucket.current.sample = curTok > 0 ? "user's request (" + fmtT(curTok) + " tok)" : "";
+  byBucket.current.tooltip = lastLLM.currentText ? "Text:\n" + lastLLM.currentText.slice(0, 400) : "";
+
+  // Output: model's response totals.
+  byBucket.output.sample = totalOutputTok > 0 ? "model wrote " + fmtT(totalOutputTok) + " tok across " + llmEvents.length + " call" + (llmEvents.length === 1 ? "" : "s") : "";
+
   return byBucket;
 }
 
-function PromptCostMini(props) {
+function PromptCostBreakdown(props) {
   var p = props.prompt;
   var byBucket = useMemo(function () { return computePromptCostByBucket(p); }, [p]);
-  var total = CTX_KEYS.reduce(function (a, k) { return a + (byBucket[k] || 0); }, 0);
+  var total = CTX_KEYS.reduce(function (a, k) { return a + (byBucket[k].cost || 0); }, 0);
   if (total <= 0) return null;
+  var totalSavings = CTX_KEYS.reduce(function (a, k) { return a + (byBucket[k].savings || 0); }, 0);
   return (
-    <div style={{ background: theme.bg.base, border: "1px solid " + theme.border.default, borderRadius: 4, padding: "6px 9px" }}>
-      <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4, display: "flex", justifyContent: "space-between" }}>
+    <div style={{
+      gridColumn: "1 / -1",
+      background: theme.bg.surface,
+      borderBottom: "1px solid " + theme.border.subtle,
+      padding: "10px 18px 14px",
+    }}>
+      <div style={{
+        display: "flex", justifyContent: "space-between", alignItems: "baseline",
+        fontSize: theme.fontSize.xs, color: theme.text.muted,
+        textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6,
+      }}>
         <span>Cost by component</span>
-        <b style={{ color: theme.text.primary }}>{fmt$(total)}</b>
+        <span>
+          <span style={{ marginRight: 12 }}>cache saved <b style={{ color: theme.cost.cached }}>{fmt$(totalSavings)}</b></span>
+          <b style={{ color: theme.text.primary }}>{fmt$(total)}</b>
+        </span>
       </div>
-      <div style={{ height: 10, background: theme.bg.surface, borderRadius: 1, overflow: "hidden", display: "flex" }}>
+      <div style={{ height: 10, background: theme.bg.base, borderRadius: 1, overflow: "hidden", display: "flex", marginBottom: 8 }}>
         {CTX_KEYS.map(function (k) {
-          var v = byBucket[k] || 0;
+          var v = byBucket[k].cost || 0;
           if (v <= 0) return null;
           var w = 100 * v / total;
           return (
@@ -856,13 +933,45 @@ function PromptCostMini(props) {
           );
         })}
       </div>
-      <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, marginTop: 4, lineHeight: 1.4, display: "flex", flexWrap: "wrap", gap: "0 10px" }}>
-        {CTX_KEYS.filter(function (k) { return (byBucket[k] || 0) / total >= 0.03; }).map(function (k) {
+      <div style={{ display: "grid", gap: 4, fontSize: theme.fontSize.sm }}>
+        {CTX_KEYS.map(function (k) {
+          var b = byBucket[k];
+          if (!b.cost || b.cost <= 0) return null;
+          var pct = 100 * b.cost / total;
+          var totalTok = b.cachedTok + b.newTok;
+          var cachedPct = totalTok > 0 ? Math.round(100 * b.cachedTok / totalTok) : 0;
+          // Cache-effect text: output bucket can't be cached, so omit.
+          var cacheText = null;
+          if (k === "output") {
+            cacheText = <span style={{ color: theme.text.muted, fontStyle: "italic" }}>output (no cache)</span>;
+          } else if (k === "current") {
+            cacheText = <span style={{ color: theme.text.muted, fontStyle: "italic" }}>fresh each call</span>;
+          } else if (totalTok > 0) {
+            cacheText = (
+              <span title={"Cached: " + fmtT(b.cachedTok) + " tok · New: " + fmtT(b.newTok) + " tok"}>
+                <b style={{ color: theme.cost.cached }}>{cachedPct}%</b> cached
+                {b.savings > 0 ? <span style={{ color: theme.text.muted }}> · saved <b style={{ color: theme.cost.cached }}>{fmt$(b.savings)}</b></span> : null}
+              </span>
+            );
+          }
           return (
-            <span key={k} title={CTX_LABELS[k] + ": " + fmt$(byBucket[k])}>
-              <span style={{ display: "inline-block", width: 7, height: 7, background: CTX_COLORS[k], borderRadius: 1, marginRight: 4, verticalAlign: "middle" }} />
-              {CTX_LABELS[k]} {(100 * byBucket[k] / total).toFixed(0)}%
-            </span>
+            <div key={k}
+              title={b.tooltip || ""}
+              style={{
+                display: "grid",
+                gridTemplateColumns: "16px 130px 90px 56px 1fr 2fr",
+                gap: 10, alignItems: "baseline",
+                padding: "3px 0",
+                borderTop: "1px solid " + theme.border.subtle,
+                cursor: b.tooltip ? "help" : "default",
+              }}>
+              <span style={{ display: "inline-block", width: 10, height: 10, background: CTX_COLORS[k], borderRadius: 1 }} />
+              <span style={{ color: theme.text.primary, fontWeight: 500 }}>{CTX_LABELS[k]}</span>
+              <span style={{ color: theme.text.primary, fontVariantNumeric: "tabular-nums" }}>{fmt$(b.cost)}</span>
+              <span style={{ color: theme.text.muted, fontVariantNumeric: "tabular-nums" }}>{pct.toFixed(0)}%</span>
+              <span style={{ color: theme.text.secondary, fontVariantNumeric: "tabular-nums" }}>{cacheText}</span>
+              <span style={{ color: theme.text.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b.sample}</span>
+            </div>
           );
         })}
       </div>
@@ -1236,7 +1345,7 @@ export default function CostView(props) {
                 borderBottom: "1px solid " + theme.border.default,
                 padding: "14px 18px",
                 display: "grid",
-                gridTemplateColumns: "48px 1fr 220px 220px auto",
+                gridTemplateColumns: "48px 1fr 220px auto",
                 gap: 14,
                 alignItems: "center",
               }}>
@@ -1260,9 +1369,9 @@ export default function CostView(props) {
                   </div>
                 </div>
                 <div><PromptNewMini prompt={p} /></div>
-                <div><PromptCostMini prompt={p} /></div>
                 <div style={{ fontSize: theme.fontSize.lg, fontWeight: 600, color: theme.text.primary, fontVariantNumeric: "tabular-nums", textAlign: "right" }}>{fmt$(p.cost)}</div>
               </div>
+              <PromptCostBreakdown prompt={p} />
 
               {p.events.map(function (ev, ei) {
                 var isLLM = ev.kind === "llm";
