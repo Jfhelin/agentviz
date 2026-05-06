@@ -53,6 +53,9 @@ interface EventLike {
   components?: Partial<Record<Bucket, number>>;
   responsePreview?: string;
   currentText?: string;
+  systemPreview?: string;
+  argsSummary?: string;
+  rawArgs?: string;
   /** "primary" = real user-facing chat call. "overhead" = UI/telemetry side
    * call (e.g. "title", "promptCategorization") that should be filtered out
    * when summarizing per-turn user prompts. */
@@ -170,6 +173,48 @@ export interface CachePollution {
   reason: string;
 }
 
+/** Per-run "fingerprint" that should be identical between A/B if the test
+ * holds only the variable under study. Mismatches surface as drift. */
+export interface RunFingerprint {
+  models: string[];
+  primaryModel: string | null;
+  turnCount: number;
+  llmCallCount: number;
+  firstUserPrompt: string;
+  firstUserPromptHash: string;
+  systemPromptText: string;
+  systemPromptChars: number;
+  systemPromptHash: string;
+  filesTouched: string[];   // sorted unique paths from any tool args
+  filesEdited: string[];    // sorted unique paths from edit/write/create tools
+  toolsInvoked: string[];   // sorted unique tool names actually called
+}
+
+export interface DriftRow {
+  /** Stable id for keying. */
+  key: string;
+  /** Display label for the row. */
+  label: string;
+  /** "match" = identical / "diff" = divergent / "info" = data-only, no judgement. */
+  status: "match" | "diff" | "info";
+  /** Side A summary (string for compact rendering). */
+  aText: string;
+  /** Side B summary. */
+  bText: string;
+  /** Optional extra detail (e.g. "A only:", "B only:" lists). */
+  detail?: string;
+  /** Whether this row, if drifted, likely invalidates the comparison. */
+  blocking?: boolean;
+}
+
+export interface DriftReport {
+  rows: DriftRow[];
+  /** True iff any blocking row is in "diff" state. */
+  hasBlockingDrift: boolean;
+  /** True iff any row at all is in "diff" state. */
+  hasAnyDrift: boolean;
+}
+
 export interface CostComparison {
   a: RunSummary;
   b: RunSummary;
@@ -199,6 +244,13 @@ export interface CostComparison {
   /** Cache-pollution diagnostic. When `suspect` is true the headline numbers
    * may be misleading because B inherited cache state from A (or vice-versa). */
   cachePollution: CachePollution;
+  /** Side-by-side fingerprint for both runs (model, turns, files, tools, etc.).
+   * Useful for the drift panel and direct programmatic comparisons. */
+  fingerprintA: RunFingerprint;
+  fingerprintB: RunFingerprint;
+  /** Status rows for the "Run Drift" panel that surfaces things which should
+   * be identical between A and B but might silently diverge. */
+  drift: DriftReport;
 }
 
 // ---------- Helpers ----------
@@ -570,6 +622,280 @@ function buildRecommendations(a: RunSummary, b: RunSummary, equivalent: boolean,
   return recs;
 }
 
+// ---------- Drift fingerprinting ----------
+
+/** Tool name patterns (case-insensitive substring match) that indicate the
+ * call modifies a file. Read-only tools (read_file, grep_search, list_dir)
+ * are intentionally excluded so "filesEdited" reflects intent-to-change. */
+const EDIT_TOOL_PATTERNS = [
+  "edit_file", "create_file", "write_file", "apply_patch",
+  "str_replace", "replace_string", "insert_edit", "multi_replace",
+  "edit_notebook", "create_directory",
+];
+
+function isEditTool(name: string): boolean {
+  const lc = (name || "").toLowerCase();
+  return EDIT_TOOL_PATTERNS.some((p) => lc.includes(p));
+}
+
+/** Extract the first file-path-like value out of a tool call's args. Walks
+ * the parsed-JSON object looking for canonical key names. Returns null when
+ * the args don't carry a path or aren't valid JSON. */
+function extractFilePath(rawArgs: string | undefined, argsSummary: string | undefined): string | null {
+  if (rawArgs) {
+    try {
+      const obj = JSON.parse(rawArgs);
+      if (obj && typeof obj === "object") {
+        const keys = ["filePath", "file_path", "path", "file", "filepath", "target_file", "uri"];
+        for (const k of keys) {
+          const v = (obj as Record<string, unknown>)[k];
+          if (typeof v === "string" && v.length > 0) return v;
+        }
+      }
+    } catch { /* not JSON, fall through */ }
+  }
+  // Fallback: try to pull a path-looking token out of the human summary.
+  if (argsSummary) {
+    const m = argsSummary.match(/[\w.\-]+\/[\w./\-]+/);
+    if (m) return m[0];
+  }
+  return null;
+}
+
+/** Stable, dependency-free 32-bit FNV-1a string hash. Returns 8-char hex.
+ * Sufficient to flag identity vs divergence; not for any security purpose. */
+function hashStr(s: string): string {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(16).padStart(8, "0");
+}
+
+function normalizeForHash(s: string): string {
+  return (s || "").trim().replace(/\s+/g, " ");
+}
+
+function buildFingerprint(ca: CostAnalysisLike | null | undefined, summary: RunSummary): RunFingerprint {
+  const empty: RunFingerprint = {
+    models: [], primaryModel: null,
+    turnCount: 0, llmCallCount: 0,
+    firstUserPrompt: "", firstUserPromptHash: "00000000",
+    systemPromptText: "", systemPromptChars: 0, systemPromptHash: "00000000",
+    filesTouched: [], filesEdited: [], toolsInvoked: [],
+  };
+  if (!ca || !Array.isArray(ca.prompts) || ca.prompts.length === 0) return empty;
+
+  // First user prompt: the label of the first non-overhead prompt, falling
+  // back to the currentText of the first primary LLM event. Tests typically
+  // start from a single user message so this captures "the prompt".
+  let firstUserPrompt = "";
+  for (const p of ca.prompts) {
+    const llmEvents = (p.events || []).filter((e) => e.kind === "llm" || e.kind === undefined);
+    if (llmEvents.length === 0) continue;
+    const allOverhead = llmEvents.every((e) => e.category === "overhead");
+    if (allOverhead) continue;
+    firstUserPrompt = (p.label || "").trim();
+    if (!firstUserPrompt) {
+      const firstPrimary = llmEvents.find((e) => e.category !== "overhead");
+      if (firstPrimary && firstPrimary.currentText) {
+        firstUserPrompt = firstPrimary.currentText.trim();
+      }
+    }
+    break;
+  }
+
+  // System prompt: first primary LLM event's systemPreview. Truncated by the
+  // parser to ~400 chars so it's already bounded; we just hash what we have.
+  let systemPromptText = "";
+  for (const p of ca.prompts) {
+    let found = false;
+    for (const ev of p.events || []) {
+      if (ev.kind && ev.kind !== "llm") continue;
+      if (ev.category === "overhead") continue;
+      systemPromptText = (ev.systemPreview || "").trim();
+      found = true;
+      break;
+    }
+    if (found) break;
+  }
+
+  const filesTouched = new Set<string>();
+  const filesEdited = new Set<string>();
+  const toolsInvoked = new Set<string>();
+  for (const p of ca.prompts) {
+    for (const ev of p.events || []) {
+      if (ev.kind !== "tool") continue;
+      const name = (ev.name || "").trim();
+      if (name) toolsInvoked.add(name);
+      const path = extractFilePath(ev.rawArgs, ev.argsSummary);
+      if (path) {
+        filesTouched.add(path);
+        if (isEditTool(name)) filesEdited.add(path);
+      }
+    }
+  }
+
+  // turnCount: number of non-overhead prompts (one per user-facing chat turn).
+  const turnCount = ca.prompts.filter((p) => {
+    const llmEvents = (p.events || []).filter((e) => e.kind === "llm" || e.kind === undefined);
+    if (llmEvents.length === 0) return false;
+    return !llmEvents.every((e) => e.category === "overhead");
+  }).length;
+
+  return {
+    models: summary.models.slice().sort(),
+    primaryModel: summary.primaryModel,
+    turnCount,
+    llmCallCount: summary.llmCallCount,
+    firstUserPrompt,
+    firstUserPromptHash: hashStr(normalizeForHash(firstUserPrompt)),
+    systemPromptText,
+    systemPromptChars: systemPromptText.length,
+    systemPromptHash: hashStr(normalizeForHash(systemPromptText)),
+    filesTouched: Array.from(filesTouched).sort(),
+    filesEdited: Array.from(filesEdited).sort(),
+    toolsInvoked: Array.from(toolsInvoked).sort(),
+  };
+}
+
+function setDiff(a: string[], b: string[]): { aOnly: string[]; bOnly: string[]; overlap: string[] } {
+  const sa = new Set(a);
+  const sb = new Set(b);
+  const aOnly: string[] = [], bOnly: string[] = [], overlap: string[] = [];
+  for (const v of a) (sb.has(v) ? overlap : aOnly).push(v);
+  for (const v of b) if (!sa.has(v)) bOnly.push(v);
+  return { aOnly, bOnly, overlap };
+}
+
+function buildDriftReport(fa: RunFingerprint, fb: RunFingerprint): DriftReport {
+  const rows: DriftRow[] = [];
+
+  // Models — blocking. If A and B ran on different models, every cost number
+  // is misleading.
+  const modelMatch = fa.primaryModel === fb.primaryModel;
+  rows.push({
+    key: "models",
+    label: "Primary model",
+    status: modelMatch ? "match" : "diff",
+    aText: fa.primaryModel || "(none)",
+    bText: fb.primaryModel || "(none)",
+    blocking: true,
+  });
+
+  // First prompt — blocking. If the user typed different prompts, you're not
+  // running the same test.
+  const promptMatch = fa.firstUserPromptHash === fb.firstUserPromptHash;
+  rows.push({
+    key: "first_prompt",
+    label: "First user prompt",
+    status: promptMatch ? "match" : "diff",
+    aText: promptMatch ? "identical (hash " + fa.firstUserPromptHash + ")" : truncate(fa.firstUserPrompt, 80),
+    bText: promptMatch ? "" : truncate(fb.firstUserPrompt, 80),
+    blocking: true,
+  });
+
+  // System prompt — non-blocking by default (this IS what techniques like #3
+  // change), but we surface byte size and hash so divergence is visible.
+  const sysMatch = fa.systemPromptHash === fb.systemPromptHash;
+  rows.push({
+    key: "system_prompt",
+    label: "System prompt",
+    status: sysMatch ? "match" : "diff",
+    aText: fa.systemPromptChars + " chars (hash " + fa.systemPromptHash + ")",
+    bText: fb.systemPromptChars + " chars (hash " + fb.systemPromptHash + ")",
+    detail: sysMatch
+      ? undefined
+      : "System prompt content differs between runs. Expected if you're testing instructions; unexpected otherwise.",
+    blocking: false,
+  });
+
+  // Turn count — blocking. Different turn counts = different conversations.
+  const turnMatch = fa.turnCount === fb.turnCount;
+  rows.push({
+    key: "turns",
+    label: "User turns",
+    status: turnMatch ? "match" : "diff",
+    aText: String(fa.turnCount),
+    bText: String(fb.turnCount),
+    blocking: true,
+  });
+
+  // LLM call count — informational. Different counts can be a legitimate
+  // result (one side took fewer steps) or a sign of divergence.
+  const callMatch = fa.llmCallCount === fb.llmCallCount;
+  rows.push({
+    key: "llm_calls",
+    label: "LLM calls",
+    status: callMatch ? "match" : "info",
+    aText: String(fa.llmCallCount),
+    bText: String(fb.llmCallCount),
+    detail: callMatch ? undefined : "Different call counts can mean the agent took a different path.",
+    blocking: false,
+  });
+
+  // Files edited — blocking. If A changed 12 files and B changed 8, the work
+  // is not the same.
+  const editsDiff = setDiff(fa.filesEdited, fb.filesEdited);
+  const editsMatch = editsDiff.aOnly.length === 0 && editsDiff.bOnly.length === 0;
+  rows.push({
+    key: "files_edited",
+    label: "Files edited",
+    status: editsMatch ? "match" : "diff",
+    aText: fa.filesEdited.length + " files",
+    bText: fb.filesEdited.length + " files",
+    detail: editsMatch
+      ? undefined
+      : formatSetDiff("edited", editsDiff),
+    blocking: true,
+  });
+
+  // Files touched (read+write). Informational. Useful for spotting "B happened
+  // to read the README, A didn't" without flagging it as a hard failure.
+  const touchedDiff = setDiff(fa.filesTouched, fb.filesTouched);
+  const touchedMatch = touchedDiff.aOnly.length === 0 && touchedDiff.bOnly.length === 0;
+  rows.push({
+    key: "files_touched",
+    label: "Files referenced",
+    status: touchedMatch ? "match" : "info",
+    aText: fa.filesTouched.length + " files",
+    bText: fb.filesTouched.length + " files",
+    detail: touchedMatch ? undefined : formatSetDiff("referenced", touchedDiff),
+    blocking: false,
+  });
+
+  // Tools invoked — blocking. If only one side called an MCP tool, the
+  // comparison is contaminated for the MCP-audit experiment.
+  const toolsDiff = setDiff(fa.toolsInvoked, fb.toolsInvoked);
+  const toolsMatch = toolsDiff.aOnly.length === 0 && toolsDiff.bOnly.length === 0;
+  rows.push({
+    key: "tools_invoked",
+    label: "Tools invoked",
+    status: toolsMatch ? "match" : "diff",
+    aText: fa.toolsInvoked.length + " distinct",
+    bText: fb.toolsInvoked.length + " distinct",
+    detail: toolsMatch ? undefined : formatSetDiff("invoked", toolsDiff),
+    blocking: true,
+  });
+
+  const hasAnyDrift = rows.some((r) => r.status === "diff");
+  const hasBlockingDrift = rows.some((r) => r.status === "diff" && r.blocking);
+  return { rows, hasBlockingDrift, hasAnyDrift };
+}
+
+function truncate(s: string, n: number): string {
+  if (!s) return "(empty)";
+  return s.length <= n ? s : s.slice(0, n) + "…";
+}
+
+function formatSetDiff(verb: string, d: { aOnly: string[]; bOnly: string[] }): string {
+  const parts: string[] = [];
+  if (d.aOnly.length) parts.push("A only " + verb + ": " + d.aOnly.slice(0, 5).join(", ") + (d.aOnly.length > 5 ? " (+" + (d.aOnly.length - 5) + ")" : ""));
+  if (d.bOnly.length) parts.push("B only " + verb + ": " + d.bOnly.slice(0, 5).join(", ") + (d.bOnly.length > 5 ? " (+" + (d.bOnly.length - 5) + ")" : ""));
+  return parts.join(" · ");
+}
+
 // ---------- Main ----------
 
 export function compareRunsCost(
@@ -583,6 +909,9 @@ export function compareRunsCost(
   const equivalent = a.finalAnswer.length > 0 && b.finalAnswer.length > 0 &&
     normalizeAnswer(a.finalAnswer) === normalizeAnswer(b.finalAnswer);
   const cachePollution = detectCachePollution(a, b);
+  const fingerprintA = buildFingerprint(costA, a);
+  const fingerprintB = buildFingerprint(costB, b);
+  const drift = buildDriftReport(fingerprintA, fingerprintB);
   return {
     a, b,
     kpis: buildKpis(a, b),
@@ -599,5 +928,8 @@ export function compareRunsCost(
     recommendations: buildRecommendations(a, b, equivalent, cachePollution),
     bucketDeltas: buildBucketDeltas(a, b),
     cachePollution,
+    fingerprintA,
+    fingerprintB,
+    drift,
   };
 }

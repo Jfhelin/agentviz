@@ -308,3 +308,174 @@ describeReal("compareRunsCost (real fixtures: caveman vs polite)", () => {
     expect(recIds).toContain("attack_tool_defs");
   });
 });
+
+describe("compareRunsCost: drift detection", () => {
+  // Helper that lets each test override the few fields drift cares about
+  // without re-typing the boilerplate event/prompt tree every time.
+  function mkRun(opts: {
+    model?: string;
+    label?: string;
+    systemPreview?: string;
+    toolCalls?: Array<{ name: string; rawArgs?: string; argsSummary?: string }>;
+    extraPromptCount?: number;
+  }): any {
+    const model = opts.model || "claude-sonnet-4.5";
+    const events: any[] = [
+      {
+        name: "panel/editAgent", model, cost: 0.01, output: 10,
+        cached: 0, fresh: 1000, cacheWrite: 0, promptTokens: 1000,
+        components: { system: 500, tool_defs: 400, current: 100 },
+        responsePreview: "ok", currentText: "do the thing",
+        systemPreview: opts.systemPreview ?? "You are a helpful coding assistant.",
+        category: "primary", kind: "llm",
+      },
+      ...(opts.toolCalls || []).map((t) => ({
+        name: t.name, model: "", cost: 0, output: 0, cached: 0, fresh: 0, cacheWrite: 0,
+        promptTokens: 0,
+        rawArgs: t.rawArgs || "{}",
+        argsSummary: t.argsSummary || t.name,
+        kind: "tool",
+      })),
+    ];
+    const prompts: any[] = [{
+      index: 0, cost: 0.01, output: 10, cached: 0, fresh: 1000, cacheWrite: 0,
+      promptTokens: 1000, llmCount: 1, label: opts.label ?? "do the thing",
+      events,
+    }];
+    for (let i = 0; i < (opts.extraPromptCount || 0); i++) {
+      prompts.push({
+        index: i + 1, cost: 0.005, output: 5, cached: 500, fresh: 100, cacheWrite: 0,
+        promptTokens: 600, llmCount: 1, label: "follow up " + (i + 1),
+        events: [{
+          name: "panel/editAgent", model, cost: 0.005, output: 5,
+          cached: 500, fresh: 100, cacheWrite: 0, promptTokens: 600,
+          components: { system: 300, history: 200, current: 100 },
+          responsePreview: "ok", currentText: "follow up " + (i + 1),
+          systemPreview: opts.systemPreview ?? "You are a helpful coding assistant.",
+          category: "primary", kind: "llm",
+        }],
+      });
+    }
+    return { prompts, totals: { promptTokens: 1000, output: 10, cached: 0, fresh: 1000, cacheWrite: 0, cost: 0.01, llmCalls: 1, toolCalls: 0, cacheHitRate: 0 } };
+  }
+
+  it("flags no drift when both runs are identical", () => {
+    const r = compareRunsCost(mkRun({}), mkRun({}))!;
+    expect(r.drift.hasAnyDrift).toBe(false);
+    expect(r.drift.hasBlockingDrift).toBe(false);
+    expect(r.drift.rows.every((row) => row.status === "match")).toBe(true);
+    // Fingerprint sanity
+    expect(r.fingerprintA.primaryModel).toBe("claude-sonnet-4.5");
+    expect(r.fingerprintA.turnCount).toBe(1);
+  });
+
+  it("flags model drift as blocking", () => {
+    const r = compareRunsCost(mkRun({}), mkRun({ model: "gpt-5" }))!;
+    expect(r.drift.hasBlockingDrift).toBe(true);
+    const modelRow = r.drift.rows.find((row) => row.key === "models")!;
+    expect(modelRow.status).toBe("diff");
+    expect(modelRow.blocking).toBe(true);
+  });
+
+  it("flags first-prompt drift as blocking", () => {
+    const r = compareRunsCost(
+      mkRun({ label: "write me a haiku" }),
+      mkRun({ label: "write me a sonnet" }),
+    )!;
+    expect(r.drift.hasBlockingDrift).toBe(true);
+    expect(r.drift.rows.find((row) => row.key === "first_prompt")!.status).toBe("diff");
+  });
+
+  it("flags system-prompt drift as non-blocking (it's expected for #3 test)", () => {
+    const r = compareRunsCost(
+      mkRun({ systemPreview: "long verbose prompt with many words" }),
+      mkRun({ systemPreview: "short prompt" }),
+    )!;
+    const sysRow = r.drift.rows.find((row) => row.key === "system_prompt")!;
+    expect(sysRow.status).toBe("diff");
+    expect(sysRow.blocking).toBe(false);
+    // Even though sys-prompt drifted, no blocking row should fire if everything
+    // else matches.
+    expect(r.drift.hasBlockingDrift).toBe(false);
+  });
+
+  it("extracts edited file paths from edit_file tool calls", () => {
+    const r = compareRunsCost(
+      mkRun({ toolCalls: [
+        { name: "edit_file", rawArgs: JSON.stringify({ filePath: "src/a.ts" }) },
+        { name: "edit_file", rawArgs: JSON.stringify({ filePath: "src/b.ts" }) },
+      ]}),
+      mkRun({ toolCalls: [
+        { name: "edit_file", rawArgs: JSON.stringify({ filePath: "src/a.ts" }) },
+      ]}),
+    )!;
+    expect(r.fingerprintA.filesEdited).toEqual(["src/a.ts", "src/b.ts"]);
+    expect(r.fingerprintB.filesEdited).toEqual(["src/a.ts"]);
+    const filesRow = r.drift.rows.find((row) => row.key === "files_edited")!;
+    expect(filesRow.status).toBe("diff");
+    expect(filesRow.blocking).toBe(true);
+    expect(filesRow.detail).toContain("A only");
+    expect(filesRow.detail).toContain("src/b.ts");
+  });
+
+  it("flags MCP tool invocation as blocking drift (the killer case for the MCP test)", () => {
+    const r = compareRunsCost(
+      mkRun({ toolCalls: [{ name: "edit_file", rawArgs: JSON.stringify({ filePath: "src/a.ts" }) }] }),
+      mkRun({ toolCalls: [
+        { name: "edit_file", rawArgs: JSON.stringify({ filePath: "src/a.ts" }) },
+        { name: "playwright_navigate", rawArgs: JSON.stringify({ url: "https://example.com" }) },
+      ]}),
+    )!;
+    const toolsRow = r.drift.rows.find((row) => row.key === "tools_invoked")!;
+    expect(toolsRow.status).toBe("diff");
+    expect(toolsRow.blocking).toBe(true);
+    expect(toolsRow.detail).toContain("playwright_navigate");
+    expect(toolsRow.detail).toContain("B only");
+  });
+
+  it("read-only tools (read_file) count as files-touched but not files-edited", () => {
+    const r = compareRunsCost(
+      mkRun({ toolCalls: [
+        { name: "read_file", rawArgs: JSON.stringify({ filePath: "src/x.ts" }) },
+        { name: "read_file", rawArgs: JSON.stringify({ filePath: "src/y.ts" }) },
+      ]}),
+      mkRun({ toolCalls: [
+        { name: "read_file", rawArgs: JSON.stringify({ filePath: "src/x.ts" }) },
+      ]}),
+    )!;
+    expect(r.fingerprintA.filesTouched).toEqual(["src/x.ts", "src/y.ts"]);
+    expect(r.fingerprintA.filesEdited).toEqual([]);
+    expect(r.fingerprintB.filesEdited).toEqual([]);
+    // Same tool invoked on both sides — no tools-invoked drift.
+    expect(r.drift.rows.find((row) => row.key === "tools_invoked")!.status).toBe("match");
+    // Files-edited matches (both empty) — no blocking drift.
+    expect(r.drift.rows.find((row) => row.key === "files_edited")!.status).toBe("match");
+    // Files-touched diverges, but is informational only.
+    const touchedRow = r.drift.rows.find((row) => row.key === "files_touched")!;
+    expect(touchedRow.status).toBe("info");
+    expect(touchedRow.blocking).toBe(false);
+    expect(r.drift.hasBlockingDrift).toBe(false);
+  });
+
+  it("turn-count drift flags as blocking", () => {
+    const r = compareRunsCost(
+      mkRun({}),
+      mkRun({ extraPromptCount: 2 }),
+    )!;
+    expect(r.fingerprintA.turnCount).toBe(1);
+    expect(r.fingerprintB.turnCount).toBe(3);
+    expect(r.drift.rows.find((row) => row.key === "turns")!.status).toBe("diff");
+    expect(r.drift.hasBlockingDrift).toBe(true);
+  });
+
+  it("extractFilePath handles fallback args summary when JSON parse fails", () => {
+    // raw args is not valid JSON; fall back to summary's path-looking token
+    const r = compareRunsCost(
+      mkRun({ toolCalls: [
+        { name: "edit_file", rawArgs: "not-json", argsSummary: "edit_file: api/services/cart.ts" },
+      ]}),
+      mkRun({}),
+    )!;
+    expect(r.fingerprintA.filesTouched).toEqual(["api/services/cart.ts"]);
+  });
+});

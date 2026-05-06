@@ -544,6 +544,87 @@ function BucketWaterfall({ deltas, totalA, totalB }) {
   );
 }
 
+function RunDriftPanel({ drift, nameA, nameB }) {
+  if (!drift || !drift.rows || drift.rows.length === 0) return null;
+  const allMatch = !drift.hasAnyDrift;
+  const hasBlocking = drift.hasBlockingDrift;
+
+  // Tone of the panel header reflects severity:
+  //   all match  -> success / quiet green
+  //   non-blocking diff -> info / muted
+  //   blocking diff -> warning
+  const tone = hasBlocking ? "warning" : allMatch ? "success" : "info";
+  const headerColor = tone === "warning"
+    ? theme.semantic.warning
+    : tone === "success"
+      ? (theme.semantic.success || theme.accent.primary)
+      : theme.text.secondary;
+  const dotMatch = theme.semantic.success || theme.accent.primary;
+  const dotInfo = theme.text.muted;
+  const dotDiff = theme.semantic.warning;
+
+  const headlineText = hasBlocking
+    ? "Drift detected on something that should have been identical"
+    : allMatch
+      ? "Both runs match on every controlled axis"
+      : "Minor drift — likely fine, see details";
+
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 8 }}>
+        <span style={{ fontSize: theme.fontSize.sm, fontWeight: 700, color: headerColor }}>
+          {hasBlocking ? "⚠" : allMatch ? "✓" : "•"} Run drift
+        </span>
+        <span style={{ fontSize: theme.fontSize.xs, color: theme.text.muted }}>{headlineText}</span>
+      </div>
+      <div style={{ display: "grid", rowGap: 6 }}>
+        {drift.rows.map((row) => {
+          const dotColor =
+            row.status === "match" ? dotMatch
+            : row.status === "diff" ? dotDiff
+            : dotInfo;
+          const symbol =
+            row.status === "match" ? "✓"
+            : row.status === "diff" ? "⚠"
+            : "•";
+          return (
+            <div key={row.key} style={{
+              display: "grid",
+              gridTemplateColumns: "20px 140px 1fr 1fr",
+              columnGap: 12, alignItems: "baseline",
+              fontSize: theme.fontSize.xs,
+              fontVariantNumeric: "tabular-nums",
+              padding: "4px 0",
+              borderBottom: "1px solid " + theme.border.subtle,
+            }}>
+              <div style={{ color: dotColor, fontWeight: 700, textAlign: "center" }}>{symbol}</div>
+              <div style={{ color: theme.text.secondary }}>{row.label}</div>
+              <div style={{ color: row.status === "diff" ? theme.text.primary : theme.text.muted }}>
+                <span style={{ color: COLOR_A, fontWeight: 600 }}>A:</span> {row.aText || "(empty)"}
+              </div>
+              <div style={{ color: row.status === "diff" ? theme.text.primary : theme.text.muted }}>
+                {row.bText
+                  ? <><span style={{ color: COLOR_B, fontWeight: 600 }}>B:</span> {row.bText}</>
+                  : <span style={{ color: theme.text.dim, fontStyle: "italic" }}>— same as A —</span>}
+              </div>
+              {row.detail && (
+                <div style={{ gridColumn: "2 / -1", color: theme.text.muted, fontSize: 11, marginTop: 2, lineHeight: 1.5 }}>
+                  {row.detail}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ marginTop: 8, fontSize: 10, color: theme.text.dim, lineHeight: 1.5 }}>
+        Comparing <span style={{ color: COLOR_A }}>{nameA}</span> vs <span style={{ color: COLOR_B }}>{nameB}</span>.
+        {" "}Rows marked ⚠ flag axes that should have been identical between the two runs;
+        when a blocking row drifts, the cost delta below may reflect that confound rather than the variable you intended to test.
+      </div>
+    </div>
+  );
+}
+
 function CachePollutionBanner({ pollution, summaryA, summaryB, nameA, nameB }) {
   if (!pollution || !pollution.suspect) return null;
   const fmtPctLocal = (n) => (n * 100).toFixed(0) + "%";
@@ -672,6 +753,9 @@ export default function CostCompare({ sessionA, sessionB, fileA, fileB }) {
         summaryA={cmp.a} summaryB={cmp.b}
         nameA={nameA} nameB={nameB}
       />
+
+      <SectionHeader title="Run drift" sub="things that should be identical between A and B" />
+      <Card><RunDriftPanel drift={cmp.drift} nameA={nameA} nameB={nameB} /></Card>
 
       <SectionHeader title="Headline numbers" sub="all metrics, side by side" />
       <KpiGrid kpis={cmp.kpis} equivalent={cmp.answersEquivalent} />
