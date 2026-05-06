@@ -86,6 +86,8 @@ export interface RunSummary {
   fixedShare: number;        // fixedCost / totalCost
   componentTokens: Record<Bucket, number>;  // sum across calls
   componentShare: Record<Bucket, number>;   // tokens-of-bucket / total-input-incl-output
+  /** Pro-rated cost (in cents-style credit units, same as totalCost) per bucket. */
+  bucketCost: Record<Bucket, number>;
   models: string[];                          // distinct models used
   primaryModel: string | null;               // model of most expensive call
   finalAnswer: string;                       // final assistant response across the whole run
@@ -93,6 +95,18 @@ export interface RunSummary {
   /** Per-user-prompt summary (skipping overhead prompts like "title" /
    * "promptCategorization"). One entry per user-facing chat turn, in order. */
   userPrompts: Array<{ label: string; finalAnswer: string }>;
+  /** Cache hit rate of the FIRST primary (non-overhead) LLM call. Used to
+   * detect cache pollution: a brand-new conversation should start near 0. */
+  firstPrimaryCallCacheHit: number;
+  /** Total cached + fresh input tokens of the first primary call (denominator
+   * for the hit rate above). When small, the rate is unreliable. */
+  firstPrimaryCallInputTokens: number;
+  /** Average effective input rate ($/1M input tokens), computed as
+   * (totalCost - output-bucket-cost) / totalInput * 1e6. Surfaces model-rate
+   * differences (e.g. premium vs. Auto-tier). */
+  avgInputRatePerMTok: number;
+  /** Average effective output rate ($/1M output tokens). */
+  avgOutputRatePerMTok: number;
 }
 
 export interface KpiPair {
@@ -136,6 +150,26 @@ export interface Recommendation {
   body: string;
 }
 
+export interface BucketDelta {
+  bucket: Bucket;
+  aCost: number;
+  bCost: number;
+  delta: number;          // bCost - aCost (negative = savings)
+  deltaPct: number | null;
+  /** Share of the absolute total swing this bucket contributed (0..1). Used
+   * to size the waterfall bars proportionally. */
+  shareOfSwing: number;
+}
+
+export interface CachePollution {
+  /** True iff the comparison is suspected to be polluted by warm-cache reuse. */
+  suspect: boolean;
+  /** Which side(s) look cache-warmed. */
+  side: "A" | "B" | "both" | null;
+  /** Human-readable explanation of the heuristic that fired. */
+  reason: string;
+}
+
 export interface CostComparison {
   a: RunSummary;
   b: RunSummary;
@@ -158,6 +192,13 @@ export interface CostComparison {
   verdict: Verdict;
   /** Rule-driven, deterministic recommendations relevant to THIS pair. */
   recommendations: Recommendation[];
+  /** Per-bucket cost deltas (B - A), sorted by absolute delta descending.
+   * Drives the waterfall view: at-a-glance "system saved 1.4 cr,
+   * tool_defs saved 0.8 cr" attribution. */
+  bucketDeltas: BucketDelta[];
+  /** Cache-pollution diagnostic. When `suspect` is true the headline numbers
+   * may be misleading because B inherited cache state from A (or vice-versa). */
+  cachePollution: CachePollution;
 }
 
 // ---------- Helpers ----------
@@ -167,9 +208,11 @@ function summarizeRun(ca: CostAnalysisLike | null | undefined): RunSummary {
     totalCost: 0, totalInput: 0, totalOutput: 0, totalCached: 0, totalFresh: 0, totalCacheWrite: 0,
     cacheHitRate: 0, promptCount: 0, llmCallCount: 0,
     fixedCost: 0, variableCost: 0, fixedShare: 0,
-    componentTokens: zeroBuckets(), componentShare: zeroBuckets(),
+    componentTokens: zeroBuckets(), componentShare: zeroBuckets(), bucketCost: zeroBuckets(),
     models: [], primaryModel: null,
     finalAnswer: "", userPromptText: "", userPrompts: [],
+    firstPrimaryCallCacheHit: 0, firstPrimaryCallInputTokens: 0,
+    avgInputRatePerMTok: 0, avgOutputRatePerMTok: 0,
   };
   if (!ca || !Array.isArray(ca.prompts) || ca.prompts.length === 0) return empty;
 
@@ -205,7 +248,9 @@ function summarizeRun(ca: CostAnalysisLike | null | undefined): RunSummary {
 
   // Fixed/variable cost: pro-rata each call's cost into buckets by token share
   // of that call's components, then sum fixed buckets vs variable buckets.
+  // Also accumulate per-bucket cost for the waterfall.
   let fixedCost = 0, variableCost = 0;
+  const bucketCost = zeroBuckets();
   for (const p of ca.prompts) {
     for (const ev of p.events || []) {
       const comps: Partial<Record<Bucket, number>> = {
@@ -217,6 +262,7 @@ function summarizeRun(ca: CostAnalysisLike | null | undefined): RunSummary {
       for (const k of BUCKETS) {
         const share = (comps[k] || 0) / sum;
         const slice = (ev.cost || 0) * share;
+        bucketCost[k] += slice;
         if (FIXED_BUCKETS.includes(k)) fixedCost += slice;
         else variableCost += slice;
       }
@@ -257,15 +303,44 @@ function summarizeRun(ca: CostAnalysisLike | null | undefined): RunSummary {
     : ((fallbackLastEv && (fallbackLastEv as any).responsePreview) || "");
   const userPromptText = lastUserPrompt ? lastUserPrompt.label : "";
 
+  // First-primary-call cache hit rate. Used by the cache-pollution detector
+  // in compareRunsCost: a fresh conversation should start near 0% cache hit;
+  // any meaningful rate on the first primary call hints at warm provider cache.
+  let firstPrimaryCallCacheHit = 0, firstPrimaryCallInputTokens = 0;
+  for (const p of ca.prompts) {
+    let found = false;
+    for (const ev of p.events || []) {
+      if (ev.kind && ev.kind !== "llm") continue;
+      if (ev.category === "overhead") continue;
+      const denom = (ev.cached || 0) + (ev.fresh || 0) + (ev.cacheWrite || 0);
+      firstPrimaryCallInputTokens = denom;
+      firstPrimaryCallCacheHit = denom > 0 ? (ev.cached || 0) / denom : 0;
+      found = true;
+      break;
+    }
+    if (found) break;
+  }
+
+  // Effective rates per million tokens. Approximates the model's pricing by
+  // splitting totalCost into input vs output along the bucket attribution.
+  // Cost is in dollars (per pricing.js / copilotChatExportParser): direct
+  // pass-through. Multiply by 1e6 to get per-million.
+  const outputCost = bucketCost.output;
+  const inputCostApprox = totalCost - outputCost;
+  const avgInputRatePerMTok = totalInput > 0 ? (inputCostApprox / totalInput) * 1e6 : 0;
+  const avgOutputRatePerMTok = totalOutput > 0 ? (outputCost / totalOutput) * 1e6 : 0;
+
   return {
     totalCost, totalInput, totalOutput, totalCached, totalFresh, totalCacheWrite,
     cacheHitRate, promptCount: ca.prompts.length, llmCallCount,
     fixedCost, variableCost,
     fixedShare: totalCost > 0 ? fixedCost / totalCost : 0,
-    componentTokens: compTok, componentShare: compShare,
+    componentTokens: compTok, componentShare: compShare, bucketCost,
     models: Array.from(modelSet),
     primaryModel: mostExpensiveCall ? mostExpensiveCall.model : null,
     finalAnswer, userPromptText, userPrompts,
+    firstPrimaryCallCacheHit, firstPrimaryCallInputTokens,
+    avgInputRatePerMTok, avgOutputRatePerMTok,
   };
 }
 
@@ -317,7 +392,68 @@ function buildKpis(a: RunSummary, b: RunSummary): KpiPair[] {
     pair("fixed_share", "Fixed overhead share", a.fixedShare, b.fixedShare, "neutral"),
     pair("cr_per_call", "Cost per LLM call", aPerCall, bPerCall, "lower"),
     pair("cr_per_out_tok", "Cost per output token", aPerOut, bPerOut, "lower"),
+    pair("avg_in_rate", "Input $/1M tok", a.avgInputRatePerMTok, b.avgInputRatePerMTok, "lower"),
+    pair("avg_out_rate", "Output $/1M tok", a.avgOutputRatePerMTok, b.avgOutputRatePerMTok, "lower"),
   ];
+}
+
+function buildBucketDeltas(a: RunSummary, b: RunSummary): BucketDelta[] {
+  const raw = BUCKETS.map((bucket): BucketDelta => {
+    const aCost = a.bucketCost[bucket];
+    const bCost = b.bucketCost[bucket];
+    const delta = bCost - aCost;
+    return {
+      bucket,
+      aCost, bCost, delta,
+      deltaPct: aCost !== 0 ? delta / aCost : null,
+      shareOfSwing: 0,
+    };
+  });
+  const totalSwing = raw.reduce((s, d) => s + Math.abs(d.delta), 0);
+  if (totalSwing > 0) {
+    for (const d of raw) d.shareOfSwing = Math.abs(d.delta) / totalSwing;
+  }
+  // Sort by absolute delta descending so the dominant lines render first.
+  return raw.slice().sort((x, y) => Math.abs(y.delta) - Math.abs(x.delta));
+}
+
+function detectCachePollution(a: RunSummary, b: RunSummary): CachePollution {
+  // Heuristic: a fresh conversation's first primary LLM call should hit
+  // ~0% cache (the model provider has not seen this prefix before). When the
+  // first primary call shows >40% cache hit AND has a meaningful denominator
+  // (>500 input tokens — anything smaller is statistically noisy), it
+  // strongly suggests the run inherited a warm provider cache from a recent
+  // sibling run in the same workspace.
+  const HIT_THRESHOLD = 0.40;
+  const TOK_FLOOR = 500;
+  const aWarm = a.firstPrimaryCallCacheHit > HIT_THRESHOLD && a.firstPrimaryCallInputTokens > TOK_FLOOR;
+  const bWarm = b.firstPrimaryCallCacheHit > HIT_THRESHOLD && b.firstPrimaryCallInputTokens > TOK_FLOOR;
+  if (!aWarm && !bWarm) {
+    return { suspect: false, side: null, reason: "Both runs started with cold cache (first primary call hit < 40%)." };
+  }
+  const fmt = (s: RunSummary) => (s.firstPrimaryCallCacheHit * 100).toFixed(0) + "%";
+  if (aWarm && bWarm) {
+    return {
+      suspect: true,
+      side: "both",
+      reason: "Both runs' first primary calls had high cache hits (A: " + fmt(a) + ", B: " + fmt(b) +
+        "). Both look cache-warmed — the absolute cost numbers reflect provider cache state, not what a cold run would cost.",
+    };
+  }
+  if (bWarm) {
+    return {
+      suspect: true,
+      side: "B",
+      reason: "B's first primary call hit " + fmt(b) + " of cache (vs " + fmt(a) +
+        " for A). B likely inherited cache from a recent run — the savings shown for B may be inflated. Re-run B from a cold cache (new VS Code window or wait several minutes) to confirm.",
+    };
+  }
+  return {
+    suspect: true,
+    side: "A",
+    reason: "A's first primary call hit " + fmt(a) + " of cache (vs " + fmt(b) +
+      " for B). A looks cache-warmed — B may appear more expensive than it really is. Re-run A from a cold cache to confirm.",
+  };
 }
 
 function buildVerdict(a: RunSummary, b: RunSummary, equivalent: boolean): Verdict {
@@ -365,12 +501,21 @@ function formatPctSigned(p: number): string {
   return sign + (Math.abs(p) * 100).toFixed(Math.abs(p) < 0.01 ? 2 : 1) + "%";
 }
 
-function buildRecommendations(a: RunSummary, b: RunSummary, equivalent: boolean): Recommendation[] {
+function buildRecommendations(a: RunSummary, b: RunSummary, equivalent: boolean, pollution: CachePollution): Recommendation[] {
   const recs: Recommendation[] = [];
   const deltaPct = a.totalCost > 0 ? (b.totalCost - a.totalCost) / a.totalCost : 0;
   const avgFixedShare = (a.fixedShare + b.fixedShare) / 2;
   const toolDefsShare = (a.componentShare.tool_defs + b.componentShare.tool_defs) / 2;
   const totalUserText = (a.userPromptText.length + b.userPromptText.length) / 2;
+
+  // Cache pollution always leads — it dwarfs every other interpretation when present.
+  if (pollution.suspect) {
+    recs.push({
+      id: "cache_pollution",
+      title: "Re-run from a cold cache before trusting these numbers",
+      body: pollution.reason,
+    });
+  }
 
   if (Math.abs(deltaPct) < 0.05 && avgFixedShare > 0.80) {
     recs.push({
@@ -437,6 +582,7 @@ export function compareRunsCost(
   const { pairs, sameShape } = buildCallPairs(costA, costB);
   const equivalent = a.finalAnswer.length > 0 && b.finalAnswer.length > 0 &&
     normalizeAnswer(a.finalAnswer) === normalizeAnswer(b.finalAnswer);
+  const cachePollution = detectCachePollution(a, b);
   return {
     a, b,
     kpis: buildKpis(a, b),
@@ -450,6 +596,8 @@ export function compareRunsCost(
     userPromptsB: b.userPrompts,
     sameShape,
     verdict: buildVerdict(a, b, equivalent),
-    recommendations: buildRecommendations(a, b, equivalent),
+    recommendations: buildRecommendations(a, b, equivalent, cachePollution),
+    bucketDeltas: buildBucketDeltas(a, b),
+    cachePollution,
   };
 }

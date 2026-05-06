@@ -59,6 +59,14 @@ function fmtTok(n) {
   return Math.round(n / 1000).toLocaleString() + "k";
 }
 
+function fmtRate(n) {
+  // Cost per 1M tokens. Input is computed in dollars/M tokens.
+  if (!isFinite(n) || n === 0) return "--";
+  if (n < 0.10) return "$" + n.toFixed(3) + "/M";
+  if (n < 10) return "$" + n.toFixed(2) + "/M";
+  return "$" + n.toFixed(1) + "/M";
+}
+
 function getCostAnalysis(session) {
   return session && session.metadata && session.metadata.costAnalysis;
 }
@@ -94,7 +102,15 @@ function VerdictBanner({ verdict }) {
   );
 }
 
-function HeaderStrip({ nameA, nameB, primaryModelA, primaryModelB, costA, costB }) {
+function HeaderStrip({ nameA, nameB, primaryModelA, primaryModelB, costA, costB, summaryA, summaryB }) {
+  function rateLine(s) {
+    if (!s) return null;
+    return (
+      <div style={{ fontSize: 10, color: theme.text.muted, marginTop: 4, fontVariantNumeric: "tabular-nums" }}>
+        in {fmtRate(s.avgInputRatePerMTok)} · out {fmtRate(s.avgOutputRatePerMTok)}
+      </div>
+    );
+  }
   return (
     <div style={{
       display: "grid",
@@ -114,6 +130,7 @@ function HeaderStrip({ nameA, nameB, primaryModelA, primaryModelB, costA, costB 
           {fmtCr(costA)}
         </div>
         <div style={{ fontSize: theme.fontSize.xs, color: theme.text.dim, fontVariantNumeric: "tabular-nums" }}>{fmtUsd(costA)}</div>
+        {rateLine(summaryA)}
       </div>
       <div style={{ color: theme.text.dim, fontSize: 24 }}>→</div>
       <div style={{ paddingLeft: 16 }}>
@@ -124,6 +141,7 @@ function HeaderStrip({ nameA, nameB, primaryModelA, primaryModelB, costA, costB 
           {fmtCr(costB)}
         </div>
         <div style={{ fontSize: theme.fontSize.xs, color: theme.text.dim, fontVariantNumeric: "tabular-nums" }}>{fmtUsd(costB)}</div>
+        {rateLine(summaryB)}
       </div>
     </div>
   );
@@ -135,6 +153,7 @@ function KpiGrid({ kpis, equivalent }) {
     if (k.key === "output_tokens") return fmtTok(v);
     if (k.key === "cr_per_out_tok") return fmtCr(v);
     if (k.key === "cr_per_call") return fmtCr(v);
+    if (k.key === "avg_in_rate" || k.key === "avg_out_rate") return fmtRate(v);
     return fmtCr(v);
   }
   function deltaTone(k) {
@@ -149,7 +168,7 @@ function KpiGrid({ kpis, equivalent }) {
   }
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 8 }}>
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 8 }}>
       {kpis.map(k => (
         <div key={k.key} style={{
           background: theme.bg.raised,
@@ -448,6 +467,120 @@ function IOSideBySide({ userA, userB, ansA, ansB, equivalent, nameA, nameB, prom
   );
 }
 
+function BucketWaterfall({ deltas, totalA, totalB }) {
+  // Use the LARGER side's component cost as the visual scale anchor so a
+  // savings bar's length means "fraction of the original cost saved".
+  const maxAbs = Math.max(...deltas.map(d => Math.abs(d.delta)), 0);
+  if (maxAbs === 0) {
+    return (
+      <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, padding: "8px 4px" }}>
+        No per-bucket cost difference between the two runs.
+      </div>
+    );
+  }
+  const netDelta = totalB - totalA;
+  return (
+    <div>
+      {deltas.map(d => {
+        const isSaving = d.delta < 0;
+        const isNoise = Math.abs(d.delta) / maxAbs < 0.005;
+        const color = isNoise ? theme.text.dim : (isSaving ? theme.semantic.success : theme.semantic.error);
+        const widthPct = (Math.abs(d.delta) / maxAbs) * 100;
+        return (
+          <div key={d.bucket} style={{ display: "grid", gridTemplateColumns: "120px 1fr 110px 70px", gap: 12, alignItems: "center", padding: "5px 0" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: theme.fontSize.xs, color: theme.text.secondary }}>
+              <div style={{ width: 8, height: 8, borderRadius: 2, background: BUCKET_COLOR[d.bucket] }} />
+              {BUCKET_LABEL[d.bucket]}
+            </div>
+            {/* Bidirectional bar: center divider, savings extend left, increases extend right. */}
+            <div style={{ position: "relative", height: 18, background: theme.bg.base, borderRadius: theme.radius.sm }}>
+              <div style={{
+                position: "absolute", top: 0, bottom: 0, left: "50%",
+                width: "1px", background: theme.border.default,
+              }} />
+              <div
+                title={fmtCr(d.aCost) + " → " + fmtCr(d.bCost)}
+                style={{
+                  position: "absolute", top: 0, bottom: 0,
+                  ...(isSaving
+                    ? { right: "50%", width: (widthPct / 2) + "%" }
+                    : { left: "50%", width: (widthPct / 2) + "%" }),
+                  background: alpha(color, 0.6),
+                  borderRadius: 2,
+                }}
+              />
+            </div>
+            <div style={{ fontSize: theme.fontSize.xs, color, textAlign: "right", fontVariantNumeric: "tabular-nums", fontWeight: 600 }}>
+              {(d.delta < 0 ? "" : "+") + fmtCr(d.delta)}
+            </div>
+            <div style={{ fontSize: 10, color: theme.text.muted, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+              {d.deltaPct == null ? "" : fmtPctSigned(d.deltaPct)}
+            </div>
+          </div>
+        );
+      })}
+      <div style={{
+        marginTop: 6, paddingTop: 8, borderTop: "1px solid " + theme.border.default,
+        display: "grid", gridTemplateColumns: "120px 1fr 110px 70px", gap: 12, alignItems: "center",
+      }}>
+        <div style={{ fontSize: theme.fontSize.xs, color: theme.text.primary, fontWeight: 600 }}>Net</div>
+        <div />
+        <div style={{
+          fontSize: theme.fontSize.sm, fontWeight: 700, textAlign: "right", fontVariantNumeric: "tabular-nums",
+          color: netDelta < 0 ? theme.semantic.success : (netDelta > 0 ? theme.semantic.error : theme.text.muted),
+        }}>{(netDelta < 0 ? "" : "+") + fmtCr(netDelta)}</div>
+        <div style={{ fontSize: 10, color: theme.text.muted, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+          {totalA > 0 ? fmtPctSigned(netDelta / totalA) : ""}
+        </div>
+      </div>
+      <div style={{
+        marginTop: 10, padding: "8px 12px", background: theme.bg.base,
+        borderLeft: "3px solid " + theme.accent.primary, borderRadius: theme.radius.sm,
+        fontSize: theme.fontSize.xs, color: theme.text.secondary, lineHeight: 1.5,
+      }}>
+        Bars are sized relative to the largest swing. <strong style={{ color: theme.semantic.success }}>Green left</strong> = B saved. <strong style={{ color: theme.semantic.error }}>Red right</strong> = B more expensive. Use this to attribute the headline delta to specific cost components.
+      </div>
+    </div>
+  );
+}
+
+function CachePollutionBanner({ pollution, summaryA, summaryB, nameA, nameB }) {
+  if (!pollution || !pollution.suspect) return null;
+  const fmtPctLocal = (n) => (n * 100).toFixed(0) + "%";
+  return (
+    <div style={{
+      marginTop: 12,
+      background: alpha(theme.semantic.warning, 0.10),
+      border: "1px solid " + alpha(theme.semantic.warning, 0.40),
+      borderLeft: "3px solid " + theme.semantic.warning,
+      borderRadius: theme.radius.md,
+      padding: "12px 14px",
+    }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 6 }}>
+        <span style={{ fontSize: theme.fontSize.sm, fontWeight: 700, color: theme.semantic.warning }}>⚠ Cache pollution suspected</span>
+        <span style={{ fontSize: theme.fontSize.xs, color: theme.text.muted }}>
+          {pollution.side === "both" ? "both runs"
+            : pollution.side === "A" ? "run A (" + nameA + ")"
+            : "run B (" + nameB + ")"}
+        </span>
+      </div>
+      <div style={{ fontSize: theme.fontSize.xs, color: theme.text.secondary, lineHeight: 1.5, marginBottom: 8 }}>
+        {pollution.reason}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, fontSize: theme.fontSize.xs, fontVariantNumeric: "tabular-nums" }}>
+        <div>
+          <span style={{ color: COLOR_A, fontWeight: 600 }}>A first call:</span>{" "}
+          <span style={{ color: theme.text.secondary }}>{fmtPctLocal(summaryA.firstPrimaryCallCacheHit)} cache · {summaryA.firstPrimaryCallInputTokens.toLocaleString()} in tokens</span>
+        </div>
+        <div>
+          <span style={{ color: COLOR_B, fontWeight: 600 }}>B first call:</span>{" "}
+          <span style={{ color: theme.text.secondary }}>{fmtPctLocal(summaryB.firstPrimaryCallCacheHit)} cache · {summaryB.firstPrimaryCallInputTokens.toLocaleString()} in tokens</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Recommendations({ recs }) {
   if (!recs || recs.length === 0) return null;
   return (
@@ -527,14 +660,24 @@ export default function CostCompare({ sessionA, sessionB, fileA, fileB }) {
         nameA={nameA} nameB={nameB}
         primaryModelA={cmp.a.primaryModel} primaryModelB={cmp.b.primaryModel}
         costA={cmp.a.totalCost} costB={cmp.b.totalCost}
+        summaryA={cmp.a} summaryB={cmp.b}
       />
 
       <div style={{ marginTop: 16 }}>
         <VerdictBanner verdict={cmp.verdict} />
       </div>
 
+      <CachePollutionBanner
+        pollution={cmp.cachePollution}
+        summaryA={cmp.a} summaryB={cmp.b}
+        nameA={nameA} nameB={nameB}
+      />
+
       <SectionHeader title="Headline numbers" sub="all metrics, side by side" />
       <KpiGrid kpis={cmp.kpis} equivalent={cmp.answersEquivalent} />
+
+      <SectionHeader title="Where the savings came from" sub="per-bucket cost delta (B − A)" />
+      <Card><BucketWaterfall deltas={cmp.bucketDeltas} totalA={cmp.a.totalCost} totalB={cmp.b.totalCost} /></Card>
 
       <SectionHeader title="Fixed overhead vs. variable cost" sub="where the budget went" />
       <Card><FixedVsVariable a={cmp.a} b={cmp.b} /></Card>
