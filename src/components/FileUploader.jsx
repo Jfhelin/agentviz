@@ -2,18 +2,52 @@ import { useState, useRef } from "react";
 import { theme, alpha } from "../lib/theme.js";
 import Icon from "./Icon.jsx";
 
-export default function FileUploader({ onLoad }) {
+export default function FileUploader({ onLoad, debugLabel }) {
   var ref = useRef(null);
   var [over, setOver] = useState(false);
 
   var [readError, setReadError] = useState(null);
 
+  var label = debugLabel || "uploader";
+
   function handleFile(file) {
-    if (!file) return;
+    if (!file) {
+      console.warn("[agentviz][" + label + "] handleFile called with no file (empty drop or canceled picker)");
+      return;
+    }
+    console.log("[agentviz][" + label + "] file received", {
+      name: file.name,
+      size: file.size,
+      sizeMB: (file.size / 1048576).toFixed(2),
+      type: file.type || "(empty)",
+      lastModified: new Date(file.lastModified).toISOString(),
+    });
+    if (file.size === 0) {
+      setReadError("File is empty (0 bytes): " + file.name);
+      console.error("[agentviz][" + label + "] empty file rejected");
+      return;
+    }
     setReadError(null);
     var reader = new FileReader();
-    reader.onload = function (e) { onLoad(e.target.result, file.name); };
-    reader.onerror = function () { setReadError("Could not read file: " + file.name); };
+    var t0 = performance.now();
+    reader.onload = function (e) {
+      var t1 = performance.now();
+      var text = e.target.result;
+      console.log("[agentviz][" + label + "] file read complete", {
+        chars: text ? text.length : 0,
+        readMs: Math.round(t1 - t0),
+        first200: text ? text.slice(0, 200) : "(empty)",
+      });
+      onLoad(text, file.name);
+    };
+    reader.onerror = function (err) {
+      console.error("[agentviz][" + label + "] FileReader error", reader.error, err);
+      setReadError("Could not read file: " + file.name + " (" + (reader.error && reader.error.name) + ")");
+    };
+    reader.onabort = function () {
+      console.warn("[agentviz][" + label + "] FileReader aborted");
+      setReadError("File read was aborted: " + file.name);
+    };
     reader.readAsText(file);
   }
 
@@ -21,7 +55,24 @@ export default function FileUploader({ onLoad }) {
     <div
       onDragOver={function (e) { e.preventDefault(); setOver(true); }}
       onDragLeave={function () { setOver(false); }}
-      onDrop={function (e) { e.preventDefault(); setOver(false); handleFile(e.dataTransfer.files[0]); }}
+      onDrop={function (e) {
+        e.preventDefault();
+        setOver(false);
+        var dt = e.dataTransfer;
+        var files = dt && dt.files ? dt.files : null;
+        var items = dt && dt.items ? dt.items : null;
+        console.log("[agentviz][" + label + "] drop event", {
+          fileCount: files ? files.length : 0,
+          itemCount: items ? items.length : 0,
+          types: dt && dt.types ? Array.from(dt.types) : [],
+          itemKinds: items ? Array.from(items).map(function (it) { return { kind: it.kind, type: it.type }; }) : [],
+        });
+        if (!files || files.length === 0) {
+          setReadError("Drop did not contain a file. (Some sources, like Outlook attachments or browser tabs, deliver a URL instead. Try saving the file to disk first.)");
+          return;
+        }
+        handleFile(files[0]);
+      }}
       onClick={function () { ref.current && ref.current.click(); }}
       style={{
         border: "2px dashed " + (over ? theme.accent.primary : theme.border.strong),
@@ -33,7 +84,11 @@ export default function FileUploader({ onLoad }) {
       <input
         ref={ref} type="file" accept=".jsonl,.json,.txt"
         style={{ display: "none" }}
-        onChange={function (e) { handleFile(e.target.files[0]); }}
+        onChange={function (e) {
+          var f = e.target.files && e.target.files[0];
+          console.log("[agentviz][" + label + "] file picker selection", f ? { name: f.name, size: f.size } : "(none)");
+          handleFile(f);
+        }}
       />
       <div style={{
         fontSize: theme.fontSize.hero, marginBottom: 12, color: theme.accent.primary,
@@ -51,7 +106,7 @@ export default function FileUploader({ onLoad }) {
         </span>
       </div>
       {readError && (
-        <div style={{ marginTop: 12, fontSize: theme.fontSize.base, color: theme.semantic.error }}>
+        <div style={{ marginTop: 12, fontSize: theme.fontSize.base, color: theme.semantic.error, lineHeight: 1.5 }}>
           {readError}
         </div>
       )}

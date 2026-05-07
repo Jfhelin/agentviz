@@ -28,9 +28,35 @@ export function detectFormat(text: string): SessionFormat {
 
 export function parseSession(text: string): ParsedSession | null {
   const format = detectFormat(text);
+  // eslint-disable-next-line no-console
+  if (typeof console !== "undefined") {
+    console.log("[agentviz][parseSession] detected format", {
+      format,
+      chars: text ? text.length : 0,
+      first120: text ? text.slice(0, 120).replace(/\n/g, "\\n") : "",
+    });
+  }
 
-  if (format === "copilot-cli") return parseCopilotCliJSONL(text);
-  if (format === "copilot-chat-export") return parseCopilotChatExport(text);
-  if (format === "vscode-chat") return parseVSCodeChatJSON(text);
-  return parseClaudeCodeJSONL(text);
+  let result: ParsedSession | null;
+  try {
+    if (format === "copilot-cli") result = parseCopilotCliJSONL(text);
+    else if (format === "copilot-chat-export") result = parseCopilotChatExport(text);
+    else if (format === "vscode-chat") result = parseVSCodeChatJSON(text);
+    else result = parseClaudeCodeJSONL(text);
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error("[agentviz][parseSession] parser threw for format=" + format, err);
+    throw err;
+  }
+
+  // eslint-disable-next-line no-console
+  if (typeof console !== "undefined") {
+    console.log("[agentviz][parseSession] result", {
+      format,
+      ok: !!result,
+      events: result ? result.events.length : 0,
+      turns: result ? result.turns.length : 0,
+    });
+  }
+  return result;
 }

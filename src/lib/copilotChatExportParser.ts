@@ -76,7 +76,7 @@ export function detectCopilotChatExport(text: string): boolean {
 
 interface RawLog {
   id?: string;
-  kind: "request" | "toolCall";
+  kind: "request" | "toolCall" | string;
   name?: string;
   type?: string;
   // Request-only:
@@ -787,8 +787,27 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
       }
 
       // request
+      if (log.kind !== "request") {
+        if (typeof console !== "undefined" && console.debug) {
+          console.debug("[agentviz][copilot-chat-export] skipping unknown log kind", { promptIndex: pi, logIdx, kind: (log as { kind?: unknown }).kind });
+        }
+        continue;
+      }
       const cls = c.classified[classifiedIdx];
       const ca = callAnalysisList[analysisCallIdx];
+      if (!cls || !ca) {
+        if (typeof console !== "undefined" && console.warn) {
+          console.warn("[agentviz][copilot-chat-export] classified/analysis index out of range; skipping log", {
+            promptIndex: pi,
+            logIdx,
+            classifiedIdx,
+            classifiedLen: c.classified.length,
+            analysisCallIdx,
+            analysisLen: callAnalysisList.length,
+          });
+        }
+        continue;
+      }
       const usage = callUsage(log);
       const fresh = Math.max(0, usage.prompt_tokens - usage.cached_tokens - usage.cache_write);
       const out_t = usage.completion_tokens;
