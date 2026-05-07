@@ -407,8 +407,15 @@ function normalizeAnswer(s: string): string {
 function buildCallPairs(a: CostAnalysisLike, b: CostAnalysisLike): { pairs: CallPair[]; sameShape: boolean } {
   const evsA: EventLike[] = [];
   const evsB: EventLike[] = [];
-  for (const p of a.prompts || []) for (const ev of p.events || []) evsA.push(ev);
-  for (const p of b.prompts || []) for (const ev of p.events || []) evsB.push(ev);
+  // Only LLM events are pair-able; tool events lack token/cost fields and
+  // their ordering is not stable across runs (different MCP setups produce
+  // different tool sequences).
+  for (const p of a.prompts || []) for (const ev of p.events || []) {
+    if (!ev.kind || ev.kind === "llm") evsA.push(ev);
+  }
+  for (const p of b.prompts || []) for (const ev of p.events || []) {
+    if (!ev.kind || ev.kind === "llm") evsB.push(ev);
+  }
 
   const sameShape = evsA.length === evsB.length &&
     evsA.every((ev, i) => ev.name === evsB[i].name);

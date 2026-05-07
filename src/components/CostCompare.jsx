@@ -336,10 +336,10 @@ function CallTable({ pairs }) {
                   {p.a && p.b && p.sameModel ? p.a.model
                     : (p.a ? p.a.model : "--") + " / " + (p.b ? p.b.model : "--")}
                 </td>
-                <td style={{ padding: "8px 10px", textAlign: "right", color: COLOR_A, fontVariantNumeric: "tabular-nums" }}>{p.a ? p.a.promptTokens.toLocaleString() : "--"}</td>
-                <td style={{ padding: "8px 10px", textAlign: "right", color: COLOR_B, fontVariantNumeric: "tabular-nums" }}>{p.b ? p.b.promptTokens.toLocaleString() : "--"}</td>
-                <td style={{ padding: "8px 10px", textAlign: "right", color: COLOR_A, fontVariantNumeric: "tabular-nums" }}>{p.a ? p.a.output.toLocaleString() : "--"}</td>
-                <td style={{ padding: "8px 10px", textAlign: "right", color: COLOR_B, fontVariantNumeric: "tabular-nums" }}>{p.b ? p.b.output.toLocaleString() : "--"}</td>
+                <td style={{ padding: "8px 10px", textAlign: "right", color: COLOR_A, fontVariantNumeric: "tabular-nums" }}>{p.a ? (p.a.promptTokens ?? 0).toLocaleString() : "--"}</td>
+                <td style={{ padding: "8px 10px", textAlign: "right", color: COLOR_B, fontVariantNumeric: "tabular-nums" }}>{p.b ? (p.b.promptTokens ?? 0).toLocaleString() : "--"}</td>
+                <td style={{ padding: "8px 10px", textAlign: "right", color: COLOR_A, fontVariantNumeric: "tabular-nums" }}>{p.a ? (p.a.output ?? 0).toLocaleString() : "--"}</td>
+                <td style={{ padding: "8px 10px", textAlign: "right", color: COLOR_B, fontVariantNumeric: "tabular-nums" }}>{p.b ? (p.b.output ?? 0).toLocaleString() : "--"}</td>
                 <td style={{ padding: "8px 10px", textAlign: "right", color: COLOR_A, fontVariantNumeric: "tabular-nums" }}>{p.a ? fmtCr(aCost) : "--"}</td>
                 <td style={{ padding: "8px 10px", textAlign: "right", color: COLOR_B, fontVariantNumeric: "tabular-nums" }}>{p.b ? fmtCr(bCost) : "--"}</td>
                 <td style={{ padding: "8px 10px", textAlign: "right", color: dColor, fontVariantNumeric: "tabular-nums" }}>{dPct == null ? "--" : fmtPctSigned(dPct)}</td>
