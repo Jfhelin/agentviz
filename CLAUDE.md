@@ -181,6 +181,20 @@ Key files for the feature:
 - `src/__tests__/copilotChatExport.test.ts` -- parser tests
 - README.md (Cost View section), CLAUDE.md (file tree), `docs/ui-ux-style-guide.md` (Cost Colors), `docs/color-palette.html` (Cost View Palette)
 
+### Test program: 11 token-cost optimization techniques
+
+`docs/cost-optimization-techniques.md` is the source of truth for the
+experimental program driving the Cost Compare instrumentation work. It
+lists all 11 techniques and buckets each by validation methodology:
+
+- ✅ Cleanly validatable with 1-call + projection (prefix-only changes)
+- ⚠️ Partially validatable (prefix component clean, behavior component noisy)
+- ❌ Not validatable with 1-call (output-only or path-only effects)
+
+Always check this file before designing a new test or claiming a
+technique "works" — the bucketing dictates how many runs you need and
+which numbers are causally defensible.
+
 ### Open architectural debt to track
 
 - Cost view depends on per-call context breakdown that today only the
