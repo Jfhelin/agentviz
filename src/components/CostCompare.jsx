@@ -702,6 +702,78 @@ function Card({ children }) {
   );
 }
 
+function DivergencePanel({ split }) {
+  const { preCostA, preCostB, preDelta, preDeltaPct, postCostA, postCostB, postDelta, postDeltaPct, preInputTokensA, preInputTokensB, preInputDelta } = split;
+  const fmtTok = (n) => (n || 0).toLocaleString();
+  function Row({ label, sub, av, bv, delta, deltaPct, valueFmt, deltaIsTokens }) {
+    const dColor = delta === 0 ? theme.text.muted
+      : delta < 0 ? theme.semantic.success : theme.semantic.error;
+    return (
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: "1fr auto auto auto",
+        alignItems: "baseline",
+        gap: 12,
+        padding: "10px 0",
+        borderBottom: "1px solid " + theme.border.subtle,
+      }}>
+        <div>
+          <div style={{ fontSize: theme.fontSize.sm, fontWeight: 600, color: theme.text.primary }}>{label}</div>
+          <div style={{ fontSize: 10, color: theme.text.muted, marginTop: 2 }}>{sub}</div>
+        </div>
+        <div style={{ color: COLOR_A, fontVariantNumeric: "tabular-nums", fontSize: theme.fontSize.sm, minWidth: 80, textAlign: "right" }}>
+          A · {valueFmt(av)}
+        </div>
+        <div style={{ color: COLOR_B, fontVariantNumeric: "tabular-nums", fontSize: theme.fontSize.sm, minWidth: 80, textAlign: "right" }}>
+          B · {valueFmt(bv)}
+        </div>
+        <div style={{ color: dColor, fontVariantNumeric: "tabular-nums", fontSize: theme.fontSize.sm, minWidth: 110, textAlign: "right", fontWeight: 600 }}>
+          {delta === 0
+            ? "Δ 0"
+            : (deltaIsTokens
+              ? "Δ " + (delta > 0 ? "+" : "") + fmtTok(delta) + " tok"
+              : "Δ " + (delta > 0 ? "+" : "") + fmtCr(delta) + (deltaPct == null ? "" : " (" + fmtPctSigned(deltaPct) + ")"))}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div>
+      <div style={{
+        fontSize: theme.fontSize.xs,
+        color: theme.text.secondary,
+        lineHeight: 1.5,
+        marginBottom: 10,
+      }}>
+        The headline cost delta mixes two very different effects. <b>Pre-divergence</b> is the cost of the first user-facing LLM call: at that point the agent has not acted yet, so this number reflects only the prompt prefix (system + tool defs + your message). <b>Post-divergence</b> is everything else, where the agent's behavioral path differs and dominates the total.
+      </div>
+      <Row
+        label="Prefix tax (input tokens, first primary call)"
+        sub="path-free; the only number isolating prefix-only variables like MCP tool count"
+        av={preInputTokensA} bv={preInputTokensB} delta={preInputDelta} deltaPct={null}
+        valueFmt={fmtTok} deltaIsTokens={true}
+      />
+      <Row
+        label="Pre-divergence cost"
+        sub="cost of the first primary call only"
+        av={preCostA} bv={preCostB} delta={preDelta} deltaPct={preDeltaPct}
+        valueFmt={fmtCr} deltaIsTokens={false}
+      />
+      <Row
+        label="Post-divergence cost"
+        sub="total cost minus the first primary call (path-dependent)"
+        av={postCostA} bv={postCostB} delta={postDelta} deltaPct={postDeltaPct}
+        valueFmt={fmtCr} deltaIsTokens={false}
+      />
+      <div style={{
+        fontSize: 10, color: theme.text.muted, marginTop: 10, lineHeight: 1.5,
+      }}>
+        N=1 caveat: the post-divergence number reflects what the agent happened to do today on this single run. With temp=0 and no API noise it would still flip on small prompt changes. Use the prefix tax row for causal claims; treat post-divergence as descriptive only.
+      </div>
+    </div>
+  );
+}
+
 export default function CostCompare({ sessionA, sessionB, fileA, fileB }) {
   const costA = getCostAnalysis(sessionA);
   const costB = getCostAnalysis(sessionB);
@@ -759,6 +831,9 @@ export default function CostCompare({ sessionA, sessionB, fileA, fileB }) {
 
       <SectionHeader title="Headline numbers" sub="all metrics, side by side" />
       <KpiGrid kpis={cmp.kpis} equivalent={cmp.answersEquivalent} />
+
+      <SectionHeader title="Pre- vs post-divergence" sub="separates prefix tax from path-dependent behavior" />
+      <Card><DivergencePanel split={cmp.divergenceSplit} /></Card>
 
       <SectionHeader title="Where the savings came from" sub="per-bucket cost delta (B − A)" />
       <Card><BucketWaterfall deltas={cmp.bucketDeltas} totalA={cmp.a.totalCost} totalB={cmp.b.totalCost} /></Card>

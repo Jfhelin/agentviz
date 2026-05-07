@@ -111,6 +111,14 @@ export interface RunSummary {
   /** Total cached + fresh input tokens of the first primary call (denominator
    * for the hit rate above). When small, the rate is unreliable. */
   firstPrimaryCallInputTokens: number;
+  /** Cost (same units as totalCost) of the first primary call. This is the
+   * "pre-divergence" cost: the agent has not acted yet, so this number
+   * reflects only the prompt prefix (system + tool defs + user message),
+   * not any path-dependent behavior. Use it to compare prefix-related
+   * variables (e.g. MCP tool count) without path noise. */
+  firstPrimaryCallCost: number;
+  /** Output tokens of the first primary call. */
+  firstPrimaryCallOutput: number;
   /** Average effective input rate ($/1M input tokens), computed as
    * (totalCost - output-bucket-cost) / totalInput * 1e6. Surfaces model-rate
    * differences (e.g. premium vs. Auto-tier). */
@@ -263,6 +271,35 @@ export interface CostComparison {
   /** Status rows for the "Run Drift" panel that surfaces things which should
    * be identical between A and B but might silently diverge. */
   drift: DriftReport;
+  /** Pre- vs post-divergence split. Pre-divergence is the cost of the very
+   * first user-facing LLM call on each side: at that point the agent has
+   * not yet acted, so the only thing that differs between A and B is the
+   * prompt prefix (system + tool defs + user message). Post-divergence is
+   * everything else, where the agent's behavioral path differs. Splitting
+   * lets users isolate prefix-related variables (e.g. MCP tool count) from
+   * path-dependent effects that get conflated in the headline total. */
+  divergenceSplit: DivergenceSplit;
+}
+
+export interface DivergenceSplit {
+  /** Cost of the first primary LLM call on each side. Path-free; reflects
+   * only the prompt prefix. */
+  preCostA: number;
+  preCostB: number;
+  preDelta: number;        // B - A
+  preDeltaPct: number | null;
+  /** Total cost minus the first primary call. Includes everything the
+   * agent did after its first turn -- where path divergence dominates. */
+  postCostA: number;
+  postCostB: number;
+  postDelta: number;
+  postDeltaPct: number | null;
+  /** Input token deltas at the first primary call. inputDelta is the pure
+   * "prefix tax" of whatever B has that A doesn't (e.g. extra MCP tool
+   * defs). Independent of cost rate or model differences. */
+  preInputTokensA: number;
+  preInputTokensB: number;
+  preInputDelta: number;
 }
 
 // ---------- Helpers ----------
@@ -276,6 +313,7 @@ function summarizeRun(ca: CostAnalysisLike | null | undefined): RunSummary {
     models: [], primaryModel: null,
     finalAnswer: "", userPromptText: "", userPrompts: [],
     firstPrimaryCallCacheHit: 0, firstPrimaryCallInputTokens: 0,
+    firstPrimaryCallCost: 0, firstPrimaryCallOutput: 0,
     avgInputRatePerMTok: 0, avgOutputRatePerMTok: 0,
   };
   if (!ca || !Array.isArray(ca.prompts) || ca.prompts.length === 0) return empty;
@@ -370,7 +408,11 @@ function summarizeRun(ca: CostAnalysisLike | null | undefined): RunSummary {
   // First-primary-call cache hit rate. Used by the cache-pollution detector
   // in compareRunsCost: a fresh conversation should start near 0% cache hit;
   // any meaningful rate on the first primary call hints at warm provider cache.
+  // Also captures the pre-divergence cost: the cost of the very first user-
+  // facing LLM call, which depends only on the prompt prefix and not on any
+  // path-dependent agent behavior.
   let firstPrimaryCallCacheHit = 0, firstPrimaryCallInputTokens = 0;
+  let firstPrimaryCallCost = 0, firstPrimaryCallOutput = 0;
   for (const p of ca.prompts) {
     let found = false;
     for (const ev of p.events || []) {
@@ -379,6 +421,8 @@ function summarizeRun(ca: CostAnalysisLike | null | undefined): RunSummary {
       const denom = (ev.cached || 0) + (ev.fresh || 0) + (ev.cacheWrite || 0);
       firstPrimaryCallInputTokens = denom;
       firstPrimaryCallCacheHit = denom > 0 ? (ev.cached || 0) / denom : 0;
+      firstPrimaryCallCost = ev.cost || 0;
+      firstPrimaryCallOutput = ev.output || 0;
       found = true;
       break;
     }
@@ -404,6 +448,7 @@ function summarizeRun(ca: CostAnalysisLike | null | undefined): RunSummary {
     primaryModel: mostExpensiveCall ? mostExpensiveCall.model : null,
     finalAnswer, userPromptText, userPrompts,
     firstPrimaryCallCacheHit, firstPrimaryCallInputTokens,
+    firstPrimaryCallCost, firstPrimaryCallOutput,
     avgInputRatePerMTok, avgOutputRatePerMTok,
   };
 }
@@ -953,6 +998,7 @@ export function compareRunsCost(
   const fingerprintA = buildFingerprint(costA, a);
   const fingerprintB = buildFingerprint(costB, b);
   const drift = buildDriftReport(fingerprintA, fingerprintB);
+  const divergenceSplit = buildDivergenceSplit(a, b);
   return {
     a, b,
     kpis: buildKpis(a, b),
@@ -972,5 +1018,25 @@ export function compareRunsCost(
     fingerprintA,
     fingerprintB,
     drift,
+    divergenceSplit,
+  };
+}
+
+function buildDivergenceSplit(a: RunSummary, b: RunSummary): DivergenceSplit {
+  const preCostA = a.firstPrimaryCallCost;
+  const preCostB = b.firstPrimaryCallCost;
+  const postCostA = Math.max(0, a.totalCost - preCostA);
+  const postCostB = Math.max(0, b.totalCost - preCostB);
+  const preInputTokensA = a.firstPrimaryCallInputTokens;
+  const preInputTokensB = b.firstPrimaryCallInputTokens;
+  return {
+    preCostA, preCostB,
+    preDelta: preCostB - preCostA,
+    preDeltaPct: preCostA > 0 ? (preCostB - preCostA) / preCostA : null,
+    postCostA, postCostB,
+    postDelta: postCostB - postCostA,
+    postDeltaPct: postCostA > 0 ? (postCostB - postCostA) / postCostA : null,
+    preInputTokensA, preInputTokensB,
+    preInputDelta: preInputTokensB - preInputTokensA,
   };
 }

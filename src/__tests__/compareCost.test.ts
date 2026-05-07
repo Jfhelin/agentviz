@@ -520,4 +520,29 @@ describe("compareRunsCost: drift detection", () => {
     )!;
     expect(r.fingerprintA.filesTouched).toEqual(["api/services/cart.ts"]);
   });
+
+  it("splits cost into pre- and post-divergence components", () => {
+    // mkRun produces a single LLM call with cost=0.01 and promptTokens=1000.
+    // With no extra prompts, totalCost === preCost so postCost should be 0.
+    const identical = compareRunsCost(mkRun({}), mkRun({}))!;
+    expect(identical.divergenceSplit.preCostA).toBeCloseTo(0.01, 5);
+    expect(identical.divergenceSplit.preCostB).toBeCloseTo(0.01, 5);
+    expect(identical.divergenceSplit.postCostA).toBeCloseTo(0, 5);
+    expect(identical.divergenceSplit.postCostB).toBeCloseTo(0, 5);
+    expect(identical.divergenceSplit.preInputTokensA).toBe(1000);
+    expect(identical.divergenceSplit.preInputDelta).toBe(0);
+
+    // With extra follow-up prompts, postCost grows but preCost stays fixed.
+    const longer = compareRunsCost(
+      mkRun({}),
+      mkRun({ extraPromptCount: 2 }),
+    )!;
+    expect(longer.divergenceSplit.preCostA).toBeCloseTo(0.01, 5);
+    expect(longer.divergenceSplit.preCostB).toBeCloseTo(0.01, 5);
+    expect(longer.divergenceSplit.preDelta).toBeCloseTo(0, 5);
+    // B has 2 extra prompts at 0.005 each = 0.01 of post-divergence cost.
+    expect(longer.divergenceSplit.postCostA).toBeCloseTo(0, 5);
+    expect(longer.divergenceSplit.postCostB).toBeCloseTo(0.01, 5);
+    expect(longer.divergenceSplit.postDelta).toBeCloseTo(0.01, 5);
+  });
 });
