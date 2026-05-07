@@ -17,6 +17,9 @@
 //     in `CTX_KEYS`: system, tool_defs, history, tool_results, current,
 //     output.
 
+// @ts-ignore -- pricing.js has no .d.ts but the function we use is well-typed in practice.
+import { getModelPrice } from "./pricing.js";
+
 export type Bucket = "system" | "tool_defs" | "history" | "tool_results" | "current" | "output";
 
 export const BUCKETS: Bucket[] = ["system", "tool_defs", "history", "tool_results", "current", "output"];
@@ -279,6 +282,13 @@ export interface CostComparison {
    * lets users isolate prefix-related variables (e.g. MCP tool count) from
    * path-dependent effects that get conflated in the headline total. */
   divergenceSplit: DivergenceSplit;
+  /** Projects the pre-divergence input-token delta over each run's actual
+   * call shape, with cache amortization. Answers: "if every primary LLM
+   * call had paid this prefix tax, what would the run have cost?" Useful
+   * because at N=1 the headline cost is path-dominated; the projection
+   * gives the only causally clean number for prefix-only variables and
+   * shows what they'd cost over a realistic continuation. */
+  prefixTaxProjections: PrefixTaxProjection[];
 }
 
 export interface DivergenceSplit {
@@ -300,6 +310,29 @@ export interface DivergenceSplit {
   preInputTokensA: number;
   preInputTokensB: number;
   preInputDelta: number;
+}
+
+export interface PrefixTaxProjection {
+  /** Which run's call shape we're projecting over. */
+  templateRef: "A" | "B";
+  /** Number of primary LLM calls in the template that contributed to the
+   * projection (overhead and tool events excluded). */
+  callCount: number;
+  /** Total cost of those primary calls in the template, ground truth from
+   * the parsed run. Use this as the denominator when expressing the
+   * projected extra cost as a percentage. */
+  templateTotalCost: number;
+  /** The input-token delta the projection was applied at (i.e. the
+   * pre-divergence prefix tax). Surfaced for transparency. */
+  extraInputTokens: number;
+  /** Projected extra cost of paying `extraInputTokens` more of prefix on
+   * every primary call, distributed proportional to each call's existing
+   * input mix. This naturally amortizes via the original call's cache
+   * pattern: cache-warm calls contribute much less than cold calls. */
+  projectedExtraCost: number;
+  /** projectedExtraCost / templateTotalCost. Null when template has no
+   * priced calls. */
+  projectedExtraPct: number | null;
 }
 
 // ---------- Helpers ----------
@@ -999,6 +1032,10 @@ export function compareRunsCost(
   const fingerprintB = buildFingerprint(costB, b);
   const drift = buildDriftReport(fingerprintA, fingerprintB);
   const divergenceSplit = buildDivergenceSplit(a, b);
+  const prefixTaxProjections: PrefixTaxProjection[] = [
+    projectPrefixTaxOver(costA, divergenceSplit.preInputDelta, "A"),
+    projectPrefixTaxOver(costB, divergenceSplit.preInputDelta, "B"),
+  ];
   return {
     a, b,
     kpis: buildKpis(a, b),
@@ -1019,6 +1056,7 @@ export function compareRunsCost(
     fingerprintB,
     drift,
     divergenceSplit,
+    prefixTaxProjections,
   };
 }
 
@@ -1038,5 +1076,65 @@ function buildDivergenceSplit(a: RunSummary, b: RunSummary): DivergenceSplit {
     postDeltaPct: postCostA > 0 ? (postCostB - postCostA) / postCostA : null,
     preInputTokensA, preInputTokensB,
     preInputDelta: preInputTokensB - preInputTokensA,
+  };
+}
+
+/**
+ * Projects a per-call prefix-token tax over the actual call shape of a parsed
+ * run. The math: for each primary LLM call, compute its effective per-input-
+ * token cost (using the model's known output rate to subtract output cost
+ * from total cost), then add `extraInputTokens * perInputTokenCost` to the
+ * projection. Cache amortization is automatic -- a call that ran 95% cache-
+ * hit has a tiny per-input-token cost, so adding tokens to it adds little
+ * cost. Calls with unknown pricing (cost == 0) contribute zero by design;
+ * we'd rather underreport than fabricate.
+ *
+ * Use this with `divergenceSplit.preInputDelta` to answer:
+ *   "If every primary call had paid this prefix tax, what would the run
+ *    have cost?"
+ *
+ * Caveats baked in:
+ *   - This is a LOWER BOUND. It assumes the agent's path stays identical.
+ *     Real prefix changes can shift behavior, which this number won't catch.
+ *   - The per-token cost is the call's average input rate (cached, fresh, and
+ *     cache-write blended). True marginal cost depends on whether the extra
+ *     tokens land in cache-hit or cache-miss; the blended average is a fair
+ *     approximation when the prefix is stable across calls.
+ */
+export function projectPrefixTaxOver(
+  template: CostAnalysisLike | null | undefined,
+  extraInputTokens: number,
+  templateRef: "A" | "B"
+): PrefixTaxProjection {
+  const empty: PrefixTaxProjection = {
+    templateRef, callCount: 0, templateTotalCost: 0,
+    extraInputTokens, projectedExtraCost: 0, projectedExtraPct: null,
+  };
+  if (!template || !Array.isArray(template.prompts)) return empty;
+  let callCount = 0;
+  let templateTotalCost = 0;
+  let projectedExtraCost = 0;
+  for (const p of template.prompts) {
+    for (const ev of p.events || []) {
+      if (ev.kind && ev.kind !== "llm") continue;
+      if (ev.category === "overhead") continue;
+      const inputTokens = (ev.cached || 0) + (ev.fresh || 0) + (ev.cacheWrite || 0);
+      if (inputTokens <= 0) continue;
+      callCount += 1;
+      templateTotalCost += ev.cost || 0;
+      const price = getModelPrice(ev.model);
+      let outputCost = 0;
+      if (price && (ev.output || 0) > 0) {
+        outputCost = ((ev.output || 0) / 1e6) * price.output;
+      }
+      const inputCost = Math.max(0, (ev.cost || 0) - outputCost);
+      const perInputTokenCost = inputCost / inputTokens;
+      projectedExtraCost += perInputTokenCost * extraInputTokens;
+    }
+  }
+  return {
+    templateRef, callCount, templateTotalCost,
+    extraInputTokens, projectedExtraCost,
+    projectedExtraPct: templateTotalCost > 0 ? projectedExtraCost / templateTotalCost : null,
   };
 }

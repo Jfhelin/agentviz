@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import * as fs from "fs";
-import { compareRunsCost } from "../lib/compareCost";
+import { compareRunsCost, projectPrefixTaxOver } from "../lib/compareCost";
 import { parseCopilotChatExport } from "../lib/copilotChatExportParser";
 
 // These fixtures live outside the repo (user attachments). The test is
@@ -544,5 +544,125 @@ describe("compareRunsCost: drift detection", () => {
     expect(longer.divergenceSplit.postCostA).toBeCloseTo(0, 5);
     expect(longer.divergenceSplit.postCostB).toBeCloseTo(0.01, 5);
     expect(longer.divergenceSplit.postDelta).toBeCloseTo(0.01, 5);
+  });
+
+  it("projects prefix tax over each run's actual call shape with cache amortization", () => {
+    // Single primary call: cost=0.01, model=claude-sonnet-4 (input $3/M,
+    // output $15/M), fresh=1000, output=10. Output cost = 10/1e6 * 15 =
+    // 0.00015. Input cost = 0.01 - 0.00015 = 0.00985. Per-input-token
+    // cost = 0.00985 / 1000 = 9.85e-6. For 100 extra prefix tokens,
+    // projection should be ~100 * 9.85e-6 = 0.000985.
+    const template: any = {
+      prompts: [{
+        index: 0, cost: 0.01, output: 10, cached: 0, fresh: 1000, cacheWrite: 0,
+        promptTokens: 1000, llmCount: 1, label: "x",
+        events: [{
+          name: "panel/editAgent", model: "claude-sonnet-4.5",
+          cost: 0.01, output: 10, cached: 0, fresh: 1000, cacheWrite: 0,
+          promptTokens: 1000, components: { system: 1000 },
+          category: "primary", kind: "llm",
+        }],
+      }],
+      totals: { promptTokens: 1000, output: 10, cached: 0, fresh: 1000, cacheWrite: 0, cost: 0.01, llmCalls: 1, toolCalls: 0, cacheHitRate: 0 },
+    };
+    const proj = projectPrefixTaxOver(template, 100, "A");
+    expect(proj.templateRef).toBe("A");
+    expect(proj.callCount).toBe(1);
+    expect(proj.templateTotalCost).toBeCloseTo(0.01, 5);
+    expect(proj.projectedExtraCost).toBeCloseTo(0.000985, 5);
+    expect(proj.projectedExtraPct).toBeCloseTo(0.0985, 3);
+  });
+
+  it("amortizes prefix tax across cached vs cold calls", () => {
+    // Cold call: 1000 fresh tokens, cost 0.01 → ~9.85e-6 per input token.
+    // Warm call: 900 cached + 100 fresh, cost 0.001875 (10% rate on cached
+    // portion: 900 * 3e-6 + 100 * 3e-6 ÷ 10 = 0.0027 + 0.0003 = 0.003 input
+    // cost; plus 0 output for simplicity = total 0.003). Per-input-token
+    // cost = 0.003 / 1000 = 3e-6.
+    // For 100 extra prefix tokens: cold contributes 100 * 9.85e-6 = 0.000985
+    // warm contributes 100 * 3e-6 = 0.0003. Total ≈ 0.001285.
+    const template: any = {
+      prompts: [
+        {
+          index: 0, cost: 0.01, output: 10, cached: 0, fresh: 1000, cacheWrite: 0,
+          promptTokens: 1000, llmCount: 1, label: "cold",
+          events: [{
+            name: "panel/editAgent", model: "claude-sonnet-4.5",
+            cost: 0.01, output: 10, cached: 0, fresh: 1000, cacheWrite: 0,
+            promptTokens: 1000, components: { system: 1000 },
+            category: "primary", kind: "llm",
+          }],
+        },
+        {
+          index: 1, cost: 0.003, output: 0, cached: 900, fresh: 100, cacheWrite: 0,
+          promptTokens: 1000, llmCount: 1, label: "warm",
+          events: [{
+            name: "panel/editAgent", model: "claude-sonnet-4.5",
+            cost: 0.003, output: 0, cached: 900, fresh: 100, cacheWrite: 0,
+            promptTokens: 1000, components: { system: 1000 },
+            category: "primary", kind: "llm",
+          }],
+        },
+      ],
+      totals: { promptTokens: 2000, output: 10, cached: 900, fresh: 1100, cacheWrite: 0, cost: 0.013, llmCalls: 2, toolCalls: 0, cacheHitRate: 0.45 },
+    };
+    const proj = projectPrefixTaxOver(template, 100, "B");
+    expect(proj.callCount).toBe(2);
+    expect(proj.projectedExtraCost).toBeGreaterThan(0.001);
+    expect(proj.projectedExtraCost).toBeLessThan(0.0015);
+    // Sanity: warm-call contribution must be much smaller than cold-call.
+    // Equivalently, doubling call count with all-cached calls should add
+    // very little.
+  });
+
+  it("skips overhead and tool events from the projection", () => {
+    const template: any = {
+      prompts: [{
+        index: 0, cost: 0.01, output: 10, cached: 0, fresh: 1000, cacheWrite: 0,
+        promptTokens: 1000, llmCount: 1, label: "x",
+        events: [
+          { name: "title", model: "gpt-4o-mini", cost: 0.0001, output: 5, cached: 0, fresh: 200, cacheWrite: 0, promptTokens: 200, components: { system: 200 }, category: "overhead", kind: "llm" },
+          { name: "panel/editAgent", model: "claude-sonnet-4.5", cost: 0.01, output: 10, cached: 0, fresh: 1000, cacheWrite: 0, promptTokens: 1000, components: { system: 1000 }, category: "primary", kind: "llm" },
+          { name: "read_file", model: "", cost: 0, output: 0, cached: 0, fresh: 0, cacheWrite: 0, promptTokens: 0, kind: "tool" },
+        ],
+      }],
+      totals: { promptTokens: 1200, output: 15, cached: 0, fresh: 1200, cacheWrite: 0, cost: 0.0101, llmCalls: 2, toolCalls: 1, cacheHitRate: 0 },
+    };
+    const proj = projectPrefixTaxOver(template, 100, "A");
+    expect(proj.callCount).toBe(1); // only the primary call
+    expect(proj.templateTotalCost).toBeCloseTo(0.01, 5); // overhead cost excluded
+  });
+
+  it("returns a zero projection when extraInputTokens is 0", () => {
+    const template: any = {
+      prompts: [{
+        index: 0, cost: 0.01, output: 10, cached: 0, fresh: 1000, cacheWrite: 0,
+        promptTokens: 1000, llmCount: 1, label: "x",
+        events: [{
+          name: "panel/editAgent", model: "claude-sonnet-4.5",
+          cost: 0.01, output: 10, cached: 0, fresh: 1000, cacheWrite: 0,
+          promptTokens: 1000, components: { system: 1000 },
+          category: "primary", kind: "llm",
+        }],
+      }],
+      totals: { promptTokens: 1000, output: 10, cached: 0, fresh: 1000, cacheWrite: 0, cost: 0.01, llmCalls: 1, toolCalls: 0, cacheHitRate: 0 },
+    };
+    const proj = projectPrefixTaxOver(template, 0, "A");
+    expect(proj.projectedExtraCost).toBe(0);
+    // callCount is still computed (it's a property of the template, not the delta).
+    expect(proj.callCount).toBe(1);
+  });
+
+  it("attaches prefixTaxProjections for both runs to the comparison result", () => {
+    const r = compareRunsCost(mkRun({}), mkRun({ extraPromptCount: 1 }))!;
+    expect(r.prefixTaxProjections).toHaveLength(2);
+    expect(r.prefixTaxProjections[0].templateRef).toBe("A");
+    expect(r.prefixTaxProjections[1].templateRef).toBe("B");
+    // Both runs have identical preInput tokens here (mkRun's first call is
+    // fixed at 1000 tokens regardless of extraPromptCount), so preInputDelta
+    // is 0 and projections come back at 0.
+    expect(r.divergenceSplit.preInputDelta).toBe(0);
+    expect(r.prefixTaxProjections[0].projectedExtraCost).toBe(0);
+    expect(r.prefixTaxProjections[1].projectedExtraCost).toBe(0);
   });
 });

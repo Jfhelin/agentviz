@@ -702,7 +702,7 @@ function Card({ children }) {
   );
 }
 
-function DivergencePanel({ split }) {
+function DivergencePanel({ split, projections, nameA, nameB }) {
   const { preCostA, preCostB, preDelta, preDeltaPct, postCostA, postCostB, postDelta, postDeltaPct, preInputTokensA, preInputTokensB, preInputDelta } = split;
   const fmtTok = (n) => (n || 0).toLocaleString();
   function Row({ label, sub, av, bv, delta, deltaPct, valueFmt, deltaIsTokens }) {
@@ -770,6 +770,91 @@ function DivergencePanel({ split }) {
       }}>
         N=1 caveat: the post-divergence number reflects what the agent happened to do today on this single run. With temp=0 and no API noise it would still flip on small prompt changes. Use the prefix tax row for causal claims; treat post-divergence as descriptive only.
       </div>
+      <ProjectionPanel projections={projections} preInputDelta={preInputDelta} nameA={nameA} nameB={nameB} />
+    </div>
+  );
+}
+
+function ProjectionPanel({ projections, preInputDelta, nameA, nameB }) {
+  if (!Array.isArray(projections) || projections.length === 0) return null;
+  if (!preInputDelta || preInputDelta === 0) return null;
+  const labelFor = (ref) => ref === "A" ? (nameA || "Run A") : (nameB || "Run B");
+  const totalAbs = Math.abs(preInputDelta);
+  const sign = preInputDelta > 0 ? "+" : "−";
+  return (
+    <div style={{
+      marginTop: 16,
+      paddingTop: 14,
+      borderTop: "1px dashed " + theme.border.subtle,
+    }}>
+      <div style={{
+        fontSize: theme.fontSize.sm,
+        fontWeight: 600,
+        color: theme.text.primary,
+        marginBottom: 4,
+      }}>
+        Projected over each run's actual call shape
+      </div>
+      <div style={{
+        fontSize: theme.fontSize.xs,
+        color: theme.text.secondary,
+        lineHeight: 1.5,
+        marginBottom: 10,
+      }}>
+        If every primary LLM call had paid the prefix tax of {sign}{totalAbs.toLocaleString()} input tokens, this is what each run would have cost on top of its actual total. Cache amortization is automatic: cache-warm calls contribute less than cold calls. <b>Lower bound only</b> -- this assumes the agent's path stays identical; real prefix changes can also shift behavior, which this number won't catch.
+      </div>
+      <div style={{ display: "grid", gap: 0 }}>
+        {projections.map((proj) => (
+          <ProjectionRow key={proj.templateRef} proj={proj} label={labelFor(proj.templateRef)} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ProjectionRow({ proj, label }) {
+  const { templateRef, callCount, templateTotalCost, projectedExtraCost, projectedExtraPct } = proj;
+  const tone = templateRef === "A" ? COLOR_A : COLOR_B;
+  const deltaColor = projectedExtraCost === 0 ? theme.text.muted
+    : projectedExtraCost < 0 ? theme.semantic.success : theme.semantic.error;
+  const sign = projectedExtraCost > 0 ? "+" : "";
+  return (
+    <div style={{
+      display: "grid",
+      gridTemplateColumns: "1fr auto auto",
+      alignItems: "baseline",
+      gap: 12,
+      padding: "8px 0",
+      borderBottom: "1px solid " + theme.border.subtle,
+    }}>
+      <div>
+        <div style={{ fontSize: theme.fontSize.sm, color: theme.text.primary }}>
+          <span style={{ color: tone, fontWeight: 600 }}>{templateRef}</span>
+          <span style={{ color: theme.text.muted }}> · {label}</span>
+        </div>
+        <div style={{ fontSize: 10, color: theme.text.muted, marginTop: 2 }}>
+          {callCount.toLocaleString()} primary call{callCount === 1 ? "" : "s"} · template total {fmtCr(templateTotalCost)}
+        </div>
+      </div>
+      <div style={{
+        color: deltaColor,
+        fontVariantNumeric: "tabular-nums",
+        fontSize: theme.fontSize.sm,
+        fontWeight: 600,
+        minWidth: 100,
+        textAlign: "right",
+      }}>
+        {sign}{fmtCr(projectedExtraCost)}
+      </div>
+      <div style={{
+        color: deltaColor,
+        fontVariantNumeric: "tabular-nums",
+        fontSize: theme.fontSize.sm,
+        minWidth: 70,
+        textAlign: "right",
+      }}>
+        {projectedExtraPct == null ? "--" : fmtPctSigned(projectedExtraPct)}
+      </div>
     </div>
   );
 }
@@ -833,7 +918,7 @@ export default function CostCompare({ sessionA, sessionB, fileA, fileB }) {
       <KpiGrid kpis={cmp.kpis} equivalent={cmp.answersEquivalent} />
 
       <SectionHeader title="Pre- vs post-divergence" sub="separates prefix tax from path-dependent behavior" />
-      <Card><DivergencePanel split={cmp.divergenceSplit} /></Card>
+      <Card><DivergencePanel split={cmp.divergenceSplit} projections={cmp.prefixTaxProjections} nameA={nameA} nameB={nameB} /></Card>
 
       <SectionHeader title="Where the savings came from" sub="per-bucket cost delta (B − A)" />
       <Card><BucketWaterfall deltas={cmp.bucketDeltas} totalA={cmp.a.totalCost} totalB={cmp.b.totalCost} /></Card>
