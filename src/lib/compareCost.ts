@@ -54,6 +54,13 @@ interface EventLike {
   responsePreview?: string;
   currentText?: string;
   systemPreview?: string;
+  /** Full character length of this call's system text. When present and >
+   * systemPreview.length, the preview is truncated and downstream hashes of
+   * systemPreview should be treated as preview-only. */
+  systemChars?: number;
+  /** Hash of the FULL (un-truncated) system text. Use this in preference to
+   * hashing systemPreview when present. */
+  systemHash?: string;
   argsSummary?: string;
   rawArgs?: string;
   /** "primary" = real user-facing chat call. "overhead" = UI/telemetry side
@@ -185,6 +192,11 @@ export interface RunFingerprint {
   systemPromptText: string;
   systemPromptChars: number;
   systemPromptHash: string;
+  /** True when systemPromptHash was computed from the full system text (via
+   * the parser), false when only the truncated preview was available. A false
+   * value here means a System prompt drift row of "match" should be qualified
+   * as "preview only". */
+  systemPromptHashTrusted: boolean;
   filesTouched: string[];   // sorted unique paths from any tool args
   filesEdited: string[];    // sorted unique paths from edit/write/create tools
   toolsInvoked: string[];   // sorted unique tool names actually called
@@ -690,6 +702,7 @@ function buildFingerprint(ca: CostAnalysisLike | null | undefined, summary: RunS
     turnCount: 0, llmCallCount: 0,
     firstUserPrompt: "", firstUserPromptHash: "00000000",
     systemPromptText: "", systemPromptChars: 0, systemPromptHash: "00000000",
+    systemPromptHashTrusted: false,
     filesTouched: [], filesEdited: [], toolsInvoked: [],
   };
   if (!ca || !Array.isArray(ca.prompts) || ca.prompts.length === 0) return empty;
@@ -713,15 +726,29 @@ function buildFingerprint(ca: CostAnalysisLike | null | undefined, summary: RunS
     break;
   }
 
-  // System prompt: first primary LLM event's systemPreview. Truncated by the
-  // parser to ~400 chars so it's already bounded; we just hash what we have.
+  // System prompt: prefer the parser-provided full-text hash + char count.
+  // Fall back to hashing the 400-char preview only when neither is present
+  // (older parsers / non-Copilot-Chat formats).
   let systemPromptText = "";
+  let systemPromptChars = 0;
+  let systemPromptHash = "00000000";
+  let systemPromptHashTrusted = false;
   for (const p of ca.prompts) {
     let found = false;
     for (const ev of p.events || []) {
       if (ev.kind && ev.kind !== "llm") continue;
       if (ev.category === "overhead") continue;
       systemPromptText = (ev.systemPreview || "").trim();
+      if (typeof ev.systemHash === "string" && ev.systemHash.length > 0) {
+        systemPromptHash = ev.systemHash;
+        systemPromptHashTrusted = true;
+      } else {
+        systemPromptHash = hashStr(normalizeForHash(systemPromptText));
+        systemPromptHashTrusted = false;
+      }
+      systemPromptChars = typeof ev.systemChars === "number" && ev.systemChars >= 0
+        ? ev.systemChars
+        : systemPromptText.length;
       found = true;
       break;
     }
@@ -759,8 +786,9 @@ function buildFingerprint(ca: CostAnalysisLike | null | undefined, summary: RunS
     firstUserPrompt,
     firstUserPromptHash: hashStr(normalizeForHash(firstUserPrompt)),
     systemPromptText,
-    systemPromptChars: systemPromptText.length,
-    systemPromptHash: hashStr(normalizeForHash(systemPromptText)),
+    systemPromptChars,
+    systemPromptHash,
+    systemPromptHashTrusted,
     filesTouched: Array.from(filesTouched).sort(),
     filesEdited: Array.from(filesEdited).sort(),
     toolsInvoked: Array.from(toolsInvoked).sort(),
@@ -806,15 +834,21 @@ function buildDriftReport(fa: RunFingerprint, fb: RunFingerprint): DriftReport {
   // System prompt — non-blocking by default (this IS what techniques like #3
   // change), but we surface byte size and hash so divergence is visible.
   const sysMatch = fa.systemPromptHash === fb.systemPromptHash;
+  const sysTrusted = fa.systemPromptHashTrusted && fb.systemPromptHashTrusted;
+  const sysHashSuffix = sysTrusted ? "" : " ~preview";
+  let sysDetail: string | undefined;
+  if (!sysMatch) {
+    sysDetail = "System prompt content differs between runs. Expected if you're testing instructions; unexpected otherwise.";
+  } else if (!sysTrusted) {
+    sysDetail = "Hashes match on the first 400 characters only. The full system text was not available, so identity beyond char 400 is not verified.";
+  }
   rows.push({
     key: "system_prompt",
     label: "System prompt",
-    status: sysMatch ? "match" : "diff",
-    aText: fa.systemPromptChars + " chars (hash " + fa.systemPromptHash + ")",
-    bText: fb.systemPromptChars + " chars (hash " + fb.systemPromptHash + ")",
-    detail: sysMatch
-      ? undefined
-      : "System prompt content differs between runs. Expected if you're testing instructions; unexpected otherwise.",
+    status: sysMatch ? (sysTrusted ? "match" : "info") : "diff",
+    aText: fa.systemPromptChars + " chars (hash " + fa.systemPromptHash + sysHashSuffix + ")",
+    bText: fb.systemPromptChars + " chars (hash " + fb.systemPromptHash + sysHashSuffix + ")",
+    detail: sysDetail,
     blocking: false,
   });
 

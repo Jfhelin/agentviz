@@ -316,17 +316,28 @@ describe("compareRunsCost: drift detection", () => {
     model?: string;
     label?: string;
     systemPreview?: string;
+    /** When true, omit systemHash/systemChars to exercise the legacy
+     * preview-only hash path (parser didn't supply full-text hash). */
+    omitSystemHash?: boolean;
     toolCalls?: Array<{ name: string; rawArgs?: string; argsSummary?: string }>;
     extraPromptCount?: number;
   }): any {
     const model = opts.model || "claude-sonnet-4.5";
+    const sysText = opts.systemPreview ?? "You are a helpful coding assistant.";
+    function fnv1a(s: string): string {
+      let h = 2166136261;
+      for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+      return (h >>> 0).toString(16).padStart(8, "0");
+    }
+    const sysHash = fnv1a(sysText.trim().replace(/\s+/g, " "));
     const events: any[] = [
       {
         name: "panel/editAgent", model, cost: 0.01, output: 10,
         cached: 0, fresh: 1000, cacheWrite: 0, promptTokens: 1000,
         components: { system: 500, tool_defs: 400, current: 100 },
         responsePreview: "ok", currentText: "do the thing",
-        systemPreview: opts.systemPreview ?? "You are a helpful coding assistant.",
+        systemPreview: sysText,
+        ...(opts.omitSystemHash ? {} : { systemChars: sysText.length, systemHash: sysHash }),
         category: "primary", kind: "llm",
       },
       ...(opts.toolCalls || []).map((t) => ({
@@ -351,7 +362,8 @@ describe("compareRunsCost: drift detection", () => {
           cached: 500, fresh: 100, cacheWrite: 0, promptTokens: 600,
           components: { system: 300, history: 200, current: 100 },
           responsePreview: "ok", currentText: "follow up " + (i + 1),
-          systemPreview: opts.systemPreview ?? "You are a helpful coding assistant.",
+          systemPreview: sysText,
+          ...(opts.omitSystemHash ? {} : { systemChars: sysText.length, systemHash: sysHash }),
           category: "primary", kind: "llm",
         }],
       });
@@ -397,6 +409,36 @@ describe("compareRunsCost: drift detection", () => {
     // Even though sys-prompt drifted, no blocking row should fire if everything
     // else matches.
     expect(r.drift.hasBlockingDrift).toBe(false);
+  });
+
+  it("downgrades a system-prompt 'match' to 'info' when only the preview was hashable", () => {
+    // Both runs have identical previews but no full-text hash from the parser.
+    // We can't prove identity beyond the preview, so the drift panel should
+    // show 'info' (not 'match') and surface a caveat to the user.
+    const r = compareRunsCost(
+      mkRun({ omitSystemHash: true }),
+      mkRun({ omitSystemHash: true }),
+    )!;
+    const sysRow = r.drift.rows.find((row) => row.key === "system_prompt")!;
+    expect(sysRow.status).toBe("info");
+    expect(sysRow.blocking).toBe(false);
+    expect(sysRow.aText).toContain("~preview");
+    expect(sysRow.bText).toContain("~preview");
+    expect(sysRow.detail).toMatch(/first 400 characters/);
+    // No 'diff' row, so hasAnyDrift remains false.
+    expect(r.drift.hasAnyDrift).toBe(false);
+    // And the fingerprint flags untrusted explicitly so consumers can decide.
+    expect(r.fingerprintA.systemPromptHashTrusted).toBe(false);
+    expect(r.fingerprintB.systemPromptHashTrusted).toBe(false);
+  });
+
+  it("trusts the full-text system hash when the parser supplies it", () => {
+    const r = compareRunsCost(mkRun({}), mkRun({}))!;
+    expect(r.fingerprintA.systemPromptHashTrusted).toBe(true);
+    expect(r.fingerprintB.systemPromptHashTrusted).toBe(true);
+    const sysRow = r.drift.rows.find((row) => row.key === "system_prompt")!;
+    expect(sysRow.status).toBe("match");
+    expect(sysRow.aText).not.toContain("~preview");
   });
 
   it("extracts edited file paths from edit_file tool calls", () => {

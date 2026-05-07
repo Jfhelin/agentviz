@@ -241,6 +241,8 @@ interface ClassifiedCall {
    * appear to grow. */
   componentChars: ComponentBreakdown;
   systemPreview: string;
+  systemChars: number;
+  systemHash: string;
   currentText: string;
   historyMsgs: { role: "user" | "assistant"; chars: number; tokens: number; preview: string }[];
   toolResultMsgs: { chars: number; tokens: number; preview: string; label: string }[];
@@ -267,6 +269,18 @@ const TOOL_GROUP_PATTERNS: { match: (name: string) => boolean; label: string }[]
 function classifyToolGroup(name: string): string {
   for (const p of TOOL_GROUP_PATTERNS) if (p.match(name)) return p.label;
   return "Built-in: other";
+}
+
+/** FNV-1a 32-bit hash, 8-char hex. Mirrors compareCost.ts's hashStr so that
+ * Run Drift can compare full-text hashes computed at parse time against
+ * preview-only hashes computed downstream. */
+function fnv1aHex(s: string): string {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(16).padStart(8, "0");
 }
 
 function classifyCall(log: RawLog): ClassifiedCall {
@@ -400,6 +414,8 @@ function classifyCall(log: RawLog): ClassifiedCall {
       current: currentChars,
     },
     systemPreview: systemText.slice(0, 400),
+    systemChars: systemText.length,
+    systemHash: fnv1aHex(systemText.trim().replace(/\s+/g, " ")),
     currentText: currentText.slice(0, 600),
     historyMsgs,
     toolResultMsgs,
@@ -490,6 +506,8 @@ export interface CostAnalysisCall {
   /** Subset of `toolResultMsgs` appended since the previous same-model call. */
   newToolResultMsgs: ClassifiedCall["toolResultMsgs"];
   systemPreview: string;
+  systemChars: number;
+  systemHash: string;
   currentText: string;
   cumCostAfter: number;
 }
@@ -925,6 +943,8 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
         newHistoryMsgs,
         newToolResultMsgs,
         systemPreview: cls.systemPreview,
+        systemChars: cls.systemChars,
+        systemHash: cls.systemHash,
         currentText: cls.currentText,
         cumCostAfter: cumCost,
       };
