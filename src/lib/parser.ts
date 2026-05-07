@@ -658,19 +658,8 @@ function buildMetadata(events: NormalizedEvent[], turns: SessionTurn[], issues: 
   };
 }
 
-export function parseClaudeCodeJSONL(text: string): ParsedSession | null {
-  const lines = text.trim().split("\n").filter(Boolean);
-  const rawRecords: RawRecord[] = [];
-  const issues = createParseIssues();
-
-  for (let index = 0; index < lines.length; index += 1) {
-    try {
-      rawRecords.push(JSON.parse(lines[index]));
-    } catch {
-      issues.malformedLines += 1;
-    }
-  }
-
+export function parseClaudeCodeRecords(rawRecords: RawRecord[], issues?: ParseIssues): ParsedSession | null {
+  const parseIssues = issues || createParseIssues();
   if (rawRecords.length === 0) return null;
 
   let timestampCount = 0;
@@ -685,7 +674,7 @@ export function parseClaudeCodeJSONL(text: string): ParsedSession | null {
   let syntheticTime = 0;
 
   for (let index = 0; index < rawRecords.length; index += 1) {
-    const parsedEvents = extractEventsFromRecord(rawRecords[index], syntheticTime, issues, mergedUsageByKey, attachedUsageKeys);
+    const parsedEvents = extractEventsFromRecord(rawRecords[index], syntheticTime, parseIssues, mergedUsageByKey, attachedUsageKeys);
     events.push(...parsedEvents);
     syntheticTime += Math.max(1, parsedEvents.length);
   }
@@ -715,7 +704,23 @@ export function parseClaudeCodeJSONL(text: string): ParsedSession | null {
   if (hasRealTimestamps) computeDurations(events);
 
   const turns = buildTurns(events);
-  const metadata = buildMetadata(events, turns, issues);
+  const metadata = buildMetadata(events, turns, parseIssues);
 
   return { events, turns, metadata };
+}
+
+export function parseClaudeCodeJSONL(text: string): ParsedSession | null {
+  const lines = text.trim().split("\n").filter(Boolean);
+  const rawRecords: RawRecord[] = [];
+  const issues = createParseIssues();
+
+  for (let index = 0; index < lines.length; index += 1) {
+    try {
+      rawRecords.push(JSON.parse(lines[index]));
+    } catch {
+      issues.malformedLines += 1;
+    }
+  }
+
+  return parseClaudeCodeRecords(rawRecords, issues);
 }

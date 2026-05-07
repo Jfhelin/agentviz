@@ -35,6 +35,7 @@ src/
     copilotCliParser.ts # parseCopilotCliJSONL() - Copilot CLI JSONL parser
     vscodeSessionParser.ts # parseVSCodeChatJSON() - VS Code Copilot Chat JSON parser
     atifParser.ts       # parseAtifJSON() - ATIF / Harbor trajectory JSON parser (schema_version ATIF-v1.6)
+    liveSessionParser.ts # Incremental live JSONL parser for appended session text
     parseSession.ts    # Auto-detect format router: detectFormat() + parseSession()
     session.ts         # Pure helpers: getSessionTotal, buildFilteredEventEntries, buildTurnStartMap
     sessionLibrary.js  # localStorage-backed session library with content persistence
@@ -57,6 +58,7 @@ src/
     dataInspector.js   # Payload summary and preview helpers for inspector panels
     formatTime.js      # Duration and date formatting utilities
     landingSessions.js # Shared landing browser labels, filters, and format options
+    lazyImport.js      # Dynamic import wrapper with stale-chunk reload recovery
     playbackUtils.js   # Playback state helpers
   components/
     InboxView.jsx      # Session inbox with auto-discovery, sorting, refresh, and review priority
@@ -99,7 +101,7 @@ server.js              # HTTP server: serves dist/ SPA + SSE /api/stream file ta
 
 Normalized event (output of parser, consumed by all views):
 ```
-{ t, agent, track, text, duration, intensity, toolName?, toolInput?, raw, turnIndex, isError, model?, tokenUsage? }
+{ t, agent, track, text, duration, intensity, toolName?, toolInput?, toolOutput?, toolCallId?, parentToolCallId?, agentName?, agentDisplayName?, raw, turnIndex, isError, model?, tokenUsage? }
 ```
 
 Turn (groups events by user-initiated conversation rounds):
@@ -121,7 +123,7 @@ Agent types: user, assistant, system
 - `npm start` - Build and launch AGENTVIZ in browser (production)
 - `npm run dev` - Vite dev server + API backend (both auto-started)
 - `npm run build` - Production build to dist/
-- `npm test` - Run 300 tests via Vitest (parsers, layout, diff, graph, autonomy, QA, regressions, and more)
+- `npm test` - Run 700+ tests via Vitest (parsers, layout, diff, graph, autonomy, QA, regressions, and more)
 - `npm run test:watch` - Watch mode for tests
 - `npm run typecheck` - Type-check with tsc --noEmit
 

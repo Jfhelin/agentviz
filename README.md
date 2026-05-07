@@ -404,6 +404,7 @@ src/
     exportHtml.js        # Self-contained HTML export for single sessions and comparisons
     formatTime.js        # Duration and date formatting utilities
     landingSessions.js   # Shared landing browser labels, filters, and format options
+    lazyImport.js        # Dynamic import wrapper with stale-chunk reload recovery
     playbackUtils.js     # Playback state helpers
   components/
     InboxView.jsx        # Session inbox with auto-discovery, sorting, refresh, and review priority
@@ -448,7 +449,7 @@ server.js                # HTTP server shell: static serving, file watcher, rout
 
 ```js
 // Every event has the same shape regardless of source format
-{ t, agent, track, text, duration, intensity, toolName?, toolInput?, raw, turnIndex, isError, model?, tokenUsage?, parentToolCallId? }
+{ t, agent, track, text, duration, intensity, toolName?, toolInput?, toolOutput?, toolCallId?, parentToolCallId?, agentName?, agentDisplayName?, raw, turnIndex, isError, model?, tokenUsage? }
 
 // Turns group events by conversation round
 { index, startTime, endTime, eventIndices, userMessage, toolCount, hasError }

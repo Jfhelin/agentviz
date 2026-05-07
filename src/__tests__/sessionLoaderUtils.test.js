@@ -4,7 +4,7 @@ import {
   buildAppliedSession,
   parseSessionText,
 } from "../lib/sessionParsing";
-import { appendRawLines, shouldApplyLiveLines } from "../hooks/useSessionLoader.js";
+import { LIVE_NOTIFY_DEBOUNCE_MS, shouldApplyLiveLines } from "../hooks/useSessionLoader.js";
 
 function buildResult() {
   return {
@@ -18,9 +18,8 @@ function buildResult() {
 }
 
 describe("useSessionLoader helpers", function () {
-  it("appends live text with stable newline handling", function () {
-    expect(appendRawLines("", "line-1")).toBe("line-1");
-    expect(appendRawLines("line-1", "line-2")).toBe("line-1\nline-2");
+  it("exposes the live notify debounce delay", function () {
+    expect(LIVE_NOTIFY_DEBOUNCE_MS).toBe(250);
   });
 
   it("only accepts live updates from the active live request", function () {

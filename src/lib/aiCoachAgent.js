@@ -49,6 +49,13 @@ export function getConfigPathsForFormat(format, agentName) {
   return CONFIG_PATHS_CLAUDE; // claude-code default
 }
 
+function getAgentTypeLabel(format) {
+  if (format === "copilot-cli") return "GitHub Copilot CLI";
+  if (format === "vscode-chat") return "VS Code Copilot Chat";
+  if (format === "atif") return "ATIF / Harbor";
+  return "Claude Code";
+}
+
 // Kept for backwards compat / tests
 export var KNOWN_CONFIG_PATHS = CONFIG_PATHS_CLAUDE.concat(CONFIG_PATHS_COPILOT.filter(function (p) {
   return !CONFIG_PATHS_CLAUDE.includes(p);
@@ -298,8 +305,9 @@ var COPILOT_CLI_GUIDANCE = [
   "     draftText: '/fleet Run the full test suite in parallel and collect all failures'",
 ].join("\n");
 
-function buildSystemPrompt(format) {
-  var formatGuidance = (format === "copilot-cli" || format === "vscode-chat") ? COPILOT_CLI_GUIDANCE : CLAUDE_CODE_GUIDANCE;
+export function buildSystemPrompt(format, agentName) {
+  var configPaths = getConfigPathsForFormat(format, agentName);
+  var formatGuidance = configPaths === CONFIG_PATHS_COPILOT ? COPILOT_CLI_GUIDANCE : CLAUDE_CODE_GUIDANCE;
   return [
     "You are an AI agent workflow coach. Your job is to:",
     "  1. Recommend changes to AI agent configuration files that fix observed problems.",
@@ -360,9 +368,7 @@ export function buildCoachPrompt(payload) {
     topTools, errorSamples, userFollowUps, existingSkills, existingMcpServers,
   } = payload;
 
-  var agentType = format === "copilot-cli" ? "GitHub Copilot CLI"
-    : format === "vscode-chat" ? "VS Code Copilot Chat"
-    : "Claude Code";
+  var agentType = getAgentTypeLabel(format);
   var agentName = payload.agentName || (payload.agent && payload.agent.name) || "";
   var configPaths = getConfigPathsForFormat(format, agentName);
   var toolList = (topTools || []).slice(0, 10).map(function (t) { return t.name + " x" + t.count; }).join(", ");
@@ -481,7 +487,7 @@ export async function runCoachAgent(payload, opts, _attempt) {
       onPermissionRequest: approveAll,
       systemMessage: {
         mode: "replace",
-        content: buildSystemPrompt(format),
+        content: buildSystemPrompt(format, agentName),
       },
     };
     if (model) sessionOpts.model = model;

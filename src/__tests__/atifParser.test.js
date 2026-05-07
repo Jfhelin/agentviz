@@ -27,7 +27,7 @@ describe("detectAtif", function () {
   });
 });
 
-describe("parseAtifJSON — d2-parse-minimal", function () {
+describe("parseAtifJSON -- d2-parse-minimal", function () {
   const text = loadFixture("atif-minimal.json");
   const session = parseAtifJSON(text);
 
@@ -69,7 +69,7 @@ describe("parseAtifJSON — d2-parse-minimal", function () {
   });
 });
 
-describe("parseAtifJSON — d3-parse-tagged", function () {
+describe("parseAtifJSON -- d3-parse-tagged", function () {
   const text = loadFixture("atif-tagged.json");
   const session = parseAtifJSON(text);
 
@@ -102,7 +102,7 @@ describe("parseAtifJSON — d3-parse-tagged", function () {
   });
 });
 
-describe("parseAtifJSON — d4-tool-linking", function () {
+describe("parseAtifJSON -- d4-tool-linking", function () {
   const text = loadFixture("atif-minimal.json");
   const session = parseAtifJSON(text);
 
@@ -119,7 +119,7 @@ describe("parseAtifJSON — d4-tool-linking", function () {
   });
 });
 
-describe("parseAtifJSON — d5-multimodal", function () {
+describe("parseAtifJSON -- d5-multimodal", function () {
   const text = loadFixture("atif-multimodal.json");
 
   it("does not throw and returns a parse result", function () {
@@ -139,7 +139,7 @@ describe("parseAtifJSON — d5-multimodal", function () {
   });
 });
 
-describe("parseAtifJSON — d6-copied-context", function () {
+describe("parseAtifJSON -- d6-copied-context", function () {
   const text = loadFixture("atif-edge.json");
   const session = parseAtifJSON(text);
 
@@ -159,7 +159,7 @@ describe("parseAtifJSON — d6-copied-context", function () {
   });
 });
 
-describe("parseAtifJSON — d9-warnings", function () {
+describe("parseAtifJSON -- d9-warnings", function () {
   it("emits a warning for non-sequential step_ids without dropping the parse", function () {
     const text = JSON.stringify({
       schema_version: "ATIF-v1.6",
@@ -183,7 +183,7 @@ describe("parseAtifJSON — d9-warnings", function () {
   });
 });
 
-describe("parseAtifJSON — recent regressions (turn segmentation, message duration cap, optional tool durations)", function () {
+describe("parseAtifJSON -- recent regressions (turn segmentation, message duration cap, optional tool durations)", function () {
   function makeAtif(steps) {
     return JSON.stringify({
       schema_version: "ATIF-v1.6",

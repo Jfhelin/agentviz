@@ -1,12 +1,11 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { parseSession } from "../lib/parseSession";
+import { appendLiveSessionText, createLiveSessionParser } from "../lib/liveSessionParser";
 import { SAMPLE_EVENTS, SAMPLE_TOTAL, SAMPLE_TURNS, SAMPLE_METADATA, MULTIAGENT_SAMPLE_EVENTS, MULTIAGENT_SAMPLE_TOTAL, MULTIAGENT_SAMPLE_TURNS, MULTIAGENT_SAMPLE_METADATA } from "../lib/constants.js";
 import { getSessionTotal } from "../lib/session";
 import { buildAppliedSession, parseSessionText } from "../lib/sessionParsing";
 
-export function appendRawLines(existingText, newLines) {
-  return existingText ? existingText + "\n" + newLines : newLines;
-}
+export var LIVE_NOTIFY_DEBOUNCE_MS = 250;
 
 export function shouldApplyLiveLines(liveRequestId, requestId) {
   return liveRequestId === requestId;
@@ -25,8 +24,10 @@ export default function useSessionLoader(options) {
   var [showHero, setShowHero] = useState(false);
   var [isLive, setIsLive] = useState(false);
   var parseTimeoutRef = useRef(null);
+  var liveNotifyTimeoutRef = useRef(null);
   var requestIdRef = useRef(0);
   var rawTextRef = useRef("");
+  var liveParserRef = useRef(createLiveSessionParser(""));
   // Tracks the requestId that initiated the current live session. appendLines
   // checks this so stale live data from a previous session never overwrites a
   // newly-loaded file.
@@ -49,6 +50,27 @@ export default function useSessionLoader(options) {
     }
   }, [onSessionParsed]);
 
+  var clearLiveNotify = useCallback(function () {
+    if (liveNotifyTimeoutRef.current) {
+      clearTimeout(liveNotifyTimeoutRef.current);
+      liveNotifyTimeoutRef.current = null;
+    }
+  }, []);
+
+  var notifyLiveSessionParsed = useCallback(function (result, name, text) {
+    if (typeof onSessionParsed !== "function") return;
+    clearLiveNotify();
+    liveNotifyTimeoutRef.current = setTimeout(function () {
+      liveNotifyTimeoutRef.current = null;
+      onSessionParsed(result, name, text);
+    }, LIVE_NOTIFY_DEBOUNCE_MS);
+  }, [clearLiveNotify, onSessionParsed]);
+
+  var resetLiveParser = useCallback(function (text) {
+    clearLiveNotify();
+    liveParserRef.current = createLiveSessionParser(text || "");
+  }, [clearLiveNotify]);
+
   var handleFile = useCallback(function (text, name) {
     requestIdRef.current += 1;
     var requestId = requestIdRef.current;
@@ -59,6 +81,7 @@ export default function useSessionLoader(options) {
     }
 
     rawTextRef.current = text;
+    resetLiveParser(text);
     setError(null);
     setLoading(true);
     setIsLive(false);
@@ -80,24 +103,27 @@ export default function useSessionLoader(options) {
       applySession(parsed.result, name);
       notifySessionParsed(parsed.result, name, text);
     }, 16);
-  }, [applySession, notifySessionParsed]);
+  }, [applySession, notifySessionParsed, resetLiveParser]);
 
   // Called by useLiveStream with each batch of new JSONL lines.
-  // Appends to rawText and re-parses the full accumulated text.
-  // Guards against stale live data overwriting a newly-loaded file.
+  // Parses only appended lines and rebuilds normalized session output from the
+  // accumulated parsed records. Guards against stale live data overwriting a
+  // newly-loaded file.
   var appendLines = useCallback(function (newLines) {
     if (!shouldApplyLiveLines(liveRequestIdRef.current, requestIdRef.current)) return;
-    rawTextRef.current = appendRawLines(rawTextRef.current, newLines);
 
-    var parsed = parseSessionText(rawTextRef.current);
-    if (!parsed.result) return;
+    var updated = appendLiveSessionText(liveParserRef.current, newLines);
+    liveParserRef.current = updated.state;
+    rawTextRef.current = updated.state.rawText;
 
-    setEvents(parsed.result.events);
-    setTurns(parsed.result.turns);
-    setMetadata(parsed.result.metadata);
-    setTotal(getSessionTotal(parsed.result.events));
-    notifySessionParsed(parsed.result, file || "live-session.jsonl", rawTextRef.current);
-  }, [file, notifySessionParsed]);
+    if (!updated.result) return;
+
+    setEvents(updated.result.events);
+    setTurns(updated.result.turns);
+    setMetadata(updated.result.metadata);
+    setTotal(getSessionTotal(updated.result.events));
+    notifyLiveSessionParsed(updated.result, file || "live-session.jsonl", updated.state.rawText);
+  }, [file, notifyLiveSessionParsed]);
 
   var loadSample = useCallback(function (mode) {
     requestIdRef.current += 1;
@@ -108,6 +134,7 @@ export default function useSessionLoader(options) {
 
     var isMultiAgent = mode === "multiagent";
     rawTextRef.current = "";
+    resetLiveParser("");
     setEvents(isMultiAgent ? MULTIAGENT_SAMPLE_EVENTS : SAMPLE_EVENTS);
     setTurns(isMultiAgent ? MULTIAGENT_SAMPLE_TURNS : SAMPLE_TURNS);
     setMetadata(isMultiAgent ? MULTIAGENT_SAMPLE_METADATA : SAMPLE_METADATA);
@@ -117,7 +144,7 @@ export default function useSessionLoader(options) {
     setLoading(false);
     setIsLive(false);
     setShowHero(true);
-  }, []);
+  }, [resetLiveParser]);
 
   var resetSession = useCallback(function () {
     requestIdRef.current += 1;
@@ -127,6 +154,7 @@ export default function useSessionLoader(options) {
     }
 
     rawTextRef.current = "";
+    resetLiveParser("");
     setEvents(null);
     setTurns([]);
     setMetadata(null);
@@ -136,7 +164,7 @@ export default function useSessionLoader(options) {
     setLoading(false);
     setIsLive(false);
     setShowHero(false);
-  }, []);
+  }, [resetLiveParser]);
 
   var dismissHero = useCallback(function () {
     setShowHero(false);
@@ -156,6 +184,7 @@ export default function useSessionLoader(options) {
           .then(function (text) {
             if (!text) return;
             rawTextRef.current = text;
+            resetLiveParser(text);
             requestIdRef.current += 1;
             if (meta.live) {
               liveRequestIdRef.current = requestIdRef.current;
@@ -178,17 +207,18 @@ export default function useSessionLoader(options) {
           });
       })
       .catch(function () {});
-  }, [autoBootstrap, notifySessionParsed]);
+  }, [autoBootstrap, notifySessionParsed, resetLiveParser]);
 
   useEffect(function () {
     return function () {
       requestIdRef.current += 1;
+      clearLiveNotify();
       if (parseTimeoutRef.current) {
         clearTimeout(parseTimeoutRef.current);
         parseTimeoutRef.current = null;
       }
     };
-  }, []);
+  }, [clearLiveNotify]);
 
   return {
     events: events,

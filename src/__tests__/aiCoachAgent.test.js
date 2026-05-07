@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { buildCoachPrompt, parseRecommendations, getConfigPathsForFormat } from "../lib/aiCoachAgent.js";
+import { buildCoachPrompt, buildSystemPrompt, parseRecommendations, getConfigPathsForFormat } from "../lib/aiCoachAgent.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // buildCoachPrompt
@@ -32,6 +32,12 @@ describe("buildCoachPrompt", function () {
   it("labels copilot-cli correctly", function () {
     var prompt = buildCoachPrompt(Object.assign({}, basePayload, { format: "copilot-cli" }));
     expect(prompt).toContain("GitHub Copilot CLI");
+  });
+
+  it("labels ATIF sessions correctly", function () {
+    var prompt = buildCoachPrompt(Object.assign({}, basePayload, { format: "atif" }));
+    expect(prompt).toContain("Analyze this ATIF / Harbor session");
+    expect(prompt).not.toContain("Analyze this Claude Code session");
   });
 
   it("includes all key stats", function () {
@@ -74,6 +80,24 @@ describe("buildCoachPrompt", function () {
     var toolsLine = prompt.split("\n").find(function (l) { return l.startsWith("- Top tools used:"); });
     var matches = (toolsLine || "").match(/tool\d+/g) || [];
     expect(matches.length).toBeLessThanOrEqual(10);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// buildSystemPrompt
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("buildSystemPrompt", function () {
+  it("uses Copilot guidance for ATIF sessions from Copilot agents", function () {
+    var prompt = buildSystemPrompt("atif", "copilot");
+    expect(prompt).toContain("Agent type: GITHUB COPILOT CLI");
+    expect(prompt).not.toContain("Agent type: CLAUDE CODE");
+  });
+
+  it("uses Claude guidance for ATIF sessions from Claude agents", function () {
+    var prompt = buildSystemPrompt("atif", "claude-code");
+    expect(prompt).toContain("Agent type: CLAUDE CODE");
+    expect(prompt).not.toContain("Agent type: GITHUB COPILOT CLI");
   });
 });
 

@@ -16,7 +16,7 @@
  * hard parse failures (invalid JSON, missing `agent`, missing `steps`).
  *
  * Note on errors: ATIF has no `is_error` flag on observation results, so
- * isError is heuristic — it matches /^Error/i and /exited with exit code [1-9]/
+ * isError is heuristic -- it matches /^Error/i and /exited with exit code [1-9]/
  * on result content. False negatives are expected.
  */
 
@@ -358,7 +358,6 @@ export function parseAtifJSON(text: string): ParsedSession | null {
   const events: NormalizedEvent[] = [];
   const turns: SessionTurn[] = [];
   let currentTurn: SessionTurn | null = null;
-  let userTurnCounter = 0;
   let primaryFallbackModel = trajectory.agent.model_name;
 
   for (let index = 0; index < steps.length; index += 1) {
@@ -413,10 +412,6 @@ export function parseAtifJSON(text: string): ParsedSession | null {
       toolCount: 0,
       hasError: false,
     };
-    if (step.source === "user") {
-      userTurnCounter += 1;
-    }
-
     const stepRawSummary: Record<string, unknown> = {
       step_id: step.step_id,
       source: step.source,
@@ -720,9 +715,6 @@ export function parseAtifJSON(text: string): ParsedSession | null {
   if (typeof trajectory.notes === "string" && trajectory.notes.length > 0) {
     metadata.customTitle = trajectory.notes;
   }
-
-  // Suppress unused-warning in the rare case primaryFallbackModel is unread.
-  void primaryFallbackModel;
 
   return { events, turns, metadata };
 }
