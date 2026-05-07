@@ -289,6 +289,12 @@ export interface CostComparison {
    * gives the only causally clean number for prefix-only variables and
    * shows what they'd cost over a realistic continuation. */
   prefixTaxProjections: PrefixTaxProjection[];
+  /** Deterministic, cost-free behavioral metrics for both runs. These are
+   * the right numbers to compare for techniques whose effect is on path
+   * length or output volume rather than prefix size (e.g. "be concise",
+   * "use Ask Mode", "prefer grep over file_search"). The cost waterfall
+   * is path-noise-contaminated at N=1; these KPIs are not. */
+  behavioralKpis: BehavioralKpis;
 }
 
 export interface DivergenceSplit {
@@ -333,6 +339,39 @@ export interface PrefixTaxProjection {
   /** projectedExtraCost / templateTotalCost. Null when template has no
    * priced calls. */
   projectedExtraPct: number | null;
+}
+
+/** A single behavioral metric, side by side. Used in BehavioralKpis. */
+export interface BehavioralKpiValue {
+  a: number;
+  b: number;
+  delta: number;            // b - a
+  deltaPct: number | null;  // (b - a) / a, null when a == 0
+}
+
+/** Cost-free, deterministic behavioral metrics for both runs. These are
+ * the right axes to compare on for techniques whose primary effect is on
+ * path length or output volume rather than prefix size: "be concise",
+ * "use Ask Mode", "prefer grep over file_search", etc. The cost numbers
+ * for those techniques are descriptive only at N=1; these are not. */
+export interface BehavioralKpis {
+  /** Number of primary user-facing LLM calls (overhead and tool events
+   * filtered out). */
+  primaryLlmCalls: BehavioralKpiValue;
+  /** Number of tool calls invoked by the agent. */
+  toolCalls: BehavioralKpiValue;
+  /** Distinct tool names used. */
+  distinctTools: BehavioralKpiValue;
+  /** Distinct files mentioned in any tool args. */
+  distinctFilesTouched: BehavioralKpiValue;
+  /** Total output (response) tokens across all primary LLM calls. */
+  totalOutputTokens: BehavioralKpiValue;
+  /** Mean output tokens per primary LLM call. */
+  avgOutputPerCall: BehavioralKpiValue;
+  /** Mean character length of user messages (across all turns). */
+  avgUserMessageChars: BehavioralKpiValue;
+  /** Number of distinct user turns (user prompts in the conversation). */
+  userTurns: BehavioralKpiValue;
 }
 
 // ---------- Helpers ----------
@@ -1036,6 +1075,7 @@ export function compareRunsCost(
     projectPrefixTaxOver(costA, divergenceSplit.preInputDelta, "A"),
     projectPrefixTaxOver(costB, divergenceSplit.preInputDelta, "B"),
   ];
+  const behavioralKpis = buildBehavioralKpis(costA, costB, fingerprintA, fingerprintB);
   return {
     a, b,
     kpis: buildKpis(a, b),
@@ -1057,6 +1097,7 @@ export function compareRunsCost(
     drift,
     divergenceSplit,
     prefixTaxProjections,
+    behavioralKpis,
   };
 }
 
@@ -1136,5 +1177,89 @@ export function projectPrefixTaxOver(
     templateRef, callCount, templateTotalCost,
     extraInputTokens, projectedExtraCost,
     projectedExtraPct: templateTotalCost > 0 ? projectedExtraCost / templateTotalCost : null,
+  };
+}
+
+function makeKpiValue(a: number, b: number): BehavioralKpiValue {
+  return {
+    a, b,
+    delta: b - a,
+    deltaPct: a !== 0 ? (b - a) / a : null,
+  };
+}
+
+function countPrimaryLlmCalls(ca: CostAnalysisLike | null | undefined): number {
+  if (!ca || !Array.isArray(ca.prompts)) return 0;
+  let n = 0;
+  for (const p of ca.prompts) {
+    for (const ev of p.events || []) {
+      if (ev.kind && ev.kind !== "llm") continue;
+      if (ev.category === "overhead") continue;
+      n++;
+    }
+  }
+  return n;
+}
+
+function countToolCalls(ca: CostAnalysisLike | null | undefined): number {
+  if (!ca || !Array.isArray(ca.prompts)) return 0;
+  let n = 0;
+  for (const p of ca.prompts) {
+    for (const ev of p.events || []) {
+      if (ev.kind === "tool") n++;
+    }
+  }
+  return n;
+}
+
+function sumPrimaryOutputTokens(ca: CostAnalysisLike | null | undefined): number {
+  if (!ca || !Array.isArray(ca.prompts)) return 0;
+  let n = 0;
+  for (const p of ca.prompts) {
+    for (const ev of p.events || []) {
+      if (ev.kind && ev.kind !== "llm") continue;
+      if (ev.category === "overhead") continue;
+      n += ev.output || 0;
+    }
+  }
+  return n;
+}
+
+function avgUserMessageChars(summary: RunSummary): number {
+  if (!summary.userPrompts.length) return 0;
+  let total = 0;
+  for (const p of summary.userPrompts) total += (p.label || "").length;
+  return total / summary.userPrompts.length;
+}
+
+function buildBehavioralKpis(
+  costA: CostAnalysisLike | null | undefined,
+  costB: CostAnalysisLike | null | undefined,
+  fingerprintA: RunFingerprint,
+  fingerprintB: RunFingerprint
+): BehavioralKpis {
+  const primaryA = countPrimaryLlmCalls(costA);
+  const primaryB = countPrimaryLlmCalls(costB);
+  const toolA = countToolCalls(costA);
+  const toolB = countToolCalls(costB);
+  const outA = sumPrimaryOutputTokens(costA);
+  const outB = sumPrimaryOutputTokens(costB);
+  const summaryA = summarizeRun(costA);
+  const summaryB = summarizeRun(costB);
+  return {
+    primaryLlmCalls: makeKpiValue(primaryA, primaryB),
+    toolCalls: makeKpiValue(toolA, toolB),
+    distinctTools: makeKpiValue(fingerprintA.toolsInvoked.length, fingerprintB.toolsInvoked.length),
+    distinctFilesTouched: makeKpiValue(fingerprintA.filesTouched.length, fingerprintB.filesTouched.length),
+    totalOutputTokens: makeKpiValue(outA, outB),
+    avgOutputPerCall: makeKpiValue(
+      primaryA > 0 ? outA / primaryA : 0,
+      primaryB > 0 ? outB / primaryB : 0,
+    ),
+    avgUserMessageChars: makeKpiValue(
+      avgUserMessageChars(summaryA),
+      avgUserMessageChars(summaryB),
+    ),
+    userTurns: makeKpiValue(fingerprintA.turnCount, fingerprintB.turnCount),
   };
 }

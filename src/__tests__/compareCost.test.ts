@@ -665,4 +665,41 @@ describe("compareRunsCost: drift detection", () => {
     expect(r.prefixTaxProjections[0].projectedExtraCost).toBe(0);
     expect(r.prefixTaxProjections[1].projectedExtraCost).toBe(0);
   });
+
+  it("computes behavioral KPIs alongside the cost summary", () => {
+    const r = compareRunsCost(
+      mkRun({ toolCalls: [{ name: "read_file" }, { name: "read_file" }, { name: "grep" }] }),
+      mkRun({ toolCalls: [{ name: "read_file" }] }),
+    )!;
+    const bk = r.behavioralKpis;
+    expect(bk.primaryLlmCalls.a).toBe(1);
+    expect(bk.primaryLlmCalls.b).toBe(1);
+    expect(bk.toolCalls.a).toBe(3);
+    expect(bk.toolCalls.b).toBe(1);
+    expect(bk.toolCalls.delta).toBe(-2);
+    expect(bk.distinctTools.a).toBe(2); // read_file + grep
+    expect(bk.distinctTools.b).toBe(1); // read_file only
+    expect(bk.totalOutputTokens.a).toBe(10);
+    expect(bk.totalOutputTokens.b).toBe(10);
+    expect(bk.userTurns.a).toBe(1);
+    expect(bk.userTurns.b).toBe(1);
+  });
+
+  it("filters overhead and tool events out of primary-call counts", () => {
+    const promptsA: any = {
+      prompts: [{
+        index: 0, cost: 0.01, output: 10, cached: 0, fresh: 1000, cacheWrite: 0,
+        promptTokens: 1000, llmCount: 1, label: "x",
+        events: [
+          { name: "title", model: "gpt-4o-mini", cost: 0.001, output: 5, cached: 0, fresh: 200, cacheWrite: 0, promptTokens: 200, components: { system: 200 }, category: "overhead", kind: "llm" },
+          { name: "panel/editAgent", model: "claude-sonnet-4.5", cost: 0.01, output: 10, cached: 0, fresh: 1000, cacheWrite: 0, promptTokens: 1000, components: { system: 1000 }, category: "primary", kind: "llm" },
+          { name: "read_file", model: "", cost: 0, output: 0, cached: 0, fresh: 0, cacheWrite: 0, promptTokens: 0, kind: "tool" },
+        ],
+      }],
+      totals: { promptTokens: 1200, output: 15, cached: 0, fresh: 1200, cacheWrite: 0, cost: 0.011, llmCalls: 2, toolCalls: 1, cacheHitRate: 0 },
+    };
+    const r = compareRunsCost(promptsA, promptsA)!;
+    expect(r.behavioralKpis.primaryLlmCalls.a).toBe(1);
+    expect(r.behavioralKpis.toolCalls.a).toBe(1);
+  });
 });

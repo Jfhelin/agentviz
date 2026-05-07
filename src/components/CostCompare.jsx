@@ -1,6 +1,7 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { theme, alpha } from "../lib/theme.js";
 import { compareRunsCost, BUCKETS } from "../lib/compareCost";
+import { formatComparisonAsMarkdown } from "../lib/exportComparison";
 import { prettifyRunName } from "../lib/runDisplayName";
 
 // A = primary blue, B = system purple. Matches the convention used elsewhere
@@ -859,6 +860,121 @@ function ProjectionRow({ proj, label }) {
   );
 }
 
+function BehavioralKpisPanel({ kpis }) {
+  const fmtNum = (n, dec = 0) => {
+    if (!isFinite(n)) return "--";
+    if (dec > 0) return n.toFixed(dec);
+    return Math.round(n).toLocaleString();
+  };
+  function Row({ label, kpi, decimals }) {
+    const dec = decimals || 0;
+    const sign = kpi.delta > 0 ? "+" : "";
+    const dColor = kpi.delta === 0 ? theme.text.muted
+      : kpi.delta < 0 ? theme.semantic.success : theme.semantic.error;
+    return (
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: "1fr auto auto auto",
+        alignItems: "baseline",
+        gap: 12,
+        padding: "8px 0",
+        borderBottom: "1px solid " + theme.border.subtle,
+      }}>
+        <div style={{ fontSize: theme.fontSize.sm, color: theme.text.primary }}>{label}</div>
+        <div style={{ color: COLOR_A, fontVariantNumeric: "tabular-nums", fontSize: theme.fontSize.sm, minWidth: 80, textAlign: "right" }}>
+          A · {fmtNum(kpi.a, dec)}
+        </div>
+        <div style={{ color: COLOR_B, fontVariantNumeric: "tabular-nums", fontSize: theme.fontSize.sm, minWidth: 80, textAlign: "right" }}>
+          B · {fmtNum(kpi.b, dec)}
+        </div>
+        <div style={{
+          color: dColor,
+          fontVariantNumeric: "tabular-nums",
+          fontSize: theme.fontSize.sm,
+          fontWeight: 600,
+          minWidth: 110,
+          textAlign: "right",
+        }}>
+          {kpi.delta === 0 ? "Δ 0" : `Δ ${sign}${fmtNum(kpi.delta, dec)} (${fmtPctSigned(kpi.deltaPct)})`}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div>
+      <div style={{
+        fontSize: theme.fontSize.xs,
+        color: theme.text.secondary,
+        lineHeight: 1.5,
+        marginBottom: 10,
+      }}>
+        These are the cost-free deterministic axes. For techniques that act on output volume ("be concise", "use Ask Mode") or path length ("prefer grep over file_search"), <b>read these instead of the cost numbers</b> -- cost is path-noise contaminated at N=1. Negative deltas in green generally mean B did less work than A.
+      </div>
+      <Row label="Primary LLM calls" kpi={kpis.primaryLlmCalls} />
+      <Row label="Tool calls" kpi={kpis.toolCalls} />
+      <Row label="Distinct tools" kpi={kpis.distinctTools} />
+      <Row label="Distinct files touched" kpi={kpis.distinctFilesTouched} />
+      <Row label="Total output tokens" kpi={kpis.totalOutputTokens} />
+      <Row label="Avg output per call" kpi={kpis.avgOutputPerCall} decimals={1} />
+      <Row label="Avg user message chars" kpi={kpis.avgUserMessageChars} decimals={1} />
+      <Row label="User turns" kpi={kpis.userTurns} />
+    </div>
+  );
+}
+
+function CopySummaryButton({ cmp, nameA, nameB }) {
+  const [status, setStatus] = useState("idle"); // idle | copied | error
+  const onClick = async () => {
+    try {
+      const md = formatComparisonAsMarkdown(cmp, { nameA, nameB });
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(md);
+      } else {
+        // Fallback: stick it in a textarea and select it.
+        const ta = document.createElement("textarea");
+        ta.value = md;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+      }
+      setStatus("copied");
+      setTimeout(() => setStatus("idle"), 2200);
+    } catch (e) {
+      console.warn("[agentviz][cost-compare] copy summary failed", e);
+      setStatus("error");
+      setTimeout(() => setStatus("idle"), 2200);
+    }
+  };
+  const label = status === "copied" ? "✓ Copied to clipboard"
+    : status === "error" ? "Copy failed -- see console"
+    : "Copy summary as markdown";
+  return (
+    <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end" }}>
+      <button
+        onClick={onClick}
+        title="Copy a structured markdown summary of this comparison for paste-into-chat. Useful when discussing the result with someone (or with a chat model)."
+        style={{
+          background: status === "copied" ? alpha(theme.semantic.success, 0.15) : "transparent",
+          border: "1px solid " + (status === "error" ? theme.semantic.error : theme.border.default),
+          color: status === "copied" ? theme.semantic.success
+            : status === "error" ? theme.semantic.error
+            : theme.text.primary,
+          padding: "4px 12px",
+          borderRadius: theme.radius.sm,
+          cursor: "pointer",
+          fontFamily: theme.font.mono,
+          fontSize: theme.fontSize.xs,
+        }}
+      >
+        {label}
+      </button>
+    </div>
+  );
+}
+
 export default function CostCompare({ sessionA, sessionB, fileA, fileB }) {
   const costA = getCostAnalysis(sessionA);
   const costB = getCostAnalysis(sessionB);
@@ -901,6 +1017,8 @@ export default function CostCompare({ sessionA, sessionB, fileA, fileB }) {
         summaryA={cmp.a} summaryB={cmp.b}
       />
 
+      <CopySummaryButton cmp={cmp} nameA={nameA} nameB={nameB} />
+
       <div style={{ marginTop: 16 }}>
         <VerdictBanner verdict={cmp.verdict} />
       </div>
@@ -919,6 +1037,9 @@ export default function CostCompare({ sessionA, sessionB, fileA, fileB }) {
 
       <SectionHeader title="Pre- vs post-divergence" sub="separates prefix tax from path-dependent behavior" />
       <Card><DivergencePanel split={cmp.divergenceSplit} projections={cmp.prefixTaxProjections} nameA={nameA} nameB={nameB} /></Card>
+
+      <SectionHeader title="Behavioral KPIs" sub="cost-free, deterministic; the right axes for path/output techniques" />
+      <Card><BehavioralKpisPanel kpis={cmp.behavioralKpis} /></Card>
 
       <SectionHeader title="Where the savings came from" sub="per-bucket cost delta (B − A)" />
       <Card><BucketWaterfall deltas={cmp.bucketDeltas} totalA={cmp.a.totalCost} totalB={cmp.b.totalCost} /></Card>
