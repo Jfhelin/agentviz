@@ -1,0 +1,74 @@
+{
+  "schema_version": "ATIF-v1.6",
+  "session_id": "00000000-0000-4000-8000-000000000003",
+  "agent": {
+    "name": "test-agent",
+    "version": "1.0.0",
+    "model_name": "gpt-test-vision"
+  },
+  "steps": [
+    {
+      "step_id": 1,
+      "timestamp": "2026-04-24T20:10:00.000Z",
+      "source": "user",
+      "message": "Show me an annotated screenshot."
+    },
+    {
+      "step_id": 2,
+      "timestamp": "2026-04-24T20:10:05.000Z",
+      "source": "agent",
+      "message": [
+        {
+          "type": "text",
+          "text": "Look at this image:"
+        },
+        {
+          "type": "image",
+          "source": {
+            "media_type": "image/png",
+            "path": "/tmp/screenshot.png"
+          }
+        }
+      ],
+      "model_name": "gpt-test-vision",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_capture",
+          "function_name": "capture_screen",
+          "arguments": {
+            "region": "full"
+          }
+        }
+      ],
+      "observation": {
+        "results": [
+          {
+            "source_call_id": "call_capture",
+            "content": [
+              {
+                "type": "text",
+                "text": "Captured screenshot at /tmp/screenshot.png"
+              },
+              {
+                "type": "image",
+                "source": {
+                  "media_type": "image/png",
+                  "path": "/tmp/screenshot.png"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "metrics": {
+        "prompt_tokens": 150,
+        "completion_tokens": 30
+      }
+    }
+  ],
+  "final_metrics": {
+    "total_prompt_tokens": 150,
+    "total_completion_tokens": 30,
+    "total_steps": 2
+  }
+}

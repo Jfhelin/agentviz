@@ -568,6 +568,7 @@ Found in ReplayView, WaterfallView, GraphView, and StatsView. All panels follow 
 - Tool lists: `fontSize: theme.fontSize.sm`, tool name uses track color, count `color: theme.text.muted`.
 - All panels use `ResizablePanel` for user-adjustable width.
 - Tool section heading is always "TOOLS USED" (consistent across Replay, Waterfall, Stats).
+- Tool-call inspectors should show paired `toolInput` and `toolOutput` in separate pre-wrapped panes when parser data is available.
 
 ### Graph View Node Types
 

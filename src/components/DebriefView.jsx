@@ -78,6 +78,7 @@ export default function DebriefView({ file, summary, metadata, rawSession }) {
 
     return {
       format: met.format || "claude-code",
+      agentName: (met.agent && met.agent.name) || met.primaryModel || "",
       primaryModel: met.primaryModel || null,
       totalEvents: met.totalEvents || 0,
       totalTurns: met.totalTurns || 0,

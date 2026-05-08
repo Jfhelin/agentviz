@@ -140,10 +140,23 @@ export default function TracksView({ currentTime, eventEntries, totalTime, timeM
                   }} />
                 );
               })}
-              {trackEntries.map(function (trackEntry) {
+              {(function () {
+                // Stagger zero-duration siblings that share the exact same `t`
+                // (e.g. parallel tool_calls in one ATIF step) so they don't
+                // collapse into a single visible bar. Underlying ev.t is
+                // unchanged -- this is presentation only.
+                var clusterIndex = {};
+                return trackEntries.map(function (trackEntry) {
                 var ev = trackEntry.event;
                 var left = timeMap ? timeMap.toPosition(ev.t) * 100 : (totalTime > 0 ? (ev.t / totalTime) * 100 : 0);
                 var width = Math.max(1, timeMap ? (timeMap.toPosition(ev.t + ev.duration) - timeMap.toPosition(ev.t)) * 100 : (totalTime > 0 ? (ev.duration / totalTime) * 100 : 2));
+                if (ev.duration === 0) {
+                  var bucket = ev.t.toFixed(3);
+                  var idx = clusterIndex[bucket] || 0;
+                  clusterIndex[bucket] = idx + 1;
+                  // Shift each sibling by ~one bar-width plus a half-bar gap.
+                  left = left + idx * (width * 1.5);
+                }
                 var agentColor = AGENT_COLORS[ev.agent] || theme.text.muted;
                 var active = currentTime >= ev.t && currentTime <= ev.t + ev.duration;
                 var hovered = hoveredEntry && hoveredEntry.index === trackEntry.index;
@@ -189,7 +202,8 @@ export default function TracksView({ currentTime, eventEntries, totalTime, timeM
                     </span>
                   </div>
                 );
-              })}
+              });
+              })()}
               <div style={{
                 position: "absolute",
                 left: playPct + "%",

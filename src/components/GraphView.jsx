@@ -16,6 +16,14 @@ function getTrackColor(track) {
   return theme.track[track] || theme.track.reasoning;
 }
 
+function safeStringify(value) {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
 function getAgentTypeColor(agentName) {
   return theme.agentType[agentName] || theme.agentType.default;
 }
@@ -703,30 +711,38 @@ function GraphInspector({ selectedNode }) {
               }}>
                 {typeof event.toolInput === "string"
                   ? event.toolInput
-                  : JSON.stringify(event.toolInput, null, 2)}
+                  : safeStringify(event.toolInput)}
               </pre>
             </div>
           )}
-          {event.text && (
-            <div style={{ marginBottom: theme.space.lg }}>
-              <div style={{ color: theme.text.dim, fontSize: theme.fontSize.xs, textTransform: "uppercase", letterSpacing: 1, marginBottom: theme.space.sm }}>Output</div>
-              <pre style={{
-                background: theme.bg.surface,
-                borderRadius: theme.radius.md,
-                padding: "8px 10px",
-                color: theme.text.primary,
-                fontSize: theme.fontSize.xs,
-                lineHeight: 1.4,
-                whiteSpace: "pre-wrap",
-                wordBreak: "break-word",
-                maxHeight: 300,
-                overflowY: "auto",
-                margin: 0,
-              }}>
-                {event.text}
-              </pre>
-            </div>
-          )}
+          {(function () {
+            // For tool_call events, `event.text` is the formatted invocation
+            // (`name(args)`) -- already shown above as Input. The real tool
+            // result lives on `event.toolOutput` if the parser paired it.
+            var isToolCall = event.track === "tool_call";
+            var content = isToolCall ? event.toolOutput : event.text;
+            if (!content) return null;
+            return (
+              <div style={{ marginBottom: theme.space.lg }}>
+                <div style={{ color: theme.text.dim, fontSize: theme.fontSize.xs, textTransform: "uppercase", letterSpacing: 1, marginBottom: theme.space.sm }}>Output</div>
+                <pre style={{
+                  background: theme.bg.surface,
+                  borderRadius: theme.radius.md,
+                  padding: "8px 10px",
+                  color: theme.text.primary,
+                  fontSize: theme.fontSize.xs,
+                  lineHeight: 1.4,
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word",
+                  maxHeight: 300,
+                  overflowY: "auto",
+                  margin: 0,
+                }}>
+                  {content}
+                </pre>
+              </div>
+            );
+          })()}
         </div>
       )}
     </div>

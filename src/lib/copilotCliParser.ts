@@ -396,6 +396,7 @@ function emitToolCall(
   events.push(makeEvent(t, "assistant", "tool_call", displayText, duration, isError ? 0.9 : 0.6, record, {
     toolName: data.toolName,
     toolInput: data.arguments,
+    toolOutput: resultText || null,
     toolCallId: data.toolCallId || null,
     isError,
     model: complete && complete.data ? complete.data.model || null : null,

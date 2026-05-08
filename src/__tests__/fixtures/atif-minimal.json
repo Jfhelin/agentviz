@@ -1,0 +1,64 @@
+{
+  "schema_version": "ATIF-v1.6",
+  "session_id": "00000000-0000-4000-8000-000000000002",
+  "agent": {
+    "name": "test-agent",
+    "version": "1.0.0",
+    "model_name": "gpt-test"
+  },
+  "steps": [
+    {
+      "step_id": 1,
+      "timestamp": "2026-04-24T20:00:00.000Z",
+      "source": "user",
+      "message": "Build me a hello world"
+    },
+    {
+      "step_id": 2,
+      "timestamp": "2026-04-24T20:00:05.000Z",
+      "source": "agent",
+      "message": "Sure",
+      "model_name": "gpt-test",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_1",
+          "function_name": "write_file",
+          "arguments": {
+            "path": "/hello.txt",
+            "content": "hello"
+          }
+        }
+      ],
+      "observation": {
+        "results": [
+          {
+            "source_call_id": "call_1",
+            "content": "wrote 5 bytes"
+          }
+        ]
+      },
+      "metrics": {
+        "prompt_tokens": 100,
+        "completion_tokens": 20,
+        "cached_tokens": 50
+      }
+    },
+    {
+      "step_id": 3,
+      "timestamp": "2026-04-24T20:00:10.000Z",
+      "source": "agent",
+      "message": "Done",
+      "model_name": "gpt-test",
+      "metrics": {
+        "prompt_tokens": 120,
+        "completion_tokens": 5
+      }
+    }
+  ],
+  "final_metrics": {
+    "total_prompt_tokens": 220,
+    "total_completion_tokens": 25,
+    "total_cached_tokens": 50,
+    "total_steps": 3
+  }
+}
