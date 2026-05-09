@@ -6,7 +6,7 @@ We tested several common Copilot Chat cost-saving ideas in VS Code to separate t
 
 The short version: **model choice and agent behavior matter far more than trimming static prompt text**. Prefix-token savings are measurable, but usually too small to matter unless they also improve the agent’s path through the task.
 
-> **Caveat up front.** This is an internal directional report, not a statistically complete benchmark. Every measurement here is N=1 on a single TypeScript test repository, one user, one workspace, one VS Code/Copilot Chat build, and one rate-card snapshot from May 2026. Treat directional findings as useful, exact percentages as illustrative, and team-wide policy changes as requiring follow-up validation.
+> **Caveat up front.** This is an internal directional report, not a statistically complete benchmark. Every measurement here is N=1 on a single TypeScript test repository, one user, one workspace, one VS Code/Copilot Chat build, and one rate-card snapshot from May 2026. Treat directional findings as useful, exact percentages as illustrative, and policy changes as requiring follow-up validation.
 
 ---
 
@@ -46,7 +46,7 @@ The main finding is simple:
 In our VS Code Copilot Chat tests, the only techniques that produced clean, material savings were:
 
 1. **Use Auto model selection where policy allows.**  
-   For eligible premium requests, Auto applies a 0.9× AI Credit multiplier when it selects the same model a user would otherwise choose manually.
+   For eligible requests, Auto applies a 0.9× AI Credit multiplier when it selects the same model a user would otherwise choose manually.
 
 2. **Use smaller models for bounded, repetitive, easy-to-verify work.**  
    On our JSDoc workload, Haiku 4.5 cost 59% less than Sonnet 4.5 and produced equal-or-better judged output for this specific task.
@@ -98,7 +98,7 @@ All hello-world prefix-tax numbers below assume Sonnet 4.5.
 
 | # | Technique | Hello world | Real workload | Recommendation | Confidence |
 |---|---|---:|---:|---|---|
-| [1](#1-enable-auto-model-selection) | **Enable Auto model selection** | n/a — billing multiplier, not token effect | −10% per eligible premium request when Auto selects the same model | **Turn on where policy allows. Override when needed.** | High, billing-rule dependent |
+| [1](#1-enable-auto-model-selection) | **Enable Auto model selection** | n/a — billing multiplier, not token effect | −10% per eligible request when Auto selects the same model | **Turn on where policy allows. Override when needed.** | High, billing-rule dependent |
 | [2](#2-use-a-smaller-model-for-routine-tasks) | **Use a smaller model for routine tasks** | ≈ −67% per call from Sonnet 4.5 to Haiku 4.5 by rate card | **−59% cost and equal-or-better quality on JSDoc task** | **Use smaller models for bounded, repetitive work.** | Medium |
 | [3](#3-trim-unused-mcp-servers) | Trim unused MCP servers | −308 tokens/call ≈ **−0.09 cr** | Inconclusive; behavior dominated | Useful for hygiene, not primary cost control | Medium |
 | [4](#4-shrink-your-always-on-instructions) | Shrink always-on instructions | −320 tokens/call ≈ **−0.10 cr** | Net **+13.9%** cost in this run | Do not shrink useful guidance for cost | Medium-low |
@@ -116,7 +116,7 @@ All hello-world prefix-tax numbers below assume Sonnet 4.5.
 - Measure real workflows, not just prompt length.
 - Treat token savings and behavioral savings as different things.
 
-### Avoid
+### Avoid these claims
 
 These claims are too broad or misleading:
 
@@ -137,7 +137,7 @@ The better message is:
 ## Three things to do today
 
 1. **Enable Auto model selection where policy allows.**  
-   It is a low-friction cost lever for eligible premium requests and reduces organization-wide drift toward always using the most expensive model.
+   It is a low-friction cost lever for eligible requests and reduces organization-wide drift toward always using the most expensive model.
 
 2. **Default routine work to a smaller model.**  
    Use Haiku 4.5 or GPT-5 mini for bounded, repetitive, easy-to-check tasks such as documentation, boilerplate, simple transformations, and summarization. Escalate to stronger models for debugging, architecture, security-sensitive work, and ambiguous multi-step tasks.
@@ -195,7 +195,7 @@ The important pattern:
 
 We did not A/B test Auto because its primary cost effect is a billing/routing rule rather than a token-count effect.
 
-For eligible premium requests, Auto receives a **0.9× AI Credit multiplier** compared with manually selecting the same model. That means if Auto selects the same appropriate model a user would have chosen manually, the direct saving is **10%**.
+For eligible requests, Auto receives a **0.9× AI Credit multiplier** compared with manually selecting the same model. That means if Auto selects the same appropriate model a user would have chosen manually, the direct saving is **10%**.
 
 The larger operational benefit is behavioral: Auto reduces the chance that broad populations default to the most expensive available model for routine work. At enterprise scale, that habit is likely more expensive than small differences in prompt prefix.
 
@@ -245,7 +245,7 @@ Quality was hand-graded using a 5-axis rubric, blind to cost.
 
 | Output dimension | Sonnet 4.5 | Haiku 4.5 |
 |---|---:|---:|
-| Blocks produced | 16 | 24 |
+| Code blocks produced | 16 | 24 |
 | Completion | 67%, skipped 8 class declarations | **100%** |
 | Per-block quality | 7/10 average | 8/10 functions, 3/10 classes |
 | Total quality units | 11.2 q | 18.0 q, function-weighted |
@@ -257,7 +257,7 @@ Cost-quality grid:
 | Sonnet 4.5 | 11.2 q | 20.7 cr | **0.54 q/cr** |
 | Haiku 4.5 | 18.0 q | 8.4 cr | **2.14 q/cr** |
 
-On this task, Haiku produced **3.3× more quality per credit**.
+On this task, Haiku produced **roughly 4× more quality per credit**.
 
 ### What this does and does not prove
 
@@ -480,7 +480,7 @@ Keep useful instructions even if they add a few hundred prefix tokens. Useful ca
 
 We observed −509 tokens per call on the first primary call, approximately **−0.15 cr/call** at Sonnet 4.5 input rates.
 
-But this appears to be an artifact, not a reliable saving mechanism.
+But this appears to be an artifact, not a reliable saving mechanism — the clean test below shows there is no gating mechanism for the saving to come from.
 
 ### Real workload: JSDoc task
 
@@ -502,26 +502,24 @@ It does suggest:
 - Do not rely on `applyTo:` as a billing-control mechanism without export inspection.
 - Verify the actual prompt before claiming savings.
 
-### What a clean test would measure
+### How we verified the mechanism
 
-A clean test would:
+We placed two instruction files in the project, each containing a unique marker string, and gave each one an `applyTo:` glob that did **not** match the JSDoc task path. Both files should have been excluded from the working set.
 
-1. Create two instruction files with obvious unique marker strings.
-2. Use different `applyTo:` globs that should include or exclude them.
-3. Export the raw chat.
-4. Inspect whether the marker strings appear in the system prompt.
-5. Only then measure token impact.
+We then ran the agent, exported the chat, and grepped the exported system prompt for the two marker strings.
 
-If the supposedly excluded content appears in the exported prompt, the cost-saving mechanism is not active in that configuration.
+**Neither marker appeared anywhere in the export** — not even from the file whose glob *did* overlap the task path. The instruction file contents were not in the prompt at all, gated or otherwise. With no contents in the prompt, there is nothing for `applyTo:` to gate, and the −509 token delta we observed earlier has no causal mechanism behind it.
 
 ### Takeaway
 
 Do not assume `applyTo:` reduces token cost.
 
-Verify any “scope your context” claim by exporting a real chat and inspecting whether the supposedly excluded content appears in the prompt.
+Verify any "scope your context" claim by exporting a real chat and inspecting whether the supposedly excluded content appears in the prompt.
 
-The lesson is broader:
+The deeper methodology lesson:
 
+> This test would have been a "skip — premise is wrong" verdict 30 minutes after the first export, with no A/B cost run needed at all.
+>
 > Always verify the mechanism exists before measuring its effect.
 
 ---
@@ -589,21 +587,22 @@ The more durable finding is methodological:
 
 ## What we didn't test, and why
 
-Seven other ideas came up but were not measured. Each rejection is itself a finding.
+Six other ideas came up but were not measured. Each rejection is itself a finding.
 
 | Technique | Why we didn't test |
 |---|---|
-| Code-only responses | Not tested. Likely low impact for tool-heavy agent tasks where input/context dominates. May matter for explanation-heavy or documentation-heavy workflows. |
-| Bullets over paragraphs | Not tested. Likely minor for agentic coding tasks, but may reduce cost in long explanatory chat. More importantly, terse output can improve readability. |
-| Default to Auto model selection | Covered in deep dive [#1](#1-enable-auto-model-selection). This is a billing/routing lever, not a token-count lever. |
-| Be precise in prompts | Not tested because it is hard to isolate. However, precise task framing is likely one of the most important behavioral levers: it can reduce exploration, wrong edits, and clarification turns. Needs a separate task-suite evaluation. |
-| Retune prompts to target model | Requires a stable target model and a corpus of tasks. Out of scope for a one-user, one-week test. |
-| `/chronicle improve` weekly | Effect is on future sessions, not measurable in a one-off A/B. Long-horizon evaluation needed. |
-| CodeAct for long tool chains | Not exposed as a user-toggleable mode in VS Code Copilot Chat. No mechanism to A/B. |
+| Code-only responses | Output tokens were 10–20% of total cost across our runs. Even an aggressive 50% output cut would shave 5–10% at most, and only on workflows that produce long prose. Not a primary lever for agentic coding tasks. |
+| Bullets over paragraphs | Same ceiling as code-only responses — operates on the output share, which is 10–20% of cost in our data. May still be worth doing for readability, but should not be sold as a billing lever. |
+| Be precise in prompts | Hard to isolate at N=1. Almost certainly one of the most important *behavioral* levers — precise framing reduces exploration, wrong edits, and clarification turns — but it shows up in path drift, not in token counts. Needs a separate task-suite evaluation with a quality rubric. |
+| Retune prompts to target model | Requires a stable target model, a corpus of tasks, and a quality rubric independent of the model under test. Same N=1 problem as test #5 (Ask Mode) — model-specific tuning cannot be scored without controlling for what the model would have done untuned. |
+| `/chronicle improve` weekly | Effect is on *future* sessions, not the one being measured. A one-off A/B has no observable signal; needs long-horizon evaluation across many real sessions. |
+| CodeAct for long tool chains | Not exposed as a user-toggleable mode in VS Code Copilot Chat. No mechanism to A/B without forking the client. |
+
+> Auto model selection was also not A/B tested — see deep dive [#1](#1-enable-auto-model-selection) for why it is a billing lever rather than a token-count lever, and what to expect from it.
 
 The pattern:
 
-- Many proposed token-saving techniques operate on parts of the request that do not drive most cost in agentic workflows.
+- Many proposed token-saving techniques operate on parts of the request that do not drive most cost in agentic workflows. Input, cached context, and tool definitions dominate; the output share is small and behavioral drift swamps it.
 - Some require infrastructure the user cannot control.
 - Some may help UX or quality but should not be sold as primary billing levers.
 
@@ -1047,9 +1046,9 @@ They are:
 5. **Measurement discipline**  
    Compare real exported runs and inspect cache state.
 
-The practical SE message is:
+The practical message is:
 
-> Do not sell “shorter prompts” as the main cost story. Sell **right model, right task, right context, fewer iterations**.
+> Do not look for “shorter prompts” as the main cost story. Ensure **right model, right task, right context, fewer iterations**.
 
 ---
 
@@ -1137,7 +1136,3 @@ copilot_all_prompts_*.json
    - Expected tool set
 10. Check first-call cache hit rate.
 11. If first-call cache hit rate is above 40%, suspect cache pollution and rerun from a colder state.
-
----
-
-*Report v4 — revised from 5 measured tests across 4 weeks of instrumentation work. Pricing data verified against Anthropic, OpenAI, and GitHub Copilot rate cards in May 2026. Findings are directional and intended for internal SE enablement, not as a statistically complete benchmark.*
