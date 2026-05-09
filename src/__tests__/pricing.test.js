@@ -7,13 +7,13 @@ describe("estimateCost", function () {
   });
 
   it("returns 0 for unknown model", function () {
-    expect(estimateCost({ inputTokens: 1000 }, "gpt-4o")).toBe(0);
+    expect(estimateCost({ inputTokens: 1000 }, "gemini-pro")).toBe(0);
   });
 
-  it("prices Claude Haiku 4 correctly", function () {
+  it("prices Claude Haiku 4.5 correctly", function () {
     var cost = estimateCost({ inputTokens: 1000000, outputTokens: 100000 }, "claude-haiku-4.5");
-    // 1M * $0.80/M + 100K * $4.00/M = $0.80 + $0.40 = $1.20
-    expect(cost).toBeCloseTo(1.20, 2);
+    // 1M * $1.00/M + 100K * $5.00/M = $1.00 + $0.50 = $1.50
+    expect(cost).toBeCloseTo(1.50, 2);
   });
 
   it("prices Claude Sonnet 4 correctly", function () {
@@ -37,10 +37,10 @@ describe("estimateMultiModelCost", function () {
       "claude-haiku-4.5": { inputTokens: 500000, outputTokens: 50000 },
       "claude-sonnet-4":  { inputTokens: 500000, outputTokens: 50000 },
     });
-    // Haiku: 500K * $0.80/M + 50K * $4.00/M = $0.40 + $0.20 = $0.60
+    // Haiku: 500K * $1.00/M + 50K * $5.00/M = $0.50 + $0.25 = $0.75
     // Sonnet: 500K * $3.00/M + 50K * $15.00/M = $1.50 + $0.75 = $2.25
-    // Total = $2.85
-    expect(cost).toBeCloseTo(2.85, 2);
+    // Total = $3.00
+    expect(cost).toBeCloseTo(3.00, 2);
   });
 
   it("is more accurate than single-model estimate for mixed sessions", function () {
@@ -54,16 +54,16 @@ describe("estimateMultiModelCost", function () {
       { inputTokens: 1000000, outputTokens: 10000 },
       "claude-haiku-4.5"
     );
-    // Multi-model should be higher because opus tokens are priced at $15/M not $0.80/M
+    // Multi-model should be higher because opus tokens are priced at $15/M not $1/M
     expect(multiModel).toBeGreaterThan(singleModel);
   });
 
   it("skips unknown models without erroring", function () {
     var cost = estimateMultiModelCost({
       "claude-sonnet-4": { inputTokens: 1000000, outputTokens: 100000 },
-      "gpt-4o":          { inputTokens: 500000, outputTokens: 50000 },
+      "gemini-pro":      { inputTokens: 500000, outputTokens: 50000 },
     });
-    // Only Sonnet is priced; GPT contributes 0
+    // Only Sonnet is priced; Gemini contributes 0
     expect(cost).toBeCloseTo(4.50, 2);
   });
 });
@@ -97,9 +97,13 @@ describe("hasModelPricing", function () {
     expect(hasModelPricing("claude-next-gen-99")).toBe(true);
   });
 
-  it("returns false for non-Claude models", function () {
-    expect(hasModelPricing("gpt-4o")).toBe(false);
+  it("returns false for non-Claude models without explicit pricing", function () {
     expect(hasModelPricing("gemini-pro")).toBe(false);
+    expect(hasModelPricing("llama-99b")).toBe(false);
+  });
+
+  it("returns true for explicitly priced GPT models", function () {
+    expect(hasModelPricing("gpt-4o")).toBe(true);
   });
 
   it("returns false for null/undefined", function () {

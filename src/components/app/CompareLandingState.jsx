@@ -37,7 +37,7 @@ export default function CompareLandingState({ session, sessionB, onLoadSessionA,
               <div style={{ fontSize: theme.fontSize.sm, color: theme.text.muted, marginTop: 4 }}>{session.metadata?.totalEvents} events</div>
             </div>
           ) : (
-            <FileUploader onLoad={onLoadSessionA} />
+            <FileUploader onLoad={onLoadSessionA} debugLabel="compare-A" />
           )}
           {session.error && <div style={{ fontSize: theme.fontSize.sm, color: theme.semantic.error }}>{session.error}</div>}
         </div>
@@ -63,7 +63,7 @@ export default function CompareLandingState({ session, sessionB, onLoadSessionA,
               <div style={{ fontSize: theme.fontSize.sm, color: theme.text.muted, marginTop: 4 }}>{sessionB.metadata?.totalEvents} events</div>
             </div>
           ) : (
-            <FileUploader onLoad={sessionB.handleFile} />
+            <FileUploader onLoad={sessionB.handleFile} debugLabel="compare-B" />
           )}
           {sessionB.error && <div style={{ fontSize: theme.fontSize.sm, color: theme.semantic.error }}>{sessionB.error}</div>}
         </div>

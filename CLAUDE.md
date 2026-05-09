@@ -52,7 +52,9 @@ src/
     diffUtils.js       # Diff detection (isFileEditEvent) + Myers line diff algorithm
     waterfall.ts       # Waterfall view helpers: item building, stats, layout, windowing
     graphLayout.js     # Graph view helpers: ELKjs DAG builder, layout runner, position merger
-    pricing.js         # Claude model pricing table and cost estimation
+    pricing.js         # Claude + GPT-4o model pricing table and cost estimation (per-model cache ratios)
+    cacheAnalysis.ts   # Per-model cache scoping, recommit math, unexpected-miss diagnosis
+    copilotChatExportParser.ts # Parser + cost analysis builder for VS Code Copilot Chat exports
     exportHtml.js      # Self-contained HTML export for single sessions and comparisons
     dataInspector.js   # Payload summary and preview helpers for inspector panels
     formatTime.js      # Duration and date formatting utilities
@@ -69,6 +71,7 @@ src/
     WaterfallView.jsx  # Tool execution waterfall with nesting, inspector sidebar
     GraphView.jsx      # Interactive DAG of turns/tool calls with ELKjs layout, pan/zoom, animations
     StatsView.jsx      # Aggregate metrics, tool ranking, turn summary
+    CostView.jsx       # Token cost & context buildup view (Copilot Chat exports only); 3-column timeline with CTX/NET/BILLED lenses
     CompareView.jsx    # Side-by-side session comparison: Scorecard + Tools tabs
     CommandPalette.jsx # Cmd+K fuzzy search overlay (events, turns, views)
     DiffViewer.jsx     # Inline unified diff view for file-editing tool calls
@@ -177,6 +180,20 @@ Key files for the feature:
 - `src/__tests__/cacheAnalysis.test.ts` -- 16 unit tests
 - `src/__tests__/copilotChatExport.test.ts` -- parser tests
 - README.md (Cost View section), CLAUDE.md (file tree), `docs/ui-ux-style-guide.md` (Cost Colors), `docs/color-palette.html` (Cost View Palette)
+
+### Test program: 11 token-cost optimization techniques
+
+`docs/cost-optimization-techniques.md` is the source of truth for the
+experimental program driving the Cost Compare instrumentation work. It
+lists all 11 techniques and buckets each by validation methodology:
+
+- ✅ Cleanly validatable with 1-call + projection (prefix-only changes)
+- ⚠️ Partially validatable (prefix component clean, behavior component noisy)
+- ❌ Not validatable with 1-call (output-only or path-only effects)
+
+Always check this file before designing a new test or claiming a
+technique "works" — the bucketing dictates how many runs you need and
+which numbers are causally defensible.
 
 ### Open architectural debt to track
 

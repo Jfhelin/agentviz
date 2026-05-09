@@ -187,6 +187,80 @@
 
 <hr class="divider">
 
+<!-- COST VIEW PALETTE -->
+<h2 style="margin-bottom:4px">Cost View Palette</h2>
+<p class="subtitle">Categorical token-cost colors used by <code>CostView</code> and the cache-miss / recommit / model-switch callouts. Tokens defined in <code>theme.cost.*</code>.</p>
+
+<div class="row-grid">
+  <div class="mode dark">
+    <h2>Dark Mode</h2>
+    <div class="section">
+      <div class="section-label">Cumulative Cost (token type)</div>
+      <div class="row"><div class="swatch" style="background:#56d364"></div><div class="token">cost.fresh</div><div class="hex">#56d364</div></div>
+      <div class="row"><div class="swatch" style="background:#f4b340"></div><div class="token">cost.cwrite</div><div class="hex">#f4b340</div></div>
+      <div class="row"><div class="swatch" style="background:#3DA9D4"></div><div class="token">cost.cached</div><div class="hex">#3DA9D4</div></div>
+      <div class="row"><div class="swatch" style="background:#a371f7"></div><div class="token">cost.output</div><div class="hex">#a371f7</div></div>
+    </div>
+    <div class="section">
+      <div class="section-label">Per-call Context (component)</div>
+      <div class="row"><div class="swatch" style="background:#7A8B9E"></div><div class="token">cost.ctxSystem</div><div class="hex">#7A8B9E</div></div>
+      <div class="row"><div class="swatch" style="background:#4A5568"></div><div class="token">cost.ctxToolDefs</div><div class="hex">#4A5568</div></div>
+      <div class="row"><div class="swatch" style="background:#E6A847"></div><div class="token">cost.ctxHistory</div><div class="hex">#E6A847</div></div>
+      <div class="row"><div class="swatch" style="background:#B8642F"></div><div class="token">cost.ctxToolResults</div><div class="hex">#B8642F</div></div>
+      <div class="row"><div class="swatch" style="background:#3DA9D4"></div><div class="token">cost.ctxCurrent</div><div class="hex">#3DA9D4</div></div>
+      <div class="row"><div class="swatch" style="background:#2C7A99"></div><div class="token">cost.ctxOutput</div><div class="hex">#2C7A99</div></div>
+    </div>
+    <div class="section">
+      <div class="section-label">Tool Group Source Chips</div>
+      <div class="row"><div class="swatch" style="background:#a371f7"></div><div class="token">cost.kindMcp</div><div class="hex">#a371f7</div></div>
+      <div class="row"><div class="swatch" style="background:#f4b340"></div><div class="token">cost.kindExtension</div><div class="hex">#f4b340</div></div>
+      <div class="row"><div class="swatch" style="background:#3DA9D4"></div><div class="token">cost.kindBuiltin</div><div class="hex">#3DA9D4</div></div>
+    </div>
+    <div class="section">
+      <div class="section-label">Callout Tints</div>
+      <div class="row"><div class="swatch" style="background:#2a141c"></div><div class="token">cost.missBg</div><div class="hex">#2a141c</div><span style="font-size:9px;color:#585860;margin-left:4px">unexpected miss</span></div>
+      <div class="row"><div class="swatch" style="background:#1a1d12"></div><div class="token">cost.recommitBg</div><div class="hex">#1a1d12</div><span style="font-size:9px;color:#585860;margin-left:4px">cache recommit</span></div>
+      <div class="row"><div class="swatch" style="background:#0f1a22"></div><div class="token">cost.switchBg</div><div class="hex">#0f1a22</div><span style="font-size:9px;color:#585860;margin-left:4px">model switch</span></div>
+      <div class="row"><div class="swatch" style="background:#0e1f14"></div><div class="token">cost.okBg</div><div class="hex">#0e1f14</div><span style="font-size:9px;color:#585860;margin-left:4px">net new</span></div>
+    </div>
+  </div>
+
+  <div class="mode light">
+    <h2>Light Mode</h2>
+    <div class="section">
+      <div class="section-label">Cumulative Cost (token type)</div>
+      <div class="row"><div class="swatch" style="background:#0ea86b"></div><div class="token">cost.fresh</div><div class="hex">#0ea86b</div></div>
+      <div class="row"><div class="swatch" style="background:#ca8a04"></div><div class="token">cost.cwrite</div><div class="hex">#ca8a04</div></div>
+      <div class="row"><div class="swatch" style="background:#1e88c4"></div><div class="token">cost.cached</div><div class="hex">#1e88c4</div></div>
+      <div class="row"><div class="swatch" style="background:#7c5ce6"></div><div class="token">cost.output</div><div class="hex">#7c5ce6</div></div>
+    </div>
+    <div class="section">
+      <div class="section-label">Per-call Context (component)</div>
+      <div class="row"><div class="swatch" style="background:#5a6b80"></div><div class="token">cost.ctxSystem</div><div class="hex">#5a6b80</div></div>
+      <div class="row"><div class="swatch" style="background:#2d3748"></div><div class="token">cost.ctxToolDefs</div><div class="hex">#2d3748</div></div>
+      <div class="row"><div class="swatch" style="background:#b87a1a"></div><div class="token">cost.ctxHistory</div><div class="hex">#b87a1a</div></div>
+      <div class="row"><div class="swatch" style="background:#8a4a1f"></div><div class="token">cost.ctxToolResults</div><div class="hex">#8a4a1f</div></div>
+      <div class="row"><div class="swatch" style="background:#1e88c4"></div><div class="token">cost.ctxCurrent</div><div class="hex">#1e88c4</div></div>
+      <div class="row"><div class="swatch" style="background:#1c5f78"></div><div class="token">cost.ctxOutput</div><div class="hex">#1c5f78</div></div>
+    </div>
+    <div class="section">
+      <div class="section-label">Tool Group Source Chips</div>
+      <div class="row"><div class="swatch" style="background:#7c5ce6"></div><div class="token">cost.kindMcp</div><div class="hex">#7c5ce6</div></div>
+      <div class="row"><div class="swatch" style="background:#ca8a04"></div><div class="token">cost.kindExtension</div><div class="hex">#ca8a04</div></div>
+      <div class="row"><div class="swatch" style="background:#1e88c4"></div><div class="token">cost.kindBuiltin</div><div class="hex">#1e88c4</div></div>
+    </div>
+    <div class="section">
+      <div class="section-label">Callout Tints</div>
+      <div class="row"><div class="swatch" style="background:#fde7ec"></div><div class="token">cost.missBg</div><div class="hex">#fde7ec</div><span style="font-size:9px;color:#8a90a2;margin-left:4px">unexpected miss</span></div>
+      <div class="row"><div class="swatch" style="background:#fdf6e0"></div><div class="token">cost.recommitBg</div><div class="hex">#fdf6e0</div><span style="font-size:9px;color:#8a90a2;margin-left:4px">cache recommit</span></div>
+      <div class="row"><div class="swatch" style="background:#e0edfa"></div><div class="token">cost.switchBg</div><div class="hex">#e0edfa</div><span style="font-size:9px;color:#8a90a2;margin-left:4px">model switch</span></div>
+      <div class="row"><div class="swatch" style="background:#dcf2e2"></div><div class="token">cost.okBg</div><div class="hex">#dcf2e2</div><span style="font-size:9px;color:#8a90a2;margin-left:4px">net new</span></div>
+    </div>
+  </div>
+</div>
+
+<hr class="divider">
+
 <!-- SIMULATED UI PREVIEW -->
 <h1 style="margin-bottom:4px">UI Preview</h1>
 <p class="subtitle">Agent badges and track bars in context</p>

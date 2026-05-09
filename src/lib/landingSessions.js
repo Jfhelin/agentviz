@@ -2,6 +2,7 @@ export var LANDING_FORMAT_OPTIONS = [
   { id: "all", label: "All clients" },
   { id: "claude-code", label: "Claude Code" },
   { id: "copilot-cli", label: "Copilot CLI" },
+  { id: "copilot-chat-export", label: "Copilot Chat export" },
   { id: "vscode-chat", label: "VS Code" },
 ];
 
@@ -25,6 +26,7 @@ export function formatLandingClientLabel(entry) {
   var isInsiders = typeof entry === "object" && entry && entry.isInsiders;
   if (format === "claude-code") return "Claude Code";
   if (format === "copilot-cli") return "Copilot CLI";
+  if (format === "copilot-chat-export") return "Copilot Chat export";
   if (format === "vscode-chat") return isInsiders ? "VS Code Insiders" : "VS Code";
   if (!format) return "Unknown client";
   return String(format);

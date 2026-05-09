@@ -8,11 +8,15 @@ import KeyboardHint from "./ui/KeyboardHint.jsx";
 
 function getFormatLabel(format) {
   if (format === "copilot-cli") return "Copilot";
+  if (format === "copilot-chat-export") return "Copilot Chat";
+  if (format === "vscode-chat") return "VS Code";
   return "Claude";
 }
 
 function getFormatColor(format) {
   if (format === "copilot-cli") return theme.semantic.success;
+  if (format === "copilot-chat-export") return theme.cost ? (theme.cost.ctxOutput || theme.accent.primary) : theme.accent.primary;
+  if (format === "vscode-chat") return theme.agent.system;
   return theme.accent.primary;
 }
 

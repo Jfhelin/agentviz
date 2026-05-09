@@ -241,6 +241,20 @@ A **Tools &amp; Skills** panel surfaces every skill, instruction file, custom ag
 <img src="docs/screenshots/stats-view.png" alt="Stats View" width="800" />
 </div>
 
+### Cost View
+
+Token spend and context-buildup analysis for VS Code Copilot Chat exports (`copilot_all_prompts_*.json`). Renders a three-column timeline:
+
+1. **Prompt &amp; steps** -- every LLM call and tool call, click to expand
+2. **Cumulative cost so far** -- stacked bar broken down by token type (fresh / cache-write / cache-read / output)
+3. **Context window for this call** -- stacked bar showing how each call's input is split across system prompt, tool definitions, history, tool results, and the current prompt
+
+Each LLM call surfaces three lenses on "input": **CTX** (full prompt size), **&#9651; NET** (real new tokens for that model, with per-model cache scoping), and **$ BILLED** (with a separate &#8634; RECOMMIT signal when cache writes exceeded growth). Calls also highlight unexpected cache misses with a tool-defs diff to explain the most common cause of sudden cost spikes under usage-based billing.
+
+The Cost tab only appears when the loaded session is a Copilot Chat export. Drag and drop a `copilot_all_prompts_*.json` file onto the landing screen to use it.
+
+**Format support:** Cost view depends on per-call context breakdown (system prompt, tool definitions, history, tool results, current prompt as separate token counts) plus per-call cache-read / cache-write usage. Today only the VS Code Copilot Chat export carries that data; Claude Code JSONL and Copilot CLI JSONL surface aggregate `tokenUsage` totals but not the breakdown, so the Cost tab is hidden for those formats. The plan is to lift `contextBreakdown` into the normalized event/turn schema so any future parser can light up Cost view by populating the field when the source data exists.
+
 ### Coach View
 
 AI-powered session coaching available directly from any session. The coach reads your autonomy metrics, project config (`.github/copilot-instructions.md`, MCP servers, skills), and session patterns to produce evidence-backed recommendations for prompts, tooling, and workflow. Click **Analyze** to run, then accept or ignore each draft recommendation. Requires the CLI server -- run via `node bin/agentviz.js` or the MCP tool.

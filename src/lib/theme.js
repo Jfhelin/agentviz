@@ -122,6 +122,55 @@ var DARK_THEME = {
     lg: "0 12px 32px rgba(0,0,0,0.35)",
     inset: "inset 0 1px 2px rgba(0,0,0,0.2)",
   },
+  cost: {
+    // Cumulative cost stack colors (token-type categorical)
+    fresh:    "#56d364",
+    cwrite:   "#f4b340",
+    cached:   "#3DA9D4",
+    output:   "#a371f7",
+    // Per-call context-window stack colors (component categorical)
+    ctxSystem:      "#7A8B9E",
+    ctxToolDefs:    "#4A5568",
+    ctxHistory:     "#E6A847",
+    ctxToolResults: "#B8642F",
+    ctxCurrent:     "#3DA9D4",
+    ctxOutput:      "#2C7A99",
+    // Tool-group kind chips
+    kindMcp:        "#a371f7",
+    kindExtension:  "#f4b340",
+    kindBuiltin:    "#3DA9D4",
+    // Subtle backgrounds for chips and code tags
+    chipBgMcp:        "#3a2f4d",
+    chipBgExtension:  "#3a3318",
+    chipBgBuiltin:    "#1f2a3a",
+    chipBgUser:       "#3a3318",
+    chipBgAssistant:  "#1f3a2c",
+    chipBgResult:     "#3a2418",
+    chipFgUser:       "#f4b340",
+    chipFgAssistant:  "#56d364",
+    chipFgResult:     "#B8642F",
+    // Cache-miss callout (red tint)
+    missBg:           "#2a141c",
+    missBorder:       "#5a2030",
+    missText:         "#fb8aa8",
+    missAccent:       "#ff9bb6",
+    missBadgeBg:      "#5a2030",
+    missCodeBg:       "#1a0d12",
+    missCodeBorder:   "#3a1820",
+    missCodeText:     "#ffc4d4",
+    // Recommit callout (yellow tint)
+    recommitBg:       "#1f1a0a",
+    recommitBorder:   "#6b5320",
+    recommitText:     "#f4d775",
+    // Model-switch callout (blue tint)
+    switchBg:         "#0e1a2a",
+    switchBorder:     "#1c3a5a",
+    switchText:       "#7fc4ff",
+    // Success callout (green tint, used for NET / fresh content blocks)
+    okBg:             "#0e1f14",
+    okBorder:         "#163b22",
+    okBarTrack:       "#0a1410",
+  },
 };
 
 var LIGHT_THEME = {
@@ -185,6 +234,47 @@ var LIGHT_THEME = {
     md: "0 4px 12px rgba(17,24,39,0.08)",
     lg: "0 12px 32px rgba(17,24,39,0.10)",
     inset: "inset 0 1px 2px rgba(17,24,39,0.06)",
+  },
+  cost: {
+    fresh:    "#0ea86b",
+    cwrite:   "#ca8a04",
+    cached:   "#1e88c4",
+    output:   "#7c5ce6",
+    ctxSystem:      "#5a6b80",
+    ctxToolDefs:    "#2d3748",
+    ctxHistory:     "#b87a1a",
+    ctxToolResults: "#8a4a1f",
+    ctxCurrent:     "#1e88c4",
+    ctxOutput:      "#1c5f78",
+    kindMcp:        "#7c5ce6",
+    kindExtension:  "#ca8a04",
+    kindBuiltin:    "#1e88c4",
+    chipBgMcp:        "#ede8fa",
+    chipBgExtension:  "#fdf3d4",
+    chipBgBuiltin:    "#dceffb",
+    chipBgUser:       "#fdf3d4",
+    chipBgAssistant:  "#dcf2e2",
+    chipBgResult:     "#fbe5d4",
+    chipFgUser:       "#a36b08",
+    chipFgAssistant:  "#0e7c4d",
+    chipFgResult:     "#8a4a1f",
+    missBg:           "#fde7ec",
+    missBorder:       "#f5b9c5",
+    missText:         "#a8203b",
+    missAccent:       "#8a162e",
+    missBadgeBg:      "#c0263e",
+    missCodeBg:       "#fdf0f3",
+    missCodeBorder:   "#f5d0d8",
+    missCodeText:     "#8a162e",
+    recommitBg:       "#fdf6e0",
+    recommitBorder:   "#e8d28a",
+    recommitText:     "#7a5b10",
+    switchBg:         "#e0edfa",
+    switchBorder:     "#a8c8ec",
+    switchText:       "#1c4f88",
+    okBg:             "#dcf2e2",
+    okBorder:         "#a6dfb8",
+    okBarTrack:       "#eaf6ee",
   },
 };
 
@@ -287,6 +377,7 @@ defineThemeSection(theme, "agent");
 defineThemeSection(theme, "agentType");
 defineThemeSection(theme, "track");
 defineThemeSection(theme, "shadow");
+defineThemeSection(theme, "cost");
 theme.font = SHARED_THEME.font;
 theme.fontSize = SHARED_THEME.fontSize;
 theme.space = SHARED_THEME.space;
