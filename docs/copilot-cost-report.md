@@ -213,13 +213,11 @@ Turn on Auto model selection where policy allows. Override per prompt when there
 
 Smaller model selection is not a prefix-token technique. The prompt may be the same, but the rate card is different.
 
-### Hello world: rate-card delta
-
 | Model | Input cost | Output cost | Hi-prompt cost, cold cache |
 |---|---:|---:|---:|
-| Sonnet 4.5 | $3/M tok | $15/M tok | ≈ **5.06 cr/call** |
-| Haiku 4.5 | $1/M tok | $5/M tok | ≈ **1.68 cr/call** |
-| GPT-5 mini | $0.25/M tok | $2/M tok | ≈ **0.42 cr/call** |
+| Sonnet 4.5 | $3/M tok | $15/M tok | ≈ **5.27 cr/call** |
+| Haiku 4.5 | $1/M tok | $5/M tok | ≈ **1.76 cr/call** |
+| GPT-5 mini | $0.25/M tok | $2/M tok | ≈ **0.44 cr/call** |
 
 Mechanical deltas:
 
@@ -252,12 +250,13 @@ Quality was hand-graded using a 5-axis rubric, blind to cost.
 
 Cost-quality grid:
 
-| Model | Quality units | Cost | Quality per credit |
-|---|---:|---:|---:|
-| Sonnet 4.5 | 11.2 q | 20.7 cr | **0.54 q/cr** |
-| Haiku 4.5 | 18.0 q | 8.4 cr | **2.14 q/cr** |
+| Model | Completion | Per-block quality | Total quality units | Cost | Quality per credit |
+|---|---:|---:|---:|---:|---:|
+| Sonnet 4.5 | 16/24 (67%) | 7.0/10 | 16 × 7 = **112** | 20.7 cr | **5.4 q/cr** |
+| Haiku 4.5 | 24/24 (100%) | 6.3/10 | 24 × 6.3 = **151** | 8.4 cr | **18.0 q/cr** |
 
-On this task, Haiku produced **roughly 4× more quality per credit**.
+On this task, Haiku produced **roughly 3.3× more quality per credit** (18.0 ÷ 5.4).
+
 
 ### What this does and does not prove
 
@@ -325,9 +324,10 @@ Run with full MCP server set vs audited-down set. First-primary-call input token
 
 | Condition | Available tools | First-call input tokens | First cold-call cost |
 |---|---:|---:|---:|
-| Full MCP set | 182 | 17,525 tok | ≈ **5.06 cr** |
-| Built-in tools only | 52 | 17,217 tok | ≈ **4.97 cr** |
+| Full MCP set | 182 | 17,525 tok | ≈ **5.26 cr** |
+| Built-in tools only | 52 | 17,217 tok | ≈ **5.17 cr** |
 | Delta | −130 tools | **−308 tok, −1.83%** | **≈ −0.09 cr on first cold call** |
+
 
 Tool definitions sit in the prefix of every primary call, so trimming unused MCP servers can reduce the uncached prefix size. However, after the prefix is cached, repeated calls against the same stable prefix are much cheaper — roughly 10% of the original input cost for cached tokens, depending on the model/provider pricing. That means the saving can still compound across a session, but mostly at the cached-token rate after the first call. In normal usage, the per-call saving is therefore even smaller than the cold-prefix number suggests.
 
@@ -385,9 +385,10 @@ Cut the project’s `instructions.md` from baseline to a deliberately trimmed ve
 
 | Condition | First-call input tokens | First cold-call cost |
 |---|---:|---:|
-| Baseline | 17,580 tok | ≈ **5.07 cr** |
-| Trimmed | 17,260 tok | ≈ **4.98 cr** |
+| Baseline | 17,580 tok | ≈ **5.27 cr** |
+| Trimmed | 17,260 tok | ≈ **5.18 cr** |
 | Delta | **−320 tok, −1.82%** | **≈ −0.10 cr/call** |
+
 
 This is the same order of magnitude as the MCP audit hello-world result. Instructions were only a small fraction of the prompt prefix. For subsequent calls that hit the prompt cache, only the uncached portion is billed at the full input rate; cached prefix tokens are billed at the lower cached-token rate.
 
@@ -488,7 +489,7 @@ Net cost was **+82%** for the supposedly scoped condition.
 
 More importantly, inspection of the raw exports showed that in the VS Code Copilot Chat build and configuration we tested, `applyTo:` did not behave as a hard cost gate for instruction files.
 
-The supposedly excluded files still appeared in the exported prompt.
+Inspection of the raw exports showed the underlying mechanism does not behave as a token gate at all in this build — see "How we verified the mechanism" below.
 
 Therefore, in this environment, `applyTo:` should not be treated as a reliable token-cost control.
 
@@ -973,7 +974,7 @@ The lesson:
 
 Inspect the raw export.
 
-If supposedly excluded content appears in the prompt, the cost-saving mechanism is not active.
+If the content you expect to be gated is either fully present or fully absent regardless of the gating directive, the gating mechanism is not doing what you think. In our `applyTo:` test, the contents were never loaded in the first place — meaning there was nothing to gate, and any token delta we measured was incidental, not causal.
 
 ---
 
