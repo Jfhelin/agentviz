@@ -305,105 +305,56 @@ The best default is not “always use the cheapest model.” It is:
 
 ### Test setup
 
-The "full MCP set" condition had 182 tools available across Azure, GitHub, Playwright, and the built-in VS Code Copilot tools.
-
-The "audited-down" condition removed the external MCP servers and kept only the 52 built-in tools.
-
-On paper this looked like a large reduction in visible tool surface: **182 → 52**. The first surprise of this test is that *the model never sees those numbers.*
-
-### What the model actually receives
-
-Inspecting the raw exports showed two things that change how this technique should be evaluated:
-
-**1. The client picks a small slate of tools and only sends those.**
-
-| Available tools (settings) | Tools sent to the model |
-|---:|---:|
-| 52 (built-in only) | **26** |
-| 182 (full MCP set) | **25** |
-
-The available-tool count is not the count the model sees. The client selects ~25–26 tools per call regardless of whether the user has 52 or 182 enabled.
-
-**2. Large MCP catalogs sit behind router tools, not inlined definitions.**
-
-The Azure MCP server was reachable in both runs through a single router tool, `mcp_azure_mcp_ser_search`, with its own description in the export:
-
-> "This is a hierarchical MCP command router. Sub commands are routed to MCP servers that require specific fields inside the `parameters` object. Set `learn=true` to discover available sub commands."
-
-When the agent needs Azure tooling, it calls the router with `learn=true` to discover sub-commands, then issues the real call. The full Azure tool catalog is reachable but not inlined in the prefix. Cost only lands when the agent actually uses Azure capabilities — and it lands on those specific calls, not on every call in the session.
-
-This is effectively **lazy tool loading at the protocol level**: enabling an MCP server adds a small router stub to the candidate pool; the catalog itself only enters the conversation if and when the agent asks for it.
+Two conditions on the same task: full MCP set (182 tools available across Azure, GitHub, Playwright, built-in) vs audited-down to the 52 built-in tools only.
 
 ### Hello world: minimal A/B
 
 First-primary-call input tokens, Sonnet 4.5, prefix-tax only:
 
-| Condition | Available tools | Tools in slate | First-call input tokens | First cold-call cost |
+| Condition | Available tools | Tools sent to model | First-call input tokens | First cold-call cost |
 |---|---:|---:|---:|---:|
 | Full MCP set | 182 | 25 | 17,217 tok | ≈ **5.17 cr** |
 | Built-in tools only | 52 | 26 | 17,525 tok | ≈ **5.26 cr** |
-| Delta | +130 tools | −1 tool | **−308 tok** | **≈ −0.09 cr on first cold call** |
+| Delta | +130 tools | −1 tool | **−308 tok** | **≈ −0.09 cr / cold call** |
 
-The direction is the opposite of what the "fewer tools = smaller prompt" intuition predicts. The 182-tool run was 308 tokens *cheaper* per cold call.
+The 182-tool run was actually 308 tokens *cheaper*, and the entire delta traces to one tool: `explore_subagent` was in the 52-tool slate but not the 182-tool slate. Adding more candidate tools displaced a useful built-in.
 
-The full delta traces to one tool. Diffing the two system prompts and tool definitions shows:
+### Why the prompt barely moves: VS Code's tool-grouping system
 
-- A's slate included `explore_subagent`. B's slate did not.
-- That one difference accounts for ~1,058 chars of tool-definition delta and a single 149-char preference line in the system prompt — together, the entire 308-token swing.
+VS Code Copilot Chat does not inline every available tool. It runs a "virtual tools" system that bounds prompt size:
 
-What appears to have happened: adding 130 more candidate tools to the pool **displaced one selected built-in tool** from B's slate. The selection algorithm seems budget-bounded. We can't see its internals, but the visible effect is that the *composition* of the slate changes when the candidate pool changes — even though the slate's *size* stays roughly constant.
+- **Hard cap of 88 tool slots per call** (`HARD_TOOL_LIMIT = 128`, `TOOLS_AND_GROUPS_LIMIT = 88`).
+- **Above ~64 tools, grouping kicks in.** Overflow tools are bundled behind virtual `activate_*` router tools — the same pattern as `mcp_azure_mcp_ser_search` in our export. The model spends one call to expand a group when it actually needs something inside it. Catalog reachable, not inlined.
+- **A proportional slot allocator** divides the 88 slots between built-in and MCP toolsets. More MCP toolsets means built-in tools lose share — that's how `explore_subagent` got displaced.
 
-In this test, runs were not even fully cold (first-call cache hit was 60–66%), so the effective per-call saving is smaller than the cold-prefix number suggests.
+Source: `microsoft/vscode-copilot-chat` → `src/extension/tools/common/virtualTools/`.
+
+The practical consequence: trimming MCP servers from a saturated configuration (60+ tools) gives almost no prefix saving. **But staying lean from the start does help** — below the ~64-tool grouping threshold, tools are inlined verbatim, and each one costs roughly **~235 tokens / ~0.07 cr per cold call**.
 
 ### Real workload: JSDoc task
 
-Same task, full vs audited MCP set:
-
-- Net cost was **+17.1%** in the audited condition.
-- This moved in the opposite direction from the prefix-tax prediction.
-- Cause: with a different selected slate, the agent picked a different path.
-
-Behavioral drift swamped the small prefix saving — and the slate displacement above is itself part of that drift.
+Net cost was **+17.1%** in the audited condition — the opposite direction from the prefix-tax prediction. With a different selected slate, the agent picked a different path. Behavioral drift swamped the tiny prefix saving.
 
 ### Practical guidance
 
 Do:
 
-- Remove MCP servers that are broken, noisy, irrelevant, or actively misleading.
-- Prefer fewer, better-described tools over large generic tool catalogs.
-- Treat MCP trimming as a quality and reliability improvement.
+- Be deliberate at install time. Don't enable MCP servers you won't use.
+- Audit existing MCP setups for noisy, broken, or irrelevant tools — treat it as a quality fix.
 
 Do not:
 
-- Sell MCP trimming as a primary token-cost optimization.
-- Assume "available tool count" maps linearly to prompt size.
-- Remove useful tools purely to save a few hundred prefix tokens.
-- Compare runs without checking whether the slate (the tools the model actually saw) changed.
-
-### What a clean test would have measured
-
-To isolate the prefix-tax effect cleanly, we would need:
-
-- A task where the agent's tool-selection slate is provably identical across conditions.
-- N≥3 runs to wash out behavioral variance.
-- A baseline export confirming both conditions hit cold cache.
-
-We did not get all three. The hello-world number, around **−0.09 cr/call**, is the best isolated estimate from this test, and even that turns out to reflect slate composition rather than raw tool-count effects.
+- Try to optimise MCP for cost after the fact in a tool-rich workspace. The cap eats your savings.
+- Toggle MCP servers on/off frequently. Each change rebuilds the slate, invalidates the prefix cache, and costs you one cold-start call with no offsetting prefix saving.
+- Compare runs without checking whether the slate (what the model actually saw) changed.
 
 ### Takeaway
 
 Audit MCP servers for **slate quality**, not for token cost.
 
-The headline cost effect is small and goes the "wrong way" because of how VS Code Copilot Chat handles tool surfaces in this build:
+In any tool-rich VS Code Copilot Chat setup the prompt-size effect of trimming is small or zero, because the client already caps the slate and routes large catalogs through `activate_*` lazy expansion. The real risk of an unaudited MCP setup isn't tokens — it's that bad or noisy tools displace good ones from the slate, and the agent picks the wrong one.
 
-- Available-tool count is not the count the model sees. The client selects a small slate (~25–26 tools per call in our test) regardless of how many MCP servers are enabled.
-- Large MCP catalogs are reachable through router tools (e.g. `mcp_azure_mcp_ser_search`) rather than inlined definitions. Enabling an Azure MCP server costs roughly one router stub in the prefix, not the full catalog. Real cost only lands when the agent actually invokes the router.
-- Adding more candidate MCP tools can **displace useful built-in tools** out of the selected slate. That is the real risk to flag — not tokens, but tool composition.
-
-Other IDEs and surfaces likely behave differently. Assume a different shape until you have inspected the export.
-
-The first-order benefit of trimming MCP servers is therefore helping the agent pick the right tool quickly, keeping the slate composed of tools you actually want it to reach for, and reducing wrong-path drift. Token savings, if any, are a side effect.
-
+Other IDEs and surfaces likely behave differently. Always inspect the export.
 
 ---
 
