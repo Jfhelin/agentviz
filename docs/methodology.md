@@ -12,51 +12,41 @@ It is the companion to the main report: [copilot-cost-report.md](copilot-cost-re
 
 All measurements come from VS Code Copilot Chat exports:
 
-```text
-copilot_all_prompts_*.json
-```
+    copilot_all_prompts_*.json
 
 These exports were loaded into a local fork of:
 
-```text
-jayparikh/agentviz
-```
+    jayparikh/agentviz
 
 Fork:
 
-```text
-Jfhelin/agentviz
-```
+    Jfhelin/agentviz
 
 Branch:
 
-```text
-jfhelin/cost-compare-instrumentation
-```
+    jfhelin/cost-compare-instrumentation
 
 The fork adds:
 
-- A **Cost view** that breaks each call down by prefix bucket:
+- A Cost view that breaks each call down by prefix bucket:
   - system
   - tool definitions
   - history
   - current prompt
   - tool results
   - output
-- A **Cost Compare** tab that pins two runs side-by-side.
+- A Cost Compare tab that pins two runs side-by-side.
 - Pre-vs-post divergence cost split.
 - Projected prefix tax over each run’s actual call shape.
 - Drift detection for:
   - prompt hash
   - system prompt hash
   - model
-  - tool set
+  - tool set / selected tool slate
   - turn count
 - Per-model cache-aware pricing via:
 
-```text
-src/lib/pricing.js
-```
+      src/lib/pricing.js
 
 Pricing data was refreshed against official Anthropic, OpenAI, and GitHub Copilot rate cards in May 2026.
 
@@ -66,13 +56,11 @@ Exports are deterministic JSON. Numbers in this report are computed from raw tok
 
 ## What "AI Credits" means
 
-Cost numbers are reported in **AI Credits (cr)**, the unit GitHub Copilot is moving to for billing.
+Cost numbers are reported in AI Credits (cr), the unit GitHub Copilot is moving to for billing.
 
 For intuition, this report approximates:
 
-```text
-1 cr ≈ $0.01 USD equivalent
-```
+    1 cr ≈ $0.01 USD equivalent
 
 A 20 cr task is therefore roughly equivalent to $0.20 of underlying spend in this framing.
 
@@ -80,7 +68,7 @@ A 20 cr task is therefore roughly equivalent to $0.20 of underlying spend in thi
 
 ## What "hello world" and "real workload" mean
 
-A **hello world** measurement is the prefix-tax delta on the first primary LLM call of a run with the technique toggled on or off.
+A hello world measurement is the prefix-tax delta on the first primary LLM call of a run with the technique toggled on or off.
 
 It is the cleanest possible cost number because it is path-independent:
 
@@ -90,22 +78,20 @@ It is the cleanest possible cost number because it is path-independent:
 
 Cost Compare reports this as the input token count of the first primary call.
 
-We express this as **AI Credits per call** at the Sonnet 4.5 rate card:
+We express this as AI Credits per call at the Sonnet 4.5 rate card:
 
-```text
-$3/M input tokens
-$15/M output tokens
-≈ 0.30 cr per 1,000 uncached input tokens
-```
+    $3/M input tokens
+    $15/M output tokens
+    ≈ 0.30 cr per 1,000 uncached input tokens
 
-Hello world is useful for techniques that change prompt prefix:
+Hello world is useful for techniques that actually change prompt prefix:
 
-- Dropping MCP servers
+- Changing the selected tool slate, if the configuration change actually changes what is sent to the model
 - Shrinking instructions
 - Switching mode
 - Changing system/tool prompt shape
 
-The other extreme is the **real workload** measurement, where the agent runs end-to-end and behavior dominates:
+The other extreme is the real workload measurement, where the agent runs end-to-end and behavior dominates:
 
 - Tool calls
 - Extra LLM calls
@@ -125,16 +111,14 @@ For techniques that do not change prefix, such as Auto model selection or smalle
 
 Every measurement in this report comes from variations of one workload:
 
-> **Add JSDoc to every exported symbol in `api/src/repositories/`.**
+> Add JSDoc to every exported symbol in `api/src/repositories/`.
 
-The task was run against the standard **OctoCat Supply Platform Demo** repo:
+The task was run against the standard OctoCat Supply Platform Demo repo:
 
 - TypeScript
 - Approximately 8 small repository files under:
 
-```text
-api/src/repositories/
-```
+      api/src/repositories/
 
 - Approximately 24 export-worthy symbols
 
@@ -152,9 +136,7 @@ A known set of files and a known list of exported symbols means we can count com
 
 Example:
 
-```text
-16 of 24 expected blocks
-```
+    16 of 24 expected blocks
 
 Without a closed scope, every “did the AI do the task?” judgment becomes subjective.
 
@@ -226,7 +208,9 @@ Effects that scale with codebase size may look compressed here:
 - Large monorepo context
 - Multi-language workspaces
 
-(MCP server count is *not* on this list. In our test, going from 52 to 182 available tools left the model's selected slate at ~25–26 tools per call and changed the system prompt by only ~308 tokens — in the *opposite* direction from "more tools = bigger prompt". VS Code Copilot Chat selects a small slate per call and reaches large MCP catalogs through router tools rather than inlining their definitions. Available-tool count is not a linear driver of prefix size in this client. See deep dive #3 in the main report.)
+MCP server count is not on this list. In our test, going from 52 to 182 available tools left the model’s selected slate at roughly 25–26 tools per call and changed the system prompt by only about 308 tokens — in the opposite direction from “more tools = bigger prompt.” VS Code Copilot Chat selects a small slate per call and reaches large MCP catalogs through router tools rather than inlining every definition. Available-tool count is therefore not a linear driver of prefix size in this client.
+
+See deep dive #3 in the main report.
 
 ### One-shot, no persistent state
 
@@ -347,7 +331,7 @@ Verify clean tests by inspecting:
 - Single user-turn count
 - Single primary model
 - Single prompt hash
-- Expected tool set
+- Expected selected tool slate
 - Expected mode
 
 If not clean, discard and rerun.
@@ -404,14 +388,12 @@ Each axis was scored 0–2.
 
 The final comparison used:
 
-```text
-per-unit average × completion ratio = quality units
-```
+    completed output units × average score per completed unit = total quality units
 
 Then:
 
-```text
-quality units / AI Credits = quality per credit
-```
+    total quality units / AI Credits = quality per credit
+
+This deliberately rewards both quality and completion: a model that produces good blocks but skips part of the requested scope receives fewer total quality units than a model that completes more of the task at similar quality.
 
 This avoids comparing only cost when output quality differs.
