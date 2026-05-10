@@ -319,17 +319,15 @@ First-primary-call input tokens, Sonnet 4.5, prefix-tax only:
 
 The 182-tool run was actually 308 tokens *cheaper*, and the entire delta traces to one tool: `explore_subagent` was in the 52-tool slate but not the 182-tool slate. Adding more candidate tools displaced a useful built-in.
 
-### Why the prompt barely moves: VS Code's tool-grouping system
+### Why the prompt barely moves
 
-VS Code Copilot Chat does not inline every available tool. It runs a "virtual tools" system that bounds prompt size:
+VS Code Copilot Chat doesn't put every available tool into the prompt. It runs a tool-budget system that caps how much tool surface the model ever sees:
 
-- **Hard cap of 88 tool slots per call** (`HARD_TOOL_LIMIT = 128`, `TOOLS_AND_GROUPS_LIMIT = 88`).
-- **Above ~64 tools, grouping kicks in.** Overflow tools are bundled behind virtual `activate_*` router tools — the same pattern as `mcp_azure_mcp_ser_search` in our export. The model spends one call to expand a group when it actually needs something inside it. Catalog reachable, not inlined.
-- **A proportional slot allocator** divides the 88 slots between built-in and MCP toolsets. More MCP toolsets means built-in tools lose share — that's how `explore_subagent` got displaced.
+- The slate sent to the model is capped (in the build we tested, around 88 tool slots per call).
+- Once the available-tool count crosses roughly 64, the client starts bundling overflow tools behind small "router" tools. The model can still reach the bundled tools — it just has to call the router first to expand them. The catalog is reachable, not inlined.
+- A budget split divides those slots between built-in tools and each MCP server, so adding more MCP toolsets shrinks the share built-in tools get. This is what displaced `explore_subagent` in our 182-tool run.
 
-Source: `microsoft/vscode-copilot-chat` → `src/extension/tools/common/virtualTools/`.
-
-The practical consequence: trimming MCP servers from a saturated configuration (60+ tools) gives almost no prefix saving. **But staying lean from the start does help** — below the ~64-tool grouping threshold, tools are inlined verbatim, and each one costs roughly **~235 tokens / ~0.07 cr per cold call**.
+The practical consequence: trimming MCP servers from a tool-heavy setup gives almost no prefix saving, because the cap is already doing the work. **Staying lean from the start does help**, though — below the grouping threshold, tools are inlined verbatim, and each one costs roughly **~235 tokens / ~0.07 cr per cold call**.
 
 ### Real workload: JSDoc task
 
@@ -345,7 +343,7 @@ Do:
 Do not:
 
 - Try to optimise MCP for cost after the fact in a tool-rich workspace. The cap eats your savings.
-- Toggle MCP servers on/off frequently. Each change rebuilds the slate, invalidates the prefix cache, and costs you one cold-start call with no offsetting prefix saving.
+- Don't toggle MCP servers mid-session just to "tidy up." VS Code intentionally keeps the tool slate stable across calls so the prefix cache stays warm — in our test, a UI toggle didn't even propagate to the slate the model received, and that's by design.
 - Compare runs without checking whether the slate (what the model actually saw) changed.
 
 ### Takeaway
