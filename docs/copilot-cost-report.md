@@ -508,9 +508,27 @@ Keep useful instructions even if they add a few hundred prefix tokens. Useful ca
 
 ## 5. Scope context with `applyTo:` globs
 
+### What this technique is supposed to do
+
+Custom instruction files (`.github/instructions/*.instructions.md` in VS Code Copilot Chat) can carry an `applyTo:` front-matter glob. The intended behaviour:
+
+- A file with `applyTo: "src/frontend/**"` is meant to apply only when the agent is working on files matching that glob.
+- Files whose glob does not match the current task should be **excluded** from the agent's working set — and, critically, from the prompt that gets billed.
+
+The cost claim being tested: scoping instruction files with `applyTo:` reduces tokens per call, because excluded files don't ride along in the system prompt.
+
+### What we wanted to measure
+
+Two questions, in this order:
+
+1. **Does the mechanism exist?** When `applyTo:` says a file should be excluded, is that file's content actually absent from the exported prompt?
+2. **If so, how much does it save?** Net cost difference per call between a "scoped" and "unscoped" configuration on a real task.
+
+The cost question only matters if the answer to the first question is yes.
+
 ### Hello world: minimal A/B
 
-We observed −509 tokens per call on the first primary call, approximately **−0.15 cr/call** at Sonnet 4.5 input rates.
+We observed **−509 tokens per call** on the first primary call, approximately **−0.15 cr/call** at Sonnet 4.5 input rates.
 
 But this appears to be an artifact, not a reliable saving mechanism — the clean test below shows there is no gating mechanism for the saving to come from.
 
@@ -518,15 +536,13 @@ But this appears to be an artifact, not a reliable saving mechanism — the clea
 
 Net cost was **+82%** for the supposedly scoped condition.
 
-More importantly, inspection of the raw exports showed that in the VS Code Copilot Chat build and configuration we tested, `applyTo:` did not behave as a hard cost gate for instruction files.
-
 Inspection of the raw exports showed the underlying mechanism does not behave as a token gate at all in this build — see "How we verified the mechanism" below.
 
 Therefore, in this environment, `applyTo:` should not be treated as a reliable token-cost control.
 
 ### What this does and does not prove
 
-This does not prove that `applyTo:` has no value.
+This does not prove that `applyTo:` has no value as an authoring or routing convention.
 
 It does suggest:
 
@@ -536,11 +552,11 @@ It does suggest:
 
 ### How we verified the mechanism
 
-We placed two instruction files in the project, each containing a unique marker string, and gave each one an `applyTo:` glob that did **not** match the JSDoc task path. Both files should have been excluded from the working set.
+We placed two instruction files in the project, each containing a unique marker string, and gave each one an `applyTo:` glob that did not match the JSDoc task path. Both files should have been excluded from the working set.
 
 We then ran the agent, exported the chat, and grepped the exported system prompt for the two marker strings.
 
-**Neither marker appeared anywhere in the export** — not even from the file whose glob *did* overlap the task path. The instruction file contents were not in the prompt at all, gated or otherwise. With no contents in the prompt, there is nothing for `applyTo:` to gate, and the −509 token delta we observed earlier has no causal mechanism behind it.
+Neither marker appeared anywhere in the export — not even from the file whose glob did overlap the task path. The instruction file contents were not in the prompt at all, gated or otherwise. With no contents in the prompt, there is nothing for `applyTo:` to gate, and the −509 token delta we observed earlier has no causal mechanism behind it.
 
 ### Takeaway
 
@@ -558,62 +574,85 @@ The deeper methodology lesson:
 
 ## 6. Use Ask Mode for one-shot questions
 
-### Hello world: minimal A/B, both runs cold
+### What this technique is supposed to do
 
-Same one-shot question sent in Agent Mode vs Ask Mode. Both runs forced to cold cache.
+Ask Mode is a separate chat mode in VS Code Copilot Chat. The intent: a lighter-weight surface for one-shot questions — explanations, code reading, quick Q&A — that loads no tools and skips the agent scaffolding, and therefore costs less per call than Agent Mode.
 
-| Condition | First-call input tokens | Cost per call, cold |
+### What we wanted to measure
+
+Two questions:
+
+1. **Is Ask Mode structurally lighter than Agent Mode** in current VS Code Copilot Chat — smaller prompt, no tool definitions, no tool use?
+2. If so, **how much does it actually save per call**?
+
+### Hello world: minimal A/B
+
+Same one-shot question sent in Agent Mode vs Ask Mode, fresh chat in each:
+
+| Condition | First-call input tokens | First cold-call cost |
 |---|---:|---:|
 | Agent Mode | 21,378 tok | ≈ **6.41 cr** |
 | Ask Mode | 20,200 tok | ≈ **6.06 cr** |
 | Delta | **−1,178 tok, −5.5%** | **≈ −0.35 cr/call** |
 
-Ask Mode is genuinely cheaper at hello world:
-
-- Smaller system prompt
-- Fewer tool definitions in the prefix
-- Lower first-call input token count
-
-This is the largest hello-world saving of any prefix-tax technique we tested.
+Ask Mode's first-call prefix is genuinely smaller — fewer tool definitions, slightly shorter system prompt — but the saving is modest: about 5%, not the order-of-magnitude difference the "lighter mode" framing suggests.
 
 ### Real workload: normal usage
 
-In real usage, the cost difference was not reliable.
+In real usage, even this small structural saving is erased by cache asymmetry.
 
-The reason appears to be cache asymmetry.
+Anthropic's prompt cache is keyed on prefix bytes per API credential. Agent Mode and Ask Mode build different prefixes, so they get **independent cache entries**. In our test, even after restarting VS Code and starting a fresh chat:
 
-Agent Mode and Ask Mode have different prefix bytes, so they have independent cache entries. Agent Mode prefixes are more likely to stay warm because users issue many Agent Mode calls in a tight sequence. Ask Mode is more often used for occasional one-shot questions, making its first call more likely to be cold.
+- Agent Mode came up at ~50% cache hit on the first call.
+- Ask Mode came up at ~14%, with the first primary call at 0%.
 
-The mechanism observed in raw exports:
+The reason: Agent Mode is the prefix the user already hammers every day, so its cache entry is continuously refreshed by ordinary work. Ask Mode prefixes are rarely warm because Ask Mode is, by design, used sporadically for one-shots.
 
-> Per-prefix-bytes, per-credential cache, approximately 5-minute TTL.
+Net effect on Pair 1 (single-call Q&A):
 
-Both modes request caching the same way. The asymmetry is usage-pattern driven, not a configuration the user can fix.
+- Total cost A: **6.10 cr**
+- Total cost B: **8.78 cr** (+44%)
+
+Ask Mode pays roughly **50% more per token** in the cold-start single-call case. The structural −5.5% prefix saving is dwarfed by the cache penalty.
+
+### The Ask Mode surprise: it is not a no-tools mode
+
+The bigger structural finding came from a second test designed to *tempt* tool use — a cross-file exploration question:
+
+| Mode | Tool calls | Distinct tools used |
+|---|---:|---|
+| Agent Mode | 14 | 3 |
+| Ask Mode | **11** | **4** (added `semantic_search`) |
+
+Ask Mode invoked `semantic_search`, `read_file`, and other tools to answer the question. There is no agent overhead being skipped at the prompt level — 98% of the system prompt is shared between the two modes — and Ask Mode will reach for tools when the question seems to need them.
+
+In multi-call workloads like this one, the cache asymmetry shrinks (both runs hit ~86–91% cache mid-run), so total cost was within noise: 18.2 cr vs 19.1 cr.
 
 ### Practical guidance
 
 Use Ask Mode when:
 
-- You want explanation, Q&A, code reading, or a one-shot answer.
-- You do not need autonomous edits.
-- You want less tool-driven behavior.
+- You want to discourage edits without disabling them.
+- You prefer the more conversational answer style.
 
 Use Agent Mode when:
 
-- You want the agent to inspect files.
-- You want the agent to modify code.
-- You want the agent to run commands.
-- You expect a multi-step task.
+- You want autonomous edits or commands.
+- You want to benefit from the warm prefix you've already built up today.
+
+Do **not** pick Ask Mode expecting it to be cheaper, tool-free, or structurally different from Agent Mode. In the build we tested, it is essentially the same product surface with a slightly trimmed prompt and a colder cache.
 
 ### Takeaway
 
-Pick the mode that fits the task, not the mode that “saves tokens.”
+For both prompt designs we tested, Ask Mode and Agent Mode are functionally and economically equivalent.
 
-Ask Mode can have a smaller first-call prefix, but the absolute saving is small and cache behavior can erase it in real use.
+The two modes share ~98% of the system prompt, Ask Mode loads only ~13–38% fewer tool definitions depending on call shape, and the cold-start cache penalty for Ask Mode can make it *more* expensive per call than Agent Mode for one-shot questions.
 
-The more durable finding is methodological:
+Pick the mode that fits the task, not the mode that "saves tokens."
 
-> First-call cache hit rate is one of the best indicators that a cost benchmark is contaminated.
+The methodology lesson:
+
+> First-call cache hit rate is one of the best indicators that a cost benchmark is contaminated — and that asymmetry is sometimes structural, not fixable.
 
 ---
 
