@@ -14,7 +14,6 @@ The short version: **model choice and agent behavior matter far more than trimmi
 
 - [TL;DR](#tldr)
 - [How to read the numbers](#how-to-read-the-numbers)
-- [Field guidance for SEs](#field-guidance-for-ses)
 - [Three things to do today](#three-things-to-do-today)
 - [Cost levers, ranked](#cost-levers-ranked)
 - [Decision matrix](#decision-matrix)
