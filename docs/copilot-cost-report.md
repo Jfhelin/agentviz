@@ -26,14 +26,9 @@ The short version: **model choice and agent behavior matter far more than trimmi
   5. [Scope context with `applyTo:` globs](#5-scope-context-with-applyto-globs)
   6. [Use Ask Mode for one-shot questions](#6-use-ask-mode-for-one-shot-questions)
 - [What we didn't test, and why](#what-we-didnt-test-and-why)
-- **Methodology**
-  - [Tooling and units](#tooling-and-units)
-  - [What "hello world" and "real workload" mean](#what-hello-world-and-real-workload-mean)
-  - [The test workload](#the-test-workload--what-we-ran-and-why)
-  - [The five traps](#the-five-traps)
-  - [Quality grading rubric](#quality-grading-rubric-used-in-test-12)
+- [Methodology](methodology.md) — separate file
 - [Final recommendation](#final-recommendation)
-- [Appendix — How to reproduce](#appendix--how-to-reproduce)
+- [Appendix — How to reproduce](appendix.md) — separate file
 
 ---
 
@@ -100,7 +95,7 @@ All hello-world prefix-tax numbers below assume Sonnet 4.5.
 |---|---|---:|---:|---|---|
 | [1](#1-enable-auto-model-selection) | **Enable Auto model selection** | n/a — billing multiplier, not token effect | −10% per eligible request when Auto selects the same model | **Turn on where policy allows. Override when needed.** | High, billing-rule dependent |
 | [2](#2-use-a-smaller-model-for-routine-tasks) | **Use a smaller model for routine tasks** | ≈ −67% per call from Sonnet 4.5 to Haiku 4.5 by rate card | **−59% cost and equal-or-better quality on JSDoc task** | **Use smaller models for bounded, repetitive work.** | Medium |
-| [3](#3-trim-unused-mcp-servers) | Trim unused MCP servers | −308 tokens/call ≈ **−0.09 cr** | Inconclusive; behavior dominated | Useful for hygiene, not primary cost control | Medium |
+| [3](#3-trim-unused-mcp-servers) | Trim unused MCP servers | ±~308 tokens/call ≈ **±0.09 cr**; sign depends on slate composition, not tool count | Inconclusive; behavior dominated | Useful for slate quality, not primary cost control | Medium |
 | [4](#4-shrink-your-always-on-instructions) | Shrink always-on instructions | −320 tokens/call ≈ **−0.10 cr** | Net **+13.9%** cost in this run | Do not shrink useful guidance for cost | Medium-low |
 | [5](#5-scope-context-with-applyto-globs) | Scope context with `applyTo:` globs | Observed −509 tokens/call, but likely artifact | +82% cost in this run | Do not assume this reduces cost; inspect exports | Medium for tested build |
 | [6](#6-use-ask-mode-for-one-shot-questions) | Use Ask Mode for one-shot questions | −1,178 tokens/call ≈ **−0.35 cr** when both runs cold | No reliable real-world saving observed | Pick mode for task fit, not token saving | Medium-low |
@@ -112,7 +107,7 @@ All hello-world prefix-tax numbers below assume Sonnet 4.5.
 - Start with **model selection**. Use smaller models for bounded, repetitive, easy-to-check tasks.
 - Enable **Auto model selection** where policy allows.
 - Optimize instructions for **clarity and task success**, not raw token count.
-- Keep MCP server lists relevant and well-described, but do not position MCP trimming as a major cost lever.
+- Keep MCP server lists relevant and well-described so the client's tool-selection slate stays composed of tools you actually want the agent to reach for. Do not position MCP trimming as a major cost lever.
 - Measure real workflows, not just prompt length.
 - Treat token savings and behavioral savings as different things.
 
@@ -311,27 +306,55 @@ The best default is not “always use the cheapest model.” It is:
 
 ### Test setup
 
-The “full MCP set” condition included 182 available tools in total: Azure, GitHub, Playwright, and the built-in VS Code Copilot tools.
+The "full MCP set" condition had 182 tools available across Azure, GitHub, Playwright, and the built-in VS Code Copilot tools.
 
-The “audited-down” condition removed the external MCP servers and kept only the 52 built-in tools.
+The "audited-down" condition removed the external MCP servers and kept only the 52 built-in tools.
 
-So this was not a tiny cleanup. It was a large reduction in visible tool surface: **182 tools → 52 tools**.
+On paper this looked like a large reduction in visible tool surface: **182 → 52**. The first surprise of this test is that *the model never sees those numbers.*
 
+### What the model actually receives
+
+Inspecting the raw exports showed two things that change how this technique should be evaluated:
+
+**1. The client picks a small slate of tools and only sends those.**
+
+| Available tools (settings) | Tools sent to the model |
+|---:|---:|
+| 52 (built-in only) | **26** |
+| 182 (full MCP set) | **25** |
+
+The available-tool count is not the count the model sees. The client selects ~25–26 tools per call regardless of whether the user has 52 or 182 enabled.
+
+**2. Large MCP catalogs sit behind router tools, not inlined definitions.**
+
+The Azure MCP server was reachable in both runs through a single router tool, `mcp_azure_mcp_ser_search`, with its own description in the export:
+
+> "This is a hierarchical MCP command router. Sub commands are routed to MCP servers that require specific fields inside the `parameters` object. Set `learn=true` to discover available sub commands."
+
+When the agent needs Azure tooling, it calls the router with `learn=true` to discover sub-commands, then issues the real call. The full Azure tool catalog is reachable but not inlined in the prefix. Cost only lands when the agent actually uses Azure capabilities — and it lands on those specific calls, not on every call in the session.
+
+This is effectively **lazy tool loading at the protocol level**: enabling an MCP server adds a small router stub to the candidate pool; the catalog itself only enters the conversation if and when the agent asks for it.
 
 ### Hello world: minimal A/B
 
-Run with full MCP server set vs audited-down set. First-primary-call input tokens, Sonnet 4.5, prefix-tax only:
+First-primary-call input tokens, Sonnet 4.5, prefix-tax only:
 
-| Condition | Available tools | First-call input tokens | First cold-call cost |
-|---|---:|---:|---:|
-| Full MCP set | 182 | 17,525 tok | ≈ **5.26 cr** |
-| Built-in tools only | 52 | 17,217 tok | ≈ **5.17 cr** |
-| Delta | −130 tools | **−308 tok, −1.83%** | **≈ −0.09 cr on first cold call** |
+| Condition | Available tools | Tools in slate | First-call input tokens | First cold-call cost |
+|---|---:|---:|---:|---:|
+| Full MCP set | 182 | 25 | 17,217 tok | ≈ **5.17 cr** |
+| Built-in tools only | 52 | 26 | 17,525 tok | ≈ **5.26 cr** |
+| Delta | +130 tools | −1 tool | **−308 tok** | **≈ −0.09 cr on first cold call** |
 
+The direction is the opposite of what the "fewer tools = smaller prompt" intuition predicts. The 182-tool run was 308 tokens *cheaper* per cold call.
 
-Tool definitions sit in the prefix of every primary call, so trimming unused MCP servers can reduce the uncached prefix size. However, after the prefix is cached, repeated calls against the same stable prefix are much cheaper — roughly 10% of the original input cost for cached tokens, depending on the model/provider pricing. That means the saving can still compound across a session, but mostly at the cached-token rate after the first call. In normal usage, the per-call saving is therefore even smaller than the cold-prefix number suggests.
+The full delta traces to one tool. Diffing the two system prompts and tool definitions shows:
 
-In this test, the runs were not even fully cold: first-call cache hit was around 60–66%.
+- A's slate included `explore_subagent`. B's slate did not.
+- That one difference accounts for ~1,058 chars of tool-definition delta and a single 149-char preference line in the system prompt — together, the entire 308-token swing.
+
+What appears to have happened: adding 130 more candidate tools to the pool **displaced one selected built-in tool** from B's slate. The selection algorithm seems budget-bounded. We can't see its internals, but the visible effect is that the *composition* of the slate changes when the candidate pool changes — even though the slate's *size* stays roughly constant.
+
+In this test, runs were not even fully cold (first-call cache hit was 60–66%), so the effective per-call saving is smaller than the cold-prefix number suggests.
 
 ### Real workload: JSDoc task
 
@@ -339,41 +362,49 @@ Same task, full vs audited MCP set:
 
 - Net cost was **+17.1%** in the audited condition.
 - This moved in the opposite direction from the prefix-tax prediction.
-- Cause: with a different tool set, the agent picked a different path on this single run.
+- Cause: with a different selected slate, the agent picked a different path.
 
-Behavioral drift swamped the small prefix saving.
+Behavioral drift swamped the small prefix saving — and the slate displacement above is itself part of that drift.
 
 ### Practical guidance
 
 Do:
 
-- Remove MCP servers that are unused, broken, noisy, or irrelevant to the workspace.
+- Remove MCP servers that are broken, noisy, irrelevant, or actively misleading.
 - Prefer fewer, better-described tools over large generic tool catalogs.
-- Treat MCP trimming as a quality and reliability improvement first.
+- Treat MCP trimming as a quality and reliability improvement.
 
 Do not:
 
 - Sell MCP trimming as a primary token-cost optimization.
+- Assume "available tool count" maps linearly to prompt size.
 - Remove useful tools purely to save a few hundred prefix tokens.
-- Compare runs without checking whether the agent took a different tool path.
+- Compare runs without checking whether the slate (the tools the model actually saw) changed.
 
 ### What a clean test would have measured
 
 To isolate the prefix-tax effect cleanly, we would need:
 
-- A task where the agent’s tool choice is provably unaffected by which MCP servers are present.
+- A task where the agent's tool-selection slate is provably identical across conditions.
 - N≥3 runs to wash out behavioral variance.
 - A baseline export confirming both conditions hit cold cache.
 
-We did not get all three.
-
-The hello-world number, around **−0.09 cr/call**, is the best isolated estimate from this test. The real workload shows that agent path variance can easily exceed it.
+We did not get all three. The hello-world number, around **−0.09 cr/call**, is the best isolated estimate from this test, and even that turns out to reflect slate composition rather than raw tool-count effects.
 
 ### Takeaway
 
-Audit MCP servers for hygiene, correctness, and tool-selection quality — not primarily for cost.
+Audit MCP servers for **slate quality**, not for token cost.
 
-The prefix-tax saving is real but tiny for typical configurations. A very large MCP setup may matter more, but the first-order benefit is helping the model select the right tool quickly.
+The headline cost effect is small and goes the "wrong way" because of how VS Code Copilot Chat handles tool surfaces in this build:
+
+- Available-tool count is not the count the model sees. The client selects a small slate (~25–26 tools per call in our test) regardless of how many MCP servers are enabled.
+- Large MCP catalogs are reachable through router tools (e.g. `mcp_azure_mcp_ser_search`) rather than inlined definitions. Enabling an Azure MCP server costs roughly one router stub in the prefix, not the full catalog. Real cost only lands when the agent actually invokes the router.
+- Adding more candidate MCP tools can **displace useful built-in tools** out of the selected slate. That is the real risk to flag — not tokens, but tool composition.
+
+Other IDEs and surfaces likely behave differently. Assume a different shape until you have inspected the export.
+
+The first-order benefit of trimming MCP servers is therefore helping the agent pick the right tool quickly, keeping the slate composed of tools you actually want it to reach for, and reducing wrong-path drift. Token savings, if any, are a side effect.
+
 
 ---
 
@@ -611,418 +642,17 @@ The pattern:
 
 # Methodology
 
-This section is for people who want to reproduce the work, debug similar measurements of their own, or pressure-test the methodology.
-
----
-
-## Tooling and units
-
-### Tooling
-
-All measurements come from VS Code Copilot Chat exports:
-
-```text
-copilot_all_prompts_*.json
-```
-
-These exports were loaded into a local fork of:
-
-```text
-jayparikh/agentviz
-```
-
-Fork:
-
-```text
-Jfhelin/agentviz
-```
-
-Branch:
-
-```text
-jfhelin/cost-compare-instrumentation
-```
-
-The fork adds:
-
-- A **Cost view** that breaks each call down by prefix bucket:
-  - system
-  - tool definitions
-  - history
-  - current prompt
-  - tool results
-  - output
-- A **Cost Compare** tab that pins two runs side-by-side.
-- Pre-vs-post divergence cost split.
-- Projected prefix tax over each run’s actual call shape.
-- Drift detection for:
-  - prompt hash
-  - system prompt hash
-  - model
-  - tool set
-  - turn count
-- Per-model cache-aware pricing via:
-
-```text
-src/lib/pricing.js
-```
-
-Pricing data was refreshed against official Anthropic, OpenAI, and GitHub Copilot rate cards in May 2026.
-
-Exports are deterministic JSON. Numbers in this report are computed from raw token counts in the export, not estimated by an LLM.
-
----
-
-## What "AI Credits" means
-
-Cost numbers are reported in **AI Credits (cr)**, the unit GitHub Copilot is moving to for billing.
-
-For intuition, this report approximates:
-
-```text
-1 cr ≈ $0.01 USD equivalent
-```
-
-A 20 cr task is therefore roughly equivalent to $0.20 of underlying spend in this framing.
-
----
-
-## What "hello world" and "real workload" mean
-
-A **hello world** measurement is the prefix-tax delta on the first primary LLM call of a run with the technique toggled on or off.
-
-It is the cleanest possible cost number because it is path-independent:
-
-- The agent has not made decisions yet.
-- No tool path has diverged yet.
-- The only difference should be whatever bytes the technique changed in the prompt prefix.
-
-Cost Compare reports this as the input token count of the first primary call.
-
-We express this as **AI Credits per call** at the Sonnet 4.5 rate card:
-
-```text
-$3/M input tokens
-$15/M output tokens
-≈ 0.30 cr per 1,000 uncached input tokens
-```
-
-Hello world is useful for techniques that change prompt prefix:
-
-- Dropping MCP servers
-- Shrinking instructions
-- Switching mode
-- Changing system/tool prompt shape
-
-The other extreme is the **real workload** measurement, where the agent runs end-to-end and behavior dominates:
-
-- Tool calls
-- Extra LLM calls
-- Cache state
-- File reads
-- Wrong turns
-- Output length
-- Task completion
-
-Comparing the two tells us whether a technique that “works” in isolation actually saves money in real use.
-
-For techniques that do not change prefix, such as Auto model selection or smaller-model choice, hello world is not the right frame. Those have to be evaluated through rate-card, billing-rule, or real workload behavior.
-
----
-
-## The test workload — what we ran and why
-
-Every measurement in this report comes from variations of one workload:
-
-> **Add JSDoc to every exported symbol in `api/src/repositories/`.**
-
-The task was run against the standard **OctoCat Supply Platform Demo** repo:
-
-- TypeScript
-- Approximately 8 small repository files under:
-
-```text
-api/src/repositories/
-```
-
-- Approximately 24 export-worthy symbols
-
-For each condition, we sent that prompt, or a near-variant, in a fresh VS Code Copilot Chat session, exported the chat as JSON, and loaded the export into agentviz Cost Compare.
-
----
-
-## Why this workload
-
-We needed a task with these properties:
-
-### Bounded scope
-
-A known set of files and a known list of exported symbols means we can count completion deterministically.
-
-Example:
-
-```text
-16 of 24 expected blocks
-```
-
-Without a closed scope, every “did the AI do the task?” judgment becomes subjective.
-
-### Deterministic and judgment axes
-
-The task allows both:
-
-- Hard measurement:
-  - block count
-  - completion ratio
-  - files touched
-- Quality judgment:
-  - correct types
-  - useful descriptions
-  - behavior captured
-  - brevity
-  - edge cases
-
-This lets us compare cost and quality on the same task.
-
-### Multi-file exploration
-
-The task forces the agent to inspect multiple files, so it exercises the parts of cost that matter in Copilot Chat:
-
-- Tool calls
-- File reads
-- Context buildup
-- Agent planning
-- Model calls
-
----
-
-## What this workload misses
-
-The workload is useful for screening, but it is not enough for policy.
-
-### Highly templated, low judgment
-
-JSDoc generation under-exercises the hardest parts of agent behavior:
-
-- Multi-step reasoning
-- Debugging
-- Design trade-offs
-- Refactoring judgment
-- Security analysis
-
-Techniques whose value is mostly “make the model think better” may not show their full effect here.
-
-### Single task class
-
-We do not know whether findings generalize to:
-
-- Large refactors
-- Failing test debugging
-- Code review
-- Open-ended feature work
-- Security remediation
-- Generated tests
-
-The Haiku win is especially task-shape dependent.
-
-### Small repo
-
-File counts and context size are modest.
-
-Effects that scale with codebase size may look compressed here:
-
-- MCP server overhead at 10+ servers
-- Instruction files at 50KB+
-- Large monorepo context
-- Multi-language workspaces
-
-### One-shot, no persistent state
-
-Each run starts fresh. We did not measure techniques that depend on cross-session memory or learned context.
-
----
-
-## Alternatives we considered
-
-| Alternative | Why we didn't use it |
-|---|---|
-| Replay a real PR, issue to produced fix | Most realistic, but high setup cost and hard to grade equivalently across models. |
-| Multi-file refactor | Better stress test for tool chains, but completion criteria are fuzzy. |
-| Debug a failing test | Exercises reasoning hard, but pass/fail is binary and loses quality gradient. |
-| Code review of an existing PR | Pure judgment, no objective grade. Useful follow-up, not a baseline. |
-| Pre-recorded transcript replay | Removes behavioral variance, but is not supported by the tooling and would test a different system than users actually run. |
-
-The JSDoc workload is good for technique screening.
-
-It is not sufficient for deciding broad policy.
-
-A finding that survives this workload deserves follow-up on a debugging or refactor task before being adopted as a team-wide default.
-
----
-
-## What an ideal test program would look like
-
-If we were doing this again with more time:
-
-- A task suite of 4–6 workloads:
-  - JSDoc generation
-  - Multi-file refactor
-  - Failing test debug
-  - Code review
-  - Feature add
-  - Security remediation
-- N≥3 runs per condition.
-- Cold-cache enforcement.
-- Median and spread, not only single numbers.
-- A second test repository of different size and language.
-- Independent quality grading.
-- Blind double-grading for outputs.
-- Explicit product-build and extension-version capture.
-
-We did not do this.
-
-Treat the report accordingly:
-
-- Directional findings are useful.
-- Exact percentages are illustrative.
-- Low-cost, high-reversibility actions are reasonable to try.
-- Team-wide defaults deserve more validation.
-
----
-
-## The five traps
-
-These bit repeatedly during testing.
-
-Anyone running similar measurements will likely hit them too.
-
----
-
-### Trap 1 — Cache pollution makes everything look great
-
-The biggest source of bad measurements.
-
-Anthropic prompt caching warms a prefix for approximately 5 minutes after each hit. If the before run primes the cache and the after run runs immediately after, the after condition can look 70–90% cheaper purely from cache hits.
-
-That does not mean the technique saved money.
-
-#### Symptom
-
-First primary call shows high cache hit rate, especially above 40%.
-
-#### Fix
-
-Force cold cache for both runs:
-
-- Use different prefix bytes.
-- Wait out the TTL.
-- Start each run from a fresh chat.
-- Select the model before the first prompt.
-- Inspect first-call cache hit rate before trusting the comparison.
-
----
-
-### Trap 2 — Prefix tax projection vs measured net cost
-
-Two valid numbers exist for every before/after change:
-
-| Number | Meaning |
-|---|---|
-| Prefix tax delta | How many fewer input tokens the new prefix carries on each call. |
-| Net cost delta | What was actually paid across all calls in the full run. |
-
-These can disagree dramatically.
-
-Example from the instruction trimming test:
-
-- Prefix tax saving was real.
-- Net cost increased because the agent did more exploration.
-
-Always report both.
-
----
-
-### Trap 3 — One chat = one prompt = one model
-
-VS Code Copilot Chat exports capture everything in the chat session, including prompts sent under different model selections.
-
-Switching model mid-chat or running two prompts in the same chat produces a polluted export.
-
-#### Fix
-
-Verify clean tests by inspecting:
-
-- Single user-turn count
-- Single primary model
-- Single prompt hash
-- Expected tool set
-- Expected mode
-
-If not clean, discard and rerun.
-
----
-
-### Trap 4 — Mechanisms that do not behave as assumed
-
-The `applyTo:` test showed that a technique can sound plausible but not operate as a cost gate in the tested product configuration.
-
-The lesson:
-
-> Verify the mechanism before measuring the effect.
-
-#### Fix
-
-Inspect the raw export.
-
-If the content you expect to be gated is either fully present or fully absent regardless of the gating directive, the gating mechanism is not doing what you think. In our `applyTo:` test, the contents were never loaded in the first place — meaning there was nothing to gate, and any token delta we measured was incidental, not causal.
-
----
-
-### Trap 5 — Speculation loses to inspection
-
-During testing, several plausible cache-behavior hypotheses turned out to be wrong.
-
-Inspecting raw exports and `cache_control` breakpoints answered questions faster than reasoning from assumptions.
-
-#### Fix
-
-When in doubt, look at the bytes actually sent.
-
----
-
-## Quality grading rubric used in test #12
-
-For tests where the technique might affect output, not just cost:
-
-1. Pre-commit a rubric before running the test.
-2. Score each output unit separately.
-3. Grade blind to cost numbers.
-4. Report both completion and quality.
-5. Compute quality per credit.
-
-For the JSDoc task, each output block was scored on five axes:
-
-- Parameters
-- Types
-- Behavior
-- Edge cases
-- Brevity
-
-Each axis was scored 0–2.
-
-The final comparison used:
-
-```text
-per-unit average × completion ratio = quality units
-```
-
-Then:
-
-```text
-quality units / AI Credits = quality per credit
-```
-
-This avoids comparing only cost when output quality differs.
+The full methodology — tooling, units, workload rationale, the five traps, and the quality grading rubric can be found here
+> [methodology.md](methodology.md).
+
+This covers:
+
+- Tooling and units (agentviz fork, AI Credits)
+- What "hello world" and "real workload" mean
+- The test workload (JSDoc on the OctoCat Supply demo) and why we chose it
+- What the workload misses, alternatives we considered, and what an ideal test program would look like
+- The five traps that contaminate Copilot cost benchmarks
+- The quality grading rubric used in the model-comparison test
 
 ---
 
@@ -1055,85 +685,6 @@ The practical message is:
 
 ## Appendix — How to reproduce
 
-### Tooling
+The full reproduction recipe — install command, test repo, prompts, raw exports, per-test writeups, and the run procedure can be found here:
 
-Repository:
-
-```text
-Jfhelin/agentviz
-```
-
-Branch:
-
-```text
-jfhelin/cost-compare-instrumentation
-```
-
-Install:
-
-```bash
-npm install -g https://github.com/Jfhelin/agentviz/releases/download/v0.7.0-cost-preview/agentviz-0.7.0.tgz
-```
-
-### Test repo
-
-The standard **OctoCat Supply Platform Demo** repo:
-
-- TypeScript
-- 8 small repository files in:
-
-```text
-api/src/repositories/
-```
-
-- Default test repository for agent demos inside GitHub
-
-### Test prompts
-
-Stored in:
-
-```text
-.github/prompts/
-```
-
-### Raw exports
-
-Stored in:
-
-```text
-cost-test-results/raw-exports/*.json
-```
-
-One export per run.
-
-### Per-test writeups
-
-Stored as:
-
-```text
-cost-test-results/test-NN-<slug>.md
-cost-test-results/test-NN-<slug>.json
-```
-
-### Procedure
-
-1. Open VS Code Copilot Chat.
-2. Start a **new chat** for every run.
-3. Select the model before the first prompt.
-4. Send exactly one user prompt.
-5. Let the agent finish.
-6. Export the chat:
-
-```text
-copilot_all_prompts_*.json
-```
-
-7. Load the export into agentviz.
-8. Use Cost Compare to A/B against baseline.
-9. Verify the export has:
-   - Single user-turn count
-   - Single primary model
-   - Single prompt hash
-   - Expected tool set
-10. Check first-call cache hit rate.
-11. If first-call cache hit rate is above 40%, suspect cache pollution and rerun from a colder state.
+> [appendix.md](appendix.md).
