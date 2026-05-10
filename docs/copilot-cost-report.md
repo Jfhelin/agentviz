@@ -1,10 +1,12 @@
 # What Actually Reduces Copilot Chat Cost in VS Code
 
-A hands-on test report to understand practical cost-saving techniques for GitHub Copilot token-based billing.
+A hands-on test report on practical cost-saving techniques for GitHub Copilot token-based billing.
 
-We tested several common Copilot Chat cost-saving ideas in VS Code to separate techniques that materially reduce AI Credit consumption from techniques that only reduce small amounts of prompt prefix.
+We tested several common Copilot Chat cost-saving ideas in VS Code to separate techniques that materially reduce AI Credit consumption from techniques that only shave small amounts off the prompt prefix.
 
 The short version: **model choice and agent behavior matter far more than trimming static prompt text**. Prefix-token savings are measurable, but usually too small to matter unless they also improve the agent’s path through the task.
+
+Several of the most useful findings were not about how to save tokens, but about which assumed cost mechanisms were not actually present in the product surface we tested.
 
 > **Caveat up front.** This is an internal directional report, not a statistically complete benchmark. Every measurement here is N=1 on a single TypeScript test repository, one user, one workspace, one VS Code/Copilot Chat build, and one rate-card snapshot from May 2026. Treat directional findings as useful, exact percentages as illustrative, and policy changes as requiring follow-up validation.
 
@@ -14,13 +16,17 @@ The short version: **model choice and agent behavior matter far more than trimmi
 
 - [TL;DR](#tldr)
 - [How to read the numbers](#how-to-read-the-numbers)
+- [Summary table](#summary-table)
+- [What to tell customers](#what-to-tell-customers)
+  - [Safe guidance](#safe-guidance)
+  - [Avoid these claims](#avoid-these-claims)
 - [Three things to do today](#three-things-to-do-today)
 - [Cost levers, ranked](#cost-levers-ranked)
 - [Decision matrix](#decision-matrix)
 - **Deep dives**
   1. [Enable Auto model selection](#1-enable-auto-model-selection)
   2. [Use a smaller model for routine tasks](#2-use-a-smaller-model-for-routine-tasks)
-  3. [Trim unused MCP servers](#3-trim-unused-mcp-servers)
+  3. [Audit MCP servers for slate quality, not cost](#3-audit-mcp-servers-for-slate-quality-not-cost)
   4. [Shrink your always-on instructions](#4-shrink-your-always-on-instructions)
   5. [Scope context with `applyTo:` globs](#5-scope-context-with-applyto-globs)
   6. [Use Ask Mode for one-shot questions](#6-use-ask-mode-for-one-shot-questions)
@@ -40,14 +46,21 @@ The main finding is simple:
 In our VS Code Copilot Chat tests, the only techniques that produced clean, material savings were:
 
 1. **Use Auto model selection where policy allows.**  
-   For eligible requests, Auto applies a 0.9× AI Credit multiplier when it selects the same model a user would otherwise choose manually.
+   By billing rule, for eligible requests, Auto applies a 0.9× AI Credit multiplier when it selects the same model a user would otherwise choose manually.
 
 2. **Use smaller models for bounded, repetitive, easy-to-verify work.**  
    On our JSDoc workload, Haiku 4.5 cost 59% less than Sonnet 4.5 and produced equal-or-better judged output for this specific task.
 
-The techniques that only reduce prompt prefix — trimming MCP servers, shrinking instructions, using Ask Mode, or relying on `applyTo:` scoping — either saved very little per call or failed to translate into reliable real-workload savings.
+The other ideas mostly failed for more interesting reasons than “the savings were small”:
+
+- In tool-rich VS Code workspaces, trimming MCP servers after the fact barely changes prompt cost because the client already caps the tool slate and routes overflow tools lazily.
+- Shrinking useful instructions saved a tiny amount of prefix but cost more overall in our run because the agent took an extra step.
+- In the build we tested, `applyTo:` did not expose a token-cost mechanism at all: the instruction-file contents we expected it to gate were not present in the exported prompt.
+- Ask Mode had a slightly smaller cold prefix, but its colder cache made it more expensive than Agent Mode in our one-shot test, and it still used tools when the task called for them.
 
 At Sonnet 4.5 input rates, trimming 1,000 uncached prompt tokens saves roughly **0.3 AI Credits**. But one extra primary model call, unnecessary tool loop, or confused agent path can cost several times more than that.
+
+The broader lesson: do not optimize what merely exists in the workspace. Optimize what actually reaches the model, how it is cached, and whether it helps the agent take a shorter path.
 
 The right optimization target is not “shorter prompts.” It is:
 
@@ -92,14 +105,16 @@ All hello-world prefix-tax numbers below assume Sonnet 4.5.
 
 | # | Technique | Hello world | Real workload | Recommendation | Confidence |
 |---|---|---:|---:|---|---|
-| [1](#1-enable-auto-model-selection) | **Enable Auto model selection** | n/a — billing multiplier, not token effect | −10% per eligible request when Auto selects the same model | **Turn on where policy allows. Override when needed.** | High, billing-rule dependent |
+| [1](#1-enable-auto-model-selection) | **Enable Auto model selection** | n/a — billing rule, not measured token effect | −10% per eligible request when Auto selects the same model | **Turn on where policy allows. Override when needed.** | High, billing-rule dependent |
 | [2](#2-use-a-smaller-model-for-routine-tasks) | **Use a smaller model for routine tasks** | ≈ −67% per call from Sonnet 4.5 to Haiku 4.5 by rate card | **−59% cost and equal-or-better quality on JSDoc task** | **Use smaller models for bounded, repetitive work.** | Medium |
-| [3](#3-trim-unused-mcp-servers) | Trim unused MCP servers | ±~308 tokens/call ≈ **±0.09 cr**; sign depends on slate composition, not tool count | Inconclusive; behavior dominated | Useful for slate quality, not primary cost control | Medium |
+| [3](#3-trim-unused-mcp-servers) | Trim unused MCP servers | In our tool-rich setup, 182 available tools vs 52 built-ins changed the selected slate more than the prompt size; observed delta was only **308 tokens / 0.09 cr** and opposite the naive expectation | Behavior dominated; selected slate changed agent path | Audit for slate quality, not primarily for cost | Medium |
 | [4](#4-shrink-your-always-on-instructions) | Shrink always-on instructions | −320 tokens/call ≈ **−0.10 cr** | Net **+13.9%** cost in this run | Do not shrink useful guidance for cost | Medium-low |
-| [5](#5-scope-context-with-applyto-globs) | Scope context with `applyTo:` globs | Observed −509 tokens/call, but likely artifact | +82% cost in this run | Do not assume this reduces cost; inspect exports | Medium for tested build |
-| [6](#6-use-ask-mode-for-one-shot-questions) | Use Ask Mode for one-shot questions | −1,178 tokens/call ≈ **−0.35 cr** when both runs cold | No reliable real-world saving observed | Pick mode for task fit, not token saving | Medium-low |
+| [5](#5-scope-context-with-applyto-globs) | Scope context with `applyTo:` globs | No valid prefix-tax result: expected instruction content was absent from the exported prompt in the build tested | Cost A/B not interpretable; premise failed before measurement | Do not sell this as a cost control without export verification | High for tested build, unknown beyond it |
+| [6](#6-use-ask-mode-for-one-shot-questions) | Use Ask Mode for one-shot questions | −1,178 tokens / **−0.35 cr** on a cold first call | In our one-shot test, Ask Mode cost **+44%** because its cache was colder; in a tool-using workload, modes were near-equivalent | Pick mode for UX and behavior, not expected savings | Medium-low |
 
 ---
+
+## What to tell customers
 
 ### Safe guidance
 
@@ -107,7 +122,8 @@ All hello-world prefix-tax numbers below assume Sonnet 4.5.
 - Enable **Auto model selection** where policy allows.
 - Optimize instructions for **clarity and task success**, not raw token count.
 - Keep MCP server lists relevant and well-described so the client's tool-selection slate stays composed of tools you actually want the agent to reach for. Do not position MCP trimming as a major cost lever.
-- Measure real workflows, not just prompt length.
+- Do not assume a lighter-looking mode is materially cheaper; choose the mode that fits the task.
+- Measure real workflows, not just configured prompt length or tool count.
 - Treat token savings and behavioral savings as different things.
 
 ### Avoid these claims
@@ -116,7 +132,9 @@ These claims are too broad or misleading:
 
 - “Shorter instructions always save money.”
 - “Ask Mode is cheaper.”
+- “Ask Mode is a no-tools mode.”
 - “`applyTo:` reduces token cost.”
+- “Fewer configured tools automatically means a cheaper prompt.”
 - “Output formatting is the main cost lever.”
 - “Haiku is better than Sonnet.”
 - “These percentages will generalize to every repo.”
@@ -134,7 +152,7 @@ The better message is:
    It is a low-friction cost lever for eligible requests and reduces organization-wide drift toward always using the most expensive model.
 
 2. **Default routine work to a smaller model.**  
-   Use Haiku 4.5 or GPT-5 mini for bounded, repetitive, easy-to-check tasks such as documentation, boilerplate, simple transformations, and summarization. Escalate to stronger models for debugging, architecture, security-sensitive work, and ambiguous multi-step tasks.
+   Haiku 4.5 delivered the measured win in this report; GPT-5 mini is even cheaper by rate card and is a candidate for the same task class. Use smaller models for bounded, repetitive, easy-to-check tasks such as documentation, boilerplate, simple transformations, and summarization. Escalate to stronger models for debugging, architecture, security-sensitive work, and ambiguous multi-step tasks.
 
 3. **Optimize instructions for behavior, not length.**  
    Do not remove useful repo guidance just to save a few hundred prefix tokens. Instead, remove stale or contradictory instructions and add concise guidance that prevents unnecessary exploration.
@@ -150,8 +168,9 @@ From most reliable to least reliable:
 | 1 | **Choose the right model** | Biggest predictable impact. |
 | 2 | **Avoid unnecessary agent iterations** | Biggest behavioral impact. |
 | 3 | **Keep context useful and cacheable** | More important than making it tiny. |
-| 4 | **Trim irrelevant tool/instruction prefix** | Real but usually small. |
-| 5 | **Format output tersely** | Useful for UX; usually not the main cost lever. |
+| 4 | **Improve what actually reaches the model** | Better than merely shrinking configured context or tool count. |
+| 5 | **Trim truly irrelevant prefix** | Real but usually small once caching and tool budgeting are in play. |
+| 6 | **Format output tersely** | Useful for UX; usually not the main cost lever. |
 
 ---
 
@@ -164,8 +183,8 @@ From most reliable to least reliable:
 | Simple code transformations | Smaller model, escalate if needed | Cost-efficient and easy to check |
 | Debugging failing tests | Sonnet / stronger model | Reasoning-heavy |
 | Security-sensitive code review | Stronger model | Error cost is high |
-| Multi-file architecture change | Stronger model or Auto | Planning and consistency matter |
-| One-shot explanation | Ask Mode | UX fit, not primarily cost |
+| Multi-file architecture change | Stronger model, or Auto if it selects one | Planning and consistency matter |
+| One-shot explanation / conversational Q&A | Ask Mode | UX and interaction fit; not a cost lever |
 | Autonomous edits | Agent Mode | Workflow fit |
 
 ---
@@ -350,7 +369,12 @@ Do not:
 
 Audit MCP servers for **slate quality**, not for token cost.
 
-In any tool-rich VS Code Copilot Chat setup the prompt-size effect of trimming is small or zero, because the client already caps the slate and routes large catalogs through `activate_*` lazy expansion. The real risk of an unaudited MCP setup isn't tokens — it's that bad or noisy tools displace good ones from the slate, and the agent picks the wrong one.
+In any tool-rich VS Code Copilot Chat setup, the prompt-size effect of trimming is small or zero — the client already caps the slate and routes large catalogs through lazy router tools. The real risks of an unaudited MCP setup are downstream:
+
+- **Wrong-tool risk:** noisy or duplicate tools can displace better tools from the slate, and the agent picks the wrong one.
+- **Expansion overhead:** when the right tool isn't in the slate, the agent has to call a router to expand a group before it can use it. That's an extra LLM round-trip, plus a permanent bump in prefix size for the rest of the session.
+
+Both of these cost more than the prefix tokens you'd save by trimming.
 
 Other IDEs and surfaces likely behave differently. Always inspect the export.
 
@@ -458,65 +482,32 @@ Keep useful instructions even if they add a few hundred prefix tokens. Useful ca
 
 ### What this technique is supposed to do
 
-Custom instruction files (`.github/instructions/*.instructions.md` in VS Code Copilot Chat) can carry an `applyTo:` front-matter glob. The intended behaviour:
-
-- A file with `applyTo: "src/frontend/**"` is meant to apply only when the agent is working on files matching that glob.
-- Files whose glob does not match the current task should be **excluded** from the agent's working set — and, critically, from the prompt that gets billed.
-
-The cost claim being tested: scoping instruction files with `applyTo:` reduces tokens per call, because excluded files don't ride along in the system prompt.
+Custom instruction files in VS Code Copilot Chat (`.github/instructions/*.instructions.md`) carry an `applyTo:` front-matter glob. The intent is that a file with `applyTo: "src/frontend/**"` should only apply when the agent works on files matching that glob — and, critically, that excluded files don't get billed because they don't enter the prompt.
 
 ### What we wanted to measure
 
-Two questions, in this order:
+Two questions, in order:
 
-1. **Does the mechanism exist?** When `applyTo:` says a file should be excluded, is that file's content actually absent from the exported prompt?
-2. **If so, how much does it save?** Net cost difference per call between a "scoped" and "unscoped" configuration on a real task.
+1. **Does the mechanism exist?** When `applyTo:` excludes a file, is that file's content actually absent from the exported prompt?
+2. **If so, how much does it save** per call?
 
-The cost question only matters if the answer to the first question is yes.
+The cost question only matters if the answer to the first is yes.
 
-### Hello world: minimal A/B
+### What we found
 
-We observed **−509 tokens per call** on the first primary call, approximately **−0.15 cr/call** at Sonnet 4.5 input rates.
+It isn't. We placed instruction files containing unique marker strings into the project, then exported the raw chat and grepped for those markers. **The markers never appeared at all** — not even from the file whose glob *did* match the task. The instruction file contents weren't in the prompt to begin with.
 
-But this appears to be an artifact, not a reliable saving mechanism — the clean test below shows there is no gating mechanism for the saving to come from.
-
-### Real workload: JSDoc task
-
-Net cost was **+82%** for the supposedly scoped condition.
-
-Inspection of the raw exports showed the underlying mechanism does not behave as a token gate at all in this build — see "How we verified the mechanism" below.
-
-Therefore, in this environment, `applyTo:` should not be treated as a reliable token-cost control.
-
-### What this does and does not prove
-
-This does not prove that `applyTo:` has no value as an authoring or routing convention.
-
-It does suggest:
-
-- Do not assume scoped instructions reduce token cost.
-- Do not rely on `applyTo:` as a billing-control mechanism without export inspection.
-- Verify the actual prompt before claiming savings.
-
-### How we verified the mechanism
-
-We placed two instruction files in the project, each containing a unique marker string, and gave each one an `applyTo:` glob that did not match the JSDoc task path. Both files should have been excluded from the working set.
-
-We then ran the agent, exported the chat, and grepped the exported system prompt for the two marker strings.
-
-Neither marker appeared anywhere in the export — not even from the file whose glob did overlap the task path. The instruction file contents were not in the prompt at all, gated or otherwise. With no contents in the prompt, there is nothing for `applyTo:` to gate, and the −509 token delta we observed earlier has no causal mechanism behind it.
+A naive cost A/B did show a small token delta (a few hundred tokens per call), but with no content present there's no mechanism for that delta to come from. It's noise.
 
 ### Takeaway
 
-Do not assume `applyTo:` reduces token cost.
+In the build we tested, `applyTo:` is not a reliable token-cost control — the file contents the user expects it to gate aren't in the prompt to begin with.
 
-Verify any "scope your context" claim by exporting a real chat and inspecting whether the supposedly excluded content appears in the prompt.
+`applyTo:` may still be useful as an authoring or routing convention, but don't sell it as a way to reduce per-call cost.
 
-The deeper methodology lesson:
+The deeper lesson:
 
-> This test would have been a "skip — premise is wrong" verdict 30 minutes after the first export, with no A/B cost run needed at all.
->
-> Always verify the mechanism exists before measuring its effect.
+> Always verify the mechanism exists before measuring its effect. This test would have been a "skip — premise is wrong" verdict 30 minutes after the first export, with no A/B cost run needed at all.
 
 ---
 
@@ -656,17 +647,20 @@ They are:
    Give the agent enough context to avoid wrong turns.
 
 3. **Workflow fit**  
-   Use Ask Mode for Q&A and Agent Mode for execution.
+   Choose the mode for the behavior and UX you want, not because you expect a cheaper prompt.
 
 4. **Tool hygiene**  
-   Keep MCP/tool surfaces relevant, not minimal.
+   Keep the active tool slate relevant, not merely small.
 
 5. **Measurement discipline**  
    Compare real exported runs and inspect cache state.
 
+6. **Mechanism verification**  
+   Before optimizing a setting, verify that it actually changes what reaches the model.
+
 The practical message is:
 
-> Do not look for “shorter prompts” as the main cost story. Ensure **right model, right task, right context, fewer iterations**.
+> Do not look for “shorter prompts” as the main cost story. Ensure **right model, right task, right context, right slate, fewer iterations**.
 
 ---
 
