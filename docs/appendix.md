@@ -84,3 +84,13 @@ copilot_all_prompts_*.json
    - Expected tool slate — the tools actually sent to the model, not only the tools configured in the workspace
 10. Check first-call cache hit rate.
 11. If first-call cache hit rate is above 40%, suspect cache pollution and rerun from a colder state.
+
+### Extra checks for `applyTo:` tests
+
+For scoped instruction-file tests, do not infer behavior from token count alone.
+
+1. Add unique sentinel strings to each scoped instruction file.
+2. Export the chat and grep the raw JSON for those sentinels.
+3. Confirm whether the system prompt contains full file contents or only a manifest of file paths and `applyTo` globs.
+4. Count `read_file` calls against `*.instructions.md`.
+5. Treat cost deltas as causal only after the export proves which state occurred: full contents in prompt, manifest-only, or manifest plus a later `read_file`.

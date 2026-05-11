@@ -356,7 +356,7 @@ If not clean, discard and rerun.
 
 ### Trap 4 — Mechanisms that do not behave as assumed
 
-The `applyTo:` test showed that a technique can sound plausible but not operate as a cost gate in the tested product configuration.
+The `applyTo:` test showed that a technique can sound plausible but operate through a different mechanism than the cost story assumes.
 
 The lesson:
 
@@ -366,7 +366,13 @@ The lesson:
 
 Inspect the raw export.
 
-If the content you expect to be gated is either fully present or fully absent regardless of the gating directive, the gating mechanism is not doing what you think. In our `applyTo:` test, the contents were never loaded in the first place — meaning there was nothing to gate, and any token delta we measured was incidental, not causal.
+For scoped instruction files, check three things separately:
+
+- Whether the system prompt contains the scoped file contents.
+- Whether the system prompt contains only a manifest of file paths and `applyTo` globs.
+- Whether the agent actually calls `read_file` on the applicable `*.instructions.md` file.
+
+In our `applyTo:` test, VS Code Copilot Chat inlined a manifest of scoped instruction files, but not their contents. The agent made 144 `read_file` calls and zero on any `*.instructions.md` file, including the files whose globs matched the task. That means the measured prefix delta was not a clean `applyTo:` gating saving; it was mostly a side effect of changing the always-on instruction file.
 
 ---
 

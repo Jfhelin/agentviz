@@ -55,7 +55,7 @@ The other ideas mostly failed for more interesting reasons than “the savings w
 
 - In tool-rich VS Code workspaces, trimming MCP servers after the fact barely changes prompt cost because the client already caps the tool slate and routes overflow tools lazily.
 - Shrinking useful instructions saved a tiny amount of prefix but cost more overall in our run because the agent took an extra step.
-- In the build we tested, `applyTo:` did not expose a token-cost mechanism at all: the instruction-file contents we expected it to gate were not present in the exported prompt.
+- In the build we tested, `applyTo:` worked as a lazy instruction catalog, not an auto-attach cost gate: scoped file contents were not in the exported prompt unless the agent chose to read them.
 - Ask Mode had a slightly smaller cold prefix, but its colder cache made it more expensive than Agent Mode in our one-shot test, and it still used tools when the task called for them.
 
 At Sonnet 4.5 input rates, trimming 1,000 uncached prompt tokens saves roughly **0.3 AI Credits**. But one extra primary model call, unnecessary tool loop, or confused agent path can cost several times more than that.
@@ -70,6 +70,7 @@ Practical guidance:
 
 - Use the cheapest capable model.
 - Keep useful instructions.
+- Keep mandatory guidance always on; use `applyTo:` only for scoped guidance the agent may safely skip.
 - Remove irrelevant tools for hygiene, not as a primary cost lever.
 - Measure real workflows rather than prompt length alone.
 
@@ -109,7 +110,7 @@ All hello-world prefix-tax numbers below assume Sonnet 4.5.
 | [2](#2-use-a-smaller-model-for-routine-tasks) | **Use a smaller model for routine tasks** | ≈ −67% per call from Sonnet 4.5 to Haiku 4.5 by rate card | **−59% cost and equal-or-better quality on JSDoc task** | **Use smaller models for bounded, repetitive work.** | Medium |
 | [3](#3-trim-unused-mcp-servers) | Trim unused MCP servers | In our tool-rich setup, 182 available tools vs 52 built-ins changed the selected slate more than the prompt size; observed delta was only **308 tokens / 0.09 cr** and opposite the naive expectation | Behavior dominated; selected slate changed agent path | Audit for slate quality, not primarily for cost | Medium |
 | [4](#4-shrink-your-always-on-instructions) | Shrink always-on instructions | −320 tokens/call ≈ **−0.10 cr** | Net **+13.9%** cost in this run | Do not shrink useful guidance for cost | Medium-low |
-| [5](#5-scope-context-with-applyto-globs) | Scope context with `applyTo:` globs | No valid prefix-tax result: expected instruction content was absent from the exported prompt in the build tested | Cost A/B not interpretable; premise failed before measurement | Do not sell this as a cost control without export verification | High for tested build, unknown beyond it |
+| [5](#5-scope-context-with-applyto-globs) | Scope context with `applyTo:` globs | No valid auto-attach prefix-tax result: scoped contents were cataloged, not inlined | Cost A/B not interpretable; the agent made 144 `read_file` calls but none on `*.instructions.md` | Use for optional guidance only; verify exported `read_file` behavior before claiming savings | High for tested build, unknown beyond it |
 | [6](#6-use-ask-mode-for-one-shot-questions) | Use Ask Mode for one-shot questions | −1,178 tokens / **−0.35 cr** on a cold first call | In our one-shot test, Ask Mode cost **+44%** because its cache was colder; in a tool-using workload, modes were near-equivalent | Pick mode for UX and behavior, not expected savings | Medium-low |
 
 ---
@@ -122,6 +123,7 @@ All hello-world prefix-tax numbers below assume Sonnet 4.5.
 - Enable **Auto model selection** where policy allows.
 - Optimize instructions for **clarity and task success**, not raw token count.
 - Keep MCP server lists relevant and well-described so the client's tool-selection slate stays composed of tools you actually want the agent to reach for. Do not position MCP trimming as a major cost lever.
+- Treat `applyTo:` instruction files as optional, lazily fetched guidance. Keep mandatory rules in always-on instructions.
 - Do not assume a lighter-looking mode is materially cheaper; choose the mode that fits the task.
 - Measure real workflows, not just configured prompt length or tool count.
 - Treat token savings and behavioral savings as different things.
@@ -133,7 +135,7 @@ These claims are too broad or misleading:
 - “Shorter instructions always save money.”
 - “Ask Mode is cheaper.”
 - “Ask Mode is a no-tools mode.”
-- “`applyTo:` reduces token cost.”
+- “`applyTo:` reliably reduces token cost.”
 - “Fewer configured tools automatically means a cheaper prompt.”
 - “Output formatting is the main cost lever.”
 - “Haiku is better than Sonnet.”
@@ -482,32 +484,42 @@ Keep useful instructions even if they add a few hundred prefix tokens. Useful ca
 
 ### What this technique is supposed to do
 
-Custom instruction files in VS Code Copilot Chat (`.github/instructions/*.instructions.md`) carry an `applyTo:` front-matter glob. The intent is that a file with `applyTo: "src/frontend/**"` should only apply when the agent works on files matching that glob — and, critically, that excluded files don't get billed because they don't enter the prompt.
+Custom instruction files in VS Code Copilot Chat (`.github/instructions/*.instructions.md`) carry an `applyTo:` front-matter glob. The popular framing: a file with `applyTo: "src/frontend/**"` only applies when the agent works on matching files, and non-matching files don't get billed.
 
 ### What we wanted to measure
 
 Two questions, in order:
 
-1. **Does the mechanism exist?** When `applyTo:` excludes a file, is that file's content actually absent from the exported prompt?
-2. **If so, how much does it save** per call?
+1. **How does the mechanism work?** Are scoped contents auto-attached when the glob matches, or only advertised as metadata?
+2. **If content is loaded, how much does it save** compared with keeping the same rules always on?
 
-The cost question only matters if the answer to the first is yes.
+The cost question only matters after the export shows whether scoped contents are auto-attached, cataloged, or lazily fetched.
 
 ### What we found
 
-It isn't. We placed instruction files containing unique marker strings into the project, then exported the raw chat and grepped for those markers. **The markers never appeared at all** — not even from the file whose glob *did* match the task. The instruction file contents weren't in the prompt to begin with.
+The mechanism exists, but not the way the popular framing suggests.
 
-A naive cost A/B did show a small token delta (a few hundred tokens per call), but with no content present there's no mechanism for that delta to come from. It's noise.
+The harness injects a small **catalog** into the system prompt — one entry per scoped instruction file (file path + glob) — and tells the agent: *"if relevant to the current task, call `read_file` to load it. Don't eagerly load all instructions upfront."*
+
+So `applyTo:` is an **opt-in catalog**, not an auto-attach. The agent decides per turn whether the glob matches, whether it's relevant, and whether to spend a `read_file` call to pull the content in. In our test run the agent made 144 `read_file` calls and zero on any `*.instructions.md` file, even with a matching glob. The rules silently never fired because the agent never asked for them.
 
 ### Takeaway
 
-In the build we tested, `applyTo:` is not a reliable token-cost control — the file contents the user expects it to gate aren't in the prompt to begin with.
+`applyTo:` *can* reduce the always-on prefix compared with putting the same rules in `copilot-instructions.md` — scoped contents are not paid on every call.
 
-`applyTo:` may still be useful as an authoring or routing convention, but don't sell it as a way to reduce per-call cost.
+But it is **agent-discretion, not guaranteed application**. The agent has to notice the glob applies, decide it is relevant, and spend a `read_file` call. If the agent never fetches the file, the cost saving comes with missing guidance.
+
+Practical guidance:
+
+- If a rule **must** apply, keep it in `copilot-instructions.md`. You pay the tokens on every call, but you know it fired.
+- If a rule is **nice-to-have when relevant**, scoping it with `applyTo:` can avoid always-on tokens — but expect the agent to skip it sometimes.
+- Verify by exporting a chat and checking whether the `read_file` call on your instruction file actually happened.
 
 The deeper lesson:
 
-> Always verify the mechanism exists before measuring its effect. This test would have been a "skip — premise is wrong" verdict 30 minutes after the first export, with no A/B cost run needed at all.
+> Verify the mechanism end-to-end before claiming a saving. We almost shipped "applyTo: doesn't work" when the truer story is "applyTo: works as a catalog, but the agent has discretion to ignore it."
+
+Caveats: single test run, source-code check limited to the `vscode-copilot-chat` extension repo. Treat as a strong working hypothesis, not a proof.
 
 ---
 
