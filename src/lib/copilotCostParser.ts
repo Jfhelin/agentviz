@@ -85,8 +85,9 @@ function truncate(text: string): string {
 
 function estimateTextTokens(text: string): number {
   if (!text) return 0;
-  // Copilot prompt exports do not include per-message token counts; this is only
-  // for relative context composition, not billing.
+  // Copilot prompt exports do not include per-message token counts; this simplified
+  // 4 chars/token estimate is only for relative context composition, not billing.
+  // Actual counts vary by tokenizer and content type.
   return Math.max(1, Math.ceil(text.length / 4));
 }
 
@@ -100,8 +101,11 @@ function estimateJSONTokens(value: unknown): number {
 
 function getToolName(tool: unknown): string {
   if (!isRecord(tool)) return "tool";
-  const fn = isRecord(tool.function) ? tool.function : null;
-  return String(tool.name || (fn && fn.name) || tool.id || tool.type || "tool");
+  if (typeof tool.name === "string" && tool.name) return tool.name;
+  if (isRecord(tool.function) && typeof tool.function.name === "string" && tool.function.name) return tool.function.name;
+  if (typeof tool.id === "string" && tool.id) return tool.id;
+  if (typeof tool.type === "string" && tool.type) return tool.type;
+  return "tool";
 }
 
 function getTools(request: AnyRecord): unknown[] {
