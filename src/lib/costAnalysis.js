@@ -1,5 +1,11 @@
 import { estimateCost } from "./pricing.js";
 
+var RECOMMIT_GROWTH_MULTIPLIER = 1.5;
+var RECOMMIT_MIN_TOKENS = 2000;
+var CACHE_MISS_MAX_CACHE_READ_RATIO = 0.35;
+var CACHE_MISS_FRESH_SPIKE_MULTIPLIER = 1.5;
+var CACHE_MISS_MIN_FRESH_DELTA = 1000;
+
 function getTokenUsage(event) {
   return event && event.tokenUsage ? event.tokenUsage : null;
 }
@@ -91,9 +97,9 @@ export function buildCostAnalysis(events, metadata) {
     var toolDiff = previousCall ? diffNames(previousCall.toolNames, toolNames) : { added: [], removed: [] };
     var cacheHitRate = usage.cacheHitRate != null ? usage.cacheHitRate : (usage.inputTokens ? cachedInputTokens / Math.max(usage.inputTokens, 1) : 0);
     // Recommit means re-writing previously cached content back into the cache. Treat
-    // cache writes that substantially exceed context growth as recommits: 1.5x filters
-    // out normal rounding/estimation noise, and 2k tokens avoids tiny prompts.
-    var recommitTokens = cacheWriteTokens > Math.max(netNewTokens * 1.5, 2000) ? cacheWriteTokens - netNewTokens : 0;
+    // cache writes that substantially exceed context growth as recommits.
+    var recommitThreshold = Math.max(netNewTokens * RECOMMIT_GROWTH_MULTIPLIER, RECOMMIT_MIN_TOKENS);
+    var recommitTokens = cacheWriteTokens > recommitThreshold ? cacheWriteTokens - netNewTokens : 0;
     peakContext = Math.max(peakContext, contextBreakdown.total || usage.inputTokens || 0);
 
     var call = {
@@ -121,11 +127,15 @@ export function buildCostAnalysis(events, metadata) {
       var previousUsage = previousCall.tokenUsage || {};
       var previousFresh = previousCall.freshInputTokens || 0;
       var previousCacheRead = previousUsage.cacheRead || 0;
-      // Flag large same-model cache drops paired with fresh-token spikes. These starting
-      // thresholds are intentionally conservative and may be tuned with real prompt data.
+      // Flag large same-model cache drops paired with fresh-token spikes. These named
+      // thresholds are conservative starting points that can be tuned with real prompt data.
+      var freshSpikeThreshold = Math.max(
+        previousFresh * CACHE_MISS_FRESH_SPIKE_MULTIPLIER,
+        previousFresh + CACHE_MISS_MIN_FRESH_DELTA,
+      );
       var likelyMiss = previousCacheRead > 0
-        && cachedInputTokens < previousCacheRead * 0.35
-        && freshInputTokens > Math.max(previousFresh * 1.5, previousFresh + 1000);
+        && cachedInputTokens < previousCacheRead * CACHE_MISS_MAX_CACHE_READ_RATIO
+        && freshInputTokens > freshSpikeThreshold;
       if (likelyMiss) {
         cacheMisses.push({
           callIndex: call.index,

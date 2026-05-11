@@ -85,8 +85,8 @@ function truncate(text: string): string {
 
 function estimateTextTokens(text: string): number {
   if (!text) return 0;
-  // Copilot prompt exports do not include per-message token counts; this simplified
-  // 4 chars/token estimate only sizes the context-composition visualization.
+  // Copilot prompt exports do not include per-message token counts. This is a rough
+  // heuristic: the 4 chars/token estimate only sizes the context-composition visualization.
   // Billing totals always come from response.usage, and actual per-message counts
   // vary by tokenizer and content type.
   return Math.max(1, Math.ceil(text.length / 4));
