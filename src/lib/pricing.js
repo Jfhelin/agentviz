@@ -14,6 +14,12 @@ var PRICE_TABLE = [
   { match: "claude-3-5-sonnet", input:  3.00, output: 15.00 },
   { match: "claude-3-5-haiku",  input:  0.80, output:  4.00 },
   // OpenAI / Copilot models
+  { match: "gpt-5-mini",        input:  0.25, output:  2.00 },
+  { match: "gpt-5.5",           input:  1.25, output: 10.00 },
+  { match: "gpt-5.4",           input:  1.25, output: 10.00 },
+  { match: "gpt-5.3",           input:  1.25, output: 10.00 },
+  { match: "gpt-5.2",           input:  1.25, output: 10.00 },
+  { match: "gpt-5",             input:  1.25, output: 10.00 },
   { match: "gpt-4.1",           input:  2.00, output:  8.00 },
   { match: "gpt-4o-mini",       input:  0.15, output:  0.60 },
   { match: "gpt-4o",            input:  2.50, output: 10.00 },
@@ -29,9 +35,13 @@ var PRICE_TABLE = [
 // Fallback for unrecognized Claude model variants (new releases, etc.)
 var DEFAULT_CLAUDE_PRICE = { input: 3.00, output: 15.00 };
 
+function normalizeModelName(modelName) {
+  return String(modelName).toLowerCase().replace(/[^a-z0-9.]+/g, "-");
+}
+
 function lookupPrice(modelName) {
   if (!modelName) return null;
-  var lower = modelName.toLowerCase();
+  var lower = normalizeModelName(modelName);
   for (var i = 0; i < PRICE_TABLE.length; i++) {
     if (lower.includes(PRICE_TABLE[i].match)) return PRICE_TABLE[i];
   }

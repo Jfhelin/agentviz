@@ -27,6 +27,18 @@ describe("estimateCost", function () {
     // 1M * $3.00/M + 100K * $15.00/M = $3.00 + $1.50 = $4.50
     expect(cost).toBeCloseTo(4.50, 2);
   });
+
+  it("prices spaced Claude model labels", function () {
+    var cost = estimateCost({ inputTokens: 1000000, outputTokens: 100000 }, "Claude Opus 4.6");
+    // 1M * $15.00/M + 100K * $75.00/M = $15.00 + $7.50 = $22.50
+    expect(cost).toBeCloseTo(22.50, 2);
+  });
+
+  it("prices GPT 5.x Copilot aliases", function () {
+    var cost = estimateCost({ inputTokens: 1000000, outputTokens: 100000 }, "gpt-5.4");
+    // 1M * $1.25/M + 100K * $10.00/M = $1.25 + $1.00 = $2.25
+    expect(cost).toBeCloseTo(2.25, 2);
+  });
 });
 
 describe("estimateMultiModelCost", function () {
@@ -95,6 +107,7 @@ describe("formatCost", function () {
 describe("hasModelPricing", function () {
   it("returns true for known Claude models", function () {
     expect(hasModelPricing("claude-sonnet-4-20250514")).toBe(true);
+    expect(hasModelPricing("Claude Opus 4.6")).toBe(true);
     expect(hasModelPricing("claude-3-5-haiku-20241022")).toBe(true);
     expect(hasModelPricing("claude-opus-4")).toBe(true);
   });
@@ -104,6 +117,10 @@ describe("hasModelPricing", function () {
   });
 
   it("returns true for known OpenAI/Copilot models", function () {
+    expect(hasModelPricing("gpt-5.5")).toBe(true);
+    expect(hasModelPricing("gpt-5.4")).toBe(true);
+    expect(hasModelPricing("gpt-5.3-codex")).toBe(true);
+    expect(hasModelPricing("gpt-5-mini")).toBe(true);
     expect(hasModelPricing("gpt-4o")).toBe(true);
     expect(hasModelPricing("gpt-4.1")).toBe(true);
     expect(hasModelPricing("o4-mini")).toBe(true);
