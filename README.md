@@ -4,7 +4,7 @@
 
 **See what your AI agents actually do.**
 
-Drop a Claude Code, VS Code Copilot Chat, Copilot CLI, or ATIF / Harbor session file and explore the agent's reasoning, tool calls, turn flow, and output through replay, tracks, waterfall, graph, and stats views. Or run it from the CLI for a live view that updates as your session unfolds.
+Drop a Claude Code, VS Code Copilot Chat, Copilot CLI, Copilot prompt export, or ATIF / Harbor session file and explore the agent's reasoning, tool calls, turn flow, output, token spend, and context buildup through replay, tracks, waterfall, graph, stats, and cost views. Or run it from the CLI for a live view that updates as your session unfolds.
 
 [![CI](https://github.com/jayparikh/agentviz/actions/workflows/ci.yml/badge.svg)](https://github.com/jayparikh/agentviz/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/agentviz?color=blue&logo=npm)](https://www.npmjs.com/package/agentviz)
@@ -16,7 +16,7 @@ Drop a Claude Code, VS Code Copilot Chat, Copilot CLI, or ATIF / Harbor session 
 
 <img src="docs/screenshots/session-hero.png" alt="AGENTVIZ session views" width="800" />
 
-*Move between replay, tracks, waterfall, graph, and stats views to inspect the same session from different angles.*
+*Move between replay, tracks, waterfall, graph, stats, and cost views to inspect the same session from different angles.*
 
 </div>
 
@@ -30,6 +30,7 @@ AI coding agents (Claude Code, VS Code Copilot Chat, Copilot CLI, ATIF / Harbor,
 - **Trace** decision flow in a graph view with expandable turn and tool-call structure
 - **Visualize** timing and concurrency in tracks and waterfall timelines
 - **Analyze** tool usage patterns, error rates, and model behavior at a glance
+- **Inspect cost** with per-call token spend, cache reads/writes, context composition, and cache-miss warnings
 - **Debug** failures by jumping directly between errors with one keystroke
 - **Stream live** as a session unfolds -- the view updates in real time
 - **Discover sessions** automatically from the Copilot CLI and VS Code session stores
@@ -241,6 +242,10 @@ A **Tools &amp; Skills** panel surfaces every skill, instruction file, custom ag
 <img src="docs/screenshots/stats-view.png" alt="Stats View" width="800" />
 </div>
 
+### Cost View
+
+Per-call token spend, cache read/write usage, context composition, and cumulative cost for sessions with token usage. Copilot prompt exports include prompt context breakdowns so the view can highlight fresh input spikes, cache misses, tool schema growth, and which parts of the prompt are filling the context window.
+
 ### Coach View
 
 AI-powered session coaching available directly from any session. The coach reads your autonomy metrics, project config (`.github/copilot-instructions.md`, MCP servers, skills), and session patterns to produce evidence-backed recommendations for prompts, tooling, and workflow. Click **Analyze** to run, then accept or ignore each draft recommendation. Requires the CLI server -- run via `node bin/agentviz.js` or the MCP tool.
@@ -256,7 +261,7 @@ AI-powered session coaching available directly from any session. The coach reads
 | **Live Streaming** | CLI mode tails a session file via SSE. View updates in real time as events arrive, including newline-delayed JSONL writes from Claude Code. |
 | **Payload Inspector** | Replay and waterfall inspectors show readable JSON or text previews with key summaries, counts, copy, and expand controls. |
 | **Graph View** | Directed turn-flow graph with fork/join DAG for parallel subagents, expandable tool-call nodes, pan/zoom, and playback-aware highlighting. |
-| **Token and Cost Tracking** | Per-turn token usage with estimated USD cost for Claude 3/4 models. |
+| **Token and Cost Tracking** | Per-turn and per-call token usage with estimated USD cost for Claude and OpenAI/Copilot models. |
 | **Search** | Full-text search across events, tools, and agents. Matches highlighted in real time. |
 | **Command Palette** | `Cmd+K` fuzzy search to jump to any turn, event, or view instantly. |
 | **Error Navigation** | Auto-detects errors from flags and text patterns. Jump with `E` / `Shift+E`. |
@@ -304,7 +309,7 @@ Open the drawer with `Cmd+Shift+K` (or via the command palette). Questions are r
 |-----|--------|
 | `Space` | Play / Pause |
 | `Left` / `Right` | Seek 2 seconds |
-| `1` / `2` / `3` / `4` / `5` / `6` | Switch view (Replay / Tracks / Waterfall / Graph / Stats / Coach) |
+| `1` / `2` / `3` / `4` / `5` / `6` / `7` | Switch view (Replay / Tracks / Waterfall / Graph / Stats / Cost / Coach) |
 | `/` | Focus search |
 | `E` / `Shift+E` | Next / Previous error |
 | `Cmd+K` | Command palette |
@@ -321,6 +326,7 @@ Modals, drawers, and overlay panels render keyboard hints with a shared `<kbd>` 
 | Claude Code | `.jsonl` from `~/.claude/projects/` | Default fallback |
 | VS Code Copilot Chat | `.json` or `.jsonl` from VS Code `workspaceStorage/*/chatSessions/` | `version` + `requests` + `sessionId` fields |
 | Copilot CLI | `.jsonl` event traces | `session.start` with `producer: "copilot-agent"` |
+| Copilot prompt export | `.json` prompt export arrays or wrappers | Prompt calls with `request.messages` and `response.usage` |
 | ATIF / Harbor | `.json` trajectory from the Harbor framework | Top-level `schema_version: "ATIF-v1.6"` with `agent` and `steps` |
 
 ATIF (Agent Trajectory Interchange Format) sessions are loaded via drag-and-drop, the `--file` flag, or `?manifest=` URLs. Auto-discovery is not wired up because Harbor has no canonical output directory.
@@ -378,6 +384,7 @@ src/
     parseSession.ts      # Auto-detect format router
     parser.ts            # Claude Code JSONL parser
     copilotCliParser.ts  # Copilot CLI JSONL parser
+    copilotCostParser.ts # Copilot prompt export JSON parser for token/cost analysis
     vscodeSessionParser.ts # VS Code Copilot Chat JSON parser
     atifParser.ts        # ATIF / Harbor trajectory JSON parser
     dataInspector.js     # Payload summary and preview helpers for inspector panels
@@ -400,7 +407,8 @@ src/
     diffUtils.js         # Diff detection and Myers line diff algorithm
     waterfall.ts         # Waterfall view helpers: item building, stats, layout
     graphLayout.js       # ELKjs graph builder, fork/join DAG for parallel agents, layout merger
-    pricing.js           # Claude model pricing table and cost estimation
+    costAnalysis.js      # Per-call cost, context, cache-miss, and token aggregation helpers
+    pricing.js           # Claude and OpenAI/Copilot model pricing table and cost estimation
     exportHtml.js        # Self-contained HTML export for single sessions and comparisons
     formatTime.js        # Duration and date formatting utilities
     landingSessions.js   # Shared landing browser labels, filters, and format options
@@ -415,6 +423,7 @@ src/
     WaterfallView.jsx    # Tool execution waterfall with nesting and inspector
     GraphView.jsx        # Interactive turn graph with expandable tool-call nodes (lazy-loaded)
     StatsView.jsx        # Aggregate metrics, tool ranking, turn summary
+    CostView.jsx         # Token spend, cache, and context-composition analysis
     CompareView.jsx      # Side-by-side session comparison (Scorecard + Tools tabs)
     CommandPalette.jsx   # Cmd+K fuzzy search overlay
     Timeline.jsx         # Scrubable playback bar with event markers

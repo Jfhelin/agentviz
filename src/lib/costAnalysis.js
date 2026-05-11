@@ -1,3 +1,4 @@
+import { computeCacheHitRate, computeEffectiveInputTokens } from "./cacheMetrics";
 import { estimateCost } from "./pricing.js";
 
 var RECOMMIT_GROWTH_MULTIPLIER = 1.5;
@@ -12,7 +13,7 @@ function getTokenUsage(event) {
 
 function effectiveFreshInput(usage) {
   if (!usage) return 0;
-  return Math.max((usage.inputTokens || 0) - (usage.cacheRead || 0), 0);
+  return computeEffectiveInputTokens(usage.inputTokens || 0, usage.cacheRead || 0);
 }
 
 function getCostPrompt(event) {
@@ -95,7 +96,9 @@ export function buildCostAnalysis(events, metadata) {
     var netNewTokens = previousCall ? Math.max(contextBreakdown.total - previousCall.contextBreakdown.total, 0) : contextBreakdown.total;
     var toolNames = getToolNames(event);
     var toolDiff = previousCall ? diffNames(previousCall.toolNames, toolNames) : { added: [], removed: [] };
-    var cacheHitRate = usage.cacheHitRate != null ? usage.cacheHitRate : (usage.inputTokens ? cachedInputTokens / Math.max(usage.inputTokens, 1) : 0);
+    var cacheHitRate = usage.cacheHitRate != null
+      ? usage.cacheHitRate
+      : computeCacheHitRate(usage.inputTokens || 0, cacheWriteTokens, cachedInputTokens) || 0;
     // Recommit means re-writing previously cached content back into the cache. Treat
     // cache writes that substantially exceed context growth as recommits.
     var recommitThreshold = Math.max(netNewTokens * RECOMMIT_GROWTH_MULTIPLIER, RECOMMIT_MIN_TOKENS);
@@ -154,7 +157,7 @@ export function buildCostAnalysis(events, metadata) {
     previousByModel[model] = call;
   }
 
-  var cacheDenom = totals.inputTokens + totals.cacheWrite;
+  var cacheHitRate = computeCacheHitRate(totals.inputTokens, totals.cacheWrite, totals.cacheRead) || 0;
   return {
     calls: calls,
     totals: {
@@ -162,9 +165,9 @@ export function buildCostAnalysis(events, metadata) {
       outputTokens: totals.outputTokens,
       cacheRead: totals.cacheRead,
       cacheWrite: totals.cacheWrite,
-      freshInputTokens: Math.max(totals.inputTokens - totals.cacheRead, 0),
+      freshInputTokens: computeEffectiveInputTokens(totals.inputTokens, totals.cacheRead),
       cost: totalCost,
-      cacheHitRate: cacheDenom > 0 ? totals.cacheRead / cacheDenom : 0,
+      cacheHitRate: cacheHitRate,
       peakContext: peakContext,
     },
     cacheMisses: cacheMisses,

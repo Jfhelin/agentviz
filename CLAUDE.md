@@ -1,6 +1,6 @@
 # AGENTVIZ
 
-Session replay visualizer for AI agent workflows. Renders Claude Code, VS Code Copilot Chat, Copilot CLI, and ATIF / Harbor session logs as interactive timelines, with auto-detection of file format.
+Session replay visualizer for AI agent workflows. Renders Claude Code, VS Code Copilot Chat, Copilot CLI, Copilot prompt exports, and ATIF / Harbor session logs as interactive timelines, with auto-detection of file format.
 
 ## Stack
 - React 18 + Vite 6
@@ -33,6 +33,7 @@ src/
     constants.js       # SAMPLE_EVENTS data for demo mode
     parser.ts          # parseClaudeCodeJSONL() - Claude Code JSONL parser
     copilotCliParser.ts # parseCopilotCliJSONL() - Copilot CLI JSONL parser
+    copilotCostParser.ts # parseCopilotPromptsJSON() - Copilot prompt export parser for token/cost analysis
     vscodeSessionParser.ts # parseVSCodeChatJSON() - VS Code Copilot Chat JSON parser
     atifParser.ts       # parseAtifJSON() - ATIF / Harbor trajectory JSON parser (schema_version ATIF-v1.6)
     liveSessionParser.ts # Incremental live JSONL parser for appended session text
@@ -53,7 +54,8 @@ src/
     diffUtils.js       # Diff detection (isFileEditEvent) + Myers line diff algorithm
     waterfall.ts       # Waterfall view helpers: item building, stats, layout, windowing
     graphLayout.js     # Graph view helpers: ELKjs DAG builder, layout runner, position merger
-    pricing.js         # Claude model pricing table and cost estimation
+    costAnalysis.js    # Per-call cost, context, cache-miss, and token aggregation helpers
+    pricing.js         # Claude and OpenAI/Copilot model pricing table and cost estimation
     exportHtml.js      # Self-contained HTML export for single sessions and comparisons
     dataInspector.js   # Payload summary and preview helpers for inspector panels
     formatTime.js      # Duration and date formatting utilities
@@ -71,6 +73,7 @@ src/
     WaterfallView.jsx  # Tool execution waterfall with nesting, inspector sidebar
     GraphView.jsx      # Interactive DAG of turns/tool calls with ELKjs layout, pan/zoom, animations
     StatsView.jsx      # Aggregate metrics, tool ranking, turn summary
+    CostView.jsx       # Token spend, cache, and context-composition analysis
     CompareView.jsx    # Side-by-side session comparison: Scorecard + Tools tabs
     CommandPalette.jsx # Cmd+K fuzzy search overlay (events, turns, views)
     DiffViewer.jsx     # Inline unified diff view for file-editing tool calls
@@ -111,7 +114,7 @@ Turn (groups events by user-initiated conversation rounds):
 
 Session metadata (aggregate stats):
 ```
-{ totalEvents, totalTurns, totalToolCalls, errorCount, duration, models, primaryModel, tokenUsage }
+{ totalEvents, totalTurns, totalToolCalls, errorCount, duration, models, primaryModel, tokenUsage, totalCost? }
 ```
 
 Parser returns: `{ events, turns, metadata }` or null

@@ -90,6 +90,12 @@ describe("useKeyboardShortcuts helpers", function () {
     expect(handleKeyboardShortcut(createEvent({ key: "5" }), options)).toBe(true);
     expect(options.onSetView).toHaveBeenCalledWith("stats");
 
+    expect(handleKeyboardShortcut(createEvent({ key: "6" }), options)).toBe(true);
+    expect(options.onSetView).toHaveBeenCalledWith("cost");
+
+    expect(handleKeyboardShortcut(createEvent({ key: "7" }), options)).toBe(true);
+    expect(options.onSetView).toHaveBeenCalledWith("coach");
+
     expect(handleKeyboardShortcut(createEvent({ key: "E" }), options)).toBe(true);
     expect(options.onJumpToError).toHaveBeenCalledWith("prev");
   });

@@ -101,7 +101,6 @@ function renderActiveView(activeView, props) {
         <CostView
           events={props.filteredEvents}
           metadata={props.session.metadata}
-          turns={props.session.turns}
         />
       </React.Suspense>
     );
