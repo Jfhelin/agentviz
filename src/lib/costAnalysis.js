@@ -90,8 +90,9 @@ export function buildCostAnalysis(events, metadata) {
     var toolNames = getToolNames(event);
     var toolDiff = previousCall ? diffNames(previousCall.toolNames, toolNames) : { added: [], removed: [] };
     var cacheHitRate = usage.cacheHitRate != null ? usage.cacheHitRate : (usage.inputTokens ? cachedInputTokens / Math.max(usage.inputTokens, 1) : 0);
-    // Treat cache writes that substantially exceed context growth as recommits:
-    // 1.5x filters out normal rounding/estimation noise, and 2k tokens avoids tiny prompts.
+    // Recommit means re-writing previously cached content back into the cache. Treat
+    // cache writes that substantially exceed context growth as recommits: 1.5x filters
+    // out normal rounding/estimation noise, and 2k tokens avoids tiny prompts.
     var recommitTokens = cacheWriteTokens > Math.max(netNewTokens * 1.5, 2000) ? cacheWriteTokens - netNewTokens : 0;
     peakContext = Math.max(peakContext, contextBreakdown.total || usage.inputTokens || 0);
 
@@ -120,8 +121,8 @@ export function buildCostAnalysis(events, metadata) {
       var previousUsage = previousCall.tokenUsage || {};
       var previousFresh = previousCall.freshInputTokens || 0;
       var previousCacheRead = previousUsage.cacheRead || 0;
-      // Flag large same-model cache drops paired with fresh-token spikes. The thresholds
-      // are intentionally conservative so routine prompt growth does not look like a miss.
+      // Flag large same-model cache drops paired with fresh-token spikes. These starting
+      // thresholds are intentionally conservative and may be tuned with real prompt data.
       var likelyMiss = previousCacheRead > 0
         && cachedInputTokens < previousCacheRead * 0.35
         && freshInputTokens > Math.max(previousFresh * 1.5, previousFresh + 1000);

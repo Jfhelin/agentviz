@@ -3,8 +3,8 @@ import { theme, alpha } from "../lib/theme.js";
 import { buildCostAnalysis, formatTokens } from "../lib/costAnalysis.js";
 import { formatCost } from "../lib/pricing.js";
 
-var SUMMARY_GRID_COLUMNS = "1.15fr repeat(4, minmax(150px, 0.6fr))";
-var MAIN_GRID_COLUMNS = "minmax(310px, 0.9fr) minmax(360px, 1fr) minmax(360px, 1fr)";
+var SUMMARY_GRID_5_COLUMNS = "1.15fr repeat(4, minmax(150px, 0.6fr))";
+var MAIN_GRID_3_COLUMNS = "minmax(310px, 0.9fr) minmax(360px, 1fr) minmax(360px, 1fr)";
 
 function panelStyle() {
   return {
@@ -202,7 +202,7 @@ export default function CostView({ events, metadata }) {
 
   return (
     <div style={{ padding: 18, display: "flex", flexDirection: "column", gap: 14, minHeight: 0, height: "100%", overflow: "hidden" }}>
-      <div style={{ display: "grid", gridTemplateColumns: SUMMARY_GRID_COLUMNS, gap: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: SUMMARY_GRID_5_COLUMNS, gap: 12 }}>
         <SummaryCard label="Cost view" value="Token spend & context buildup" sub="Full context, net-new tokens, and billed API usage." />
         <SummaryCard label="Total spend" value={formatCost(totals.cost)} sub={cachePercent + "% cached input"} />
         <SummaryCard label="Input tokens" value={formatTokens(totals.inputTokens)} sub={formatTokens(totals.freshInputTokens) + " fresh · " + formatTokens(totals.cacheRead) + " cached"} />
@@ -210,7 +210,7 @@ export default function CostView({ events, metadata }) {
         <SummaryCard label="Cache misses" value={analysis.cacheMisses.length} sub="unexpected fresh-token spikes" color={analysis.cacheMisses.length ? theme.semantic.warning : theme.text.primary} />
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: MAIN_GRID_COLUMNS, gap: 14, minHeight: 0, flex: 1 }}>
+      <div style={{ display: "grid", gridTemplateColumns: MAIN_GRID_3_COLUMNS, gap: 14, minHeight: 0, flex: 1 }}>
         <Panel label="Prompt & steps" title="Calls in session order" aside="expandable">
           <div style={{ padding: 10, overflow: "auto", display: "flex", flexDirection: "column", gap: 9 }}>
             {calls.map(function (call) { return <CallRow key={call.index} call={call} miss={missByIndex.has(call.index)} />; })}
