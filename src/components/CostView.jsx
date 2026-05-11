@@ -90,7 +90,7 @@ function CallRow({ call, miss }) {
     }}>
       <div style={{ width: 28, height: 28, borderRadius: theme.radius.lg, background: theme.bg.raised, color: theme.text.secondary, display: "grid", placeItems: "center", fontFamily: theme.font.mono, fontSize: theme.fontSize.sm }}>{String(call.index + 1).padStart(2, "0")}</div>
       <div style={{ minWidth: 0 }}>
-        <div style={{ color: theme.text.primary, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{call.title}</div>
+        <div title={call.title} style={{ color: theme.text.primary, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{call.title}</div>
         <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 7 }}>
           <Chip>{call.model}</Chip>
           <Chip>{formatTokens(call.contextBreakdown.total || call.tokenUsage.inputTokens)} ctx</Chip>
@@ -137,12 +137,18 @@ function CostBars({ calls, cacheMisses }) {
 function CacheMissAnnotation({ miss }) {
   var changes = [];
   if (miss && miss.toolDiff) {
-    if (miss.toolDiff.added && miss.toolDiff.added.length) changes.push("+" + miss.toolDiff.added.slice(0, 3).join(", +"));
-    if (miss.toolDiff.removed && miss.toolDiff.removed.length) changes.push("-" + miss.toolDiff.removed.slice(0, 3).join(", -"));
+    if (miss.toolDiff.added && miss.toolDiff.added.length) changes.push("added " + miss.toolDiff.added.slice(0, 3).join(", "));
+    if (miss.toolDiff.removed && miss.toolDiff.removed.length) changes.push("removed " + miss.toolDiff.removed.slice(0, 3).join(", "));
   }
+  var fromTokens = formatTokens(miss.previousFreshInputTokens);
+  var toTokens = formatTokens(miss.freshInputTokens);
+  var toolText = changes.length ? " Tool diff: " + changes.join("; ") + "." : "";
+  var message = "Unexpected cache miss on call #" + (miss.callIndex + 1) + ". Fresh input jumped from " + fromTokens + " to " + toTokens + "." + toolText;
   return (
-    <div style={{ border: "1px solid " + alpha(theme.semantic.warning, 0.45), background: alpha(theme.semantic.warning, 0.08), borderRadius: theme.radius.lg, padding: "9px 10px", color: theme.semantic.warning, fontWeight: 700, lineHeight: 1.35 }}>
-      Unexpected cache miss on call #{miss.callIndex + 1}. Fresh input jumped from {formatTokens(miss.previousFreshInputTokens)} to {formatTokens(miss.freshInputTokens)}{changes.length ? "; tool diff " + changes.join(" ") : ""}.
+    <div aria-label={message} style={{ border: "1px solid " + alpha(theme.semantic.warning, 0.45), background: alpha(theme.semantic.warning, 0.08), borderRadius: theme.radius.lg, padding: "9px 10px", color: theme.semantic.warning, fontWeight: 700, lineHeight: 1.35 }}>
+      <span>Unexpected cache miss on call #{miss.callIndex + 1}.</span>{" "}
+      <span>Fresh input jumped from {fromTokens} to {toTokens}.</span>
+      {toolText && <span>{toolText}</span>}
     </div>
   );
 }

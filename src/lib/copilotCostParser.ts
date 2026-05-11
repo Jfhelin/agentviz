@@ -85,6 +85,8 @@ function truncate(text: string): string {
 
 function estimateTextTokens(text: string): number {
   if (!text) return 0;
+  // Copilot prompt exports do not include per-message token counts; this is only
+  // for relative context composition, not billing.
   return Math.max(1, Math.ceil(text.length / 4));
 }
 
@@ -190,13 +192,9 @@ function buildContextBreakdown(messages: unknown[], tools: unknown[]): AnyRecord
     total: 0,
   };
 
-  let lastUserIndex = -1;
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    if (getMessageRole(messages[index]) === "user") {
-      lastUserIndex = index;
-      break;
-    }
-  }
+  const lastUserIndex = messages.reduce(function (lastIndex, message, index) {
+    return getMessageRole(message) === "user" ? index : lastIndex;
+  }, -1);
 
   for (let index = 0; index < messages.length; index += 1) {
     const role = getMessageRole(messages[index]);
