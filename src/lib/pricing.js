@@ -13,6 +13,13 @@ var PRICE_TABLE = [
   // Claude 3.5 family
   { match: "claude-3-5-sonnet", input:  3.00, output: 15.00 },
   { match: "claude-3-5-haiku",  input:  0.80, output:  4.00 },
+  // OpenAI / Copilot models
+  { match: "gpt-4.1",           input:  2.00, output:  8.00 },
+  { match: "gpt-4o-mini",       input:  0.15, output:  0.60 },
+  { match: "gpt-4o",            input:  2.50, output: 10.00 },
+  { match: "o4-mini",           input:  1.10, output:  4.40 },
+  { match: "o3-mini",           input:  1.10, output:  4.40 },
+  { match: "o3",                input: 10.00, output: 40.00 },
   // Claude 3 family
   { match: "claude-3-opus",     input: 15.00, output: 75.00 },
   { match: "claude-3-sonnet",   input:  3.00, output: 15.00 },
@@ -29,7 +36,7 @@ function lookupPrice(modelName) {
     if (lower.includes(PRICE_TABLE[i].match)) return PRICE_TABLE[i];
   }
   // Apply Claude default only to Claude variants we haven't explicitly listed.
-  // For GPT, Gemini, or other unknown models we return null -- cost unknown.
+  // For Gemini or other unknown models we return null -- cost unknown.
   if (lower.includes("claude")) return DEFAULT_CLAUDE_PRICE;
   return null;
 }
@@ -48,7 +55,8 @@ export function estimateCost(tokenUsage, modelName) {
   if (!tokenUsage) return 0;
   var price = lookupPrice(modelName);
   if (!price) return 0; // unknown model -- don't fabricate a number
-  var inputCost  = (tokenUsage.inputTokens  || 0) / 1e6 * price.input;
+  var freshInputTokens = Math.max((tokenUsage.inputTokens || 0) - (tokenUsage.cacheRead || 0), 0);
+  var inputCost  = freshInputTokens / 1e6 * price.input;
   var outputCost = (tokenUsage.outputTokens || 0) / 1e6 * price.output;
   var cacheReadCost  = (tokenUsage.cacheRead  || 0) / 1e6 * price.input * 0.1;
   var cacheWriteCost = (tokenUsage.cacheWrite || 0) / 1e6 * price.input * 1.25;

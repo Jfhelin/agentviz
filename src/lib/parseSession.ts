@@ -4,6 +4,7 @@
  * Supported formats:
  *   - Copilot CLI JSONL (producer: "copilot-agent")
  *   - VS Code Copilot Chat JSON (version + requests + sessionId)
+ *   - VS Code Copilot prompt exports (copilot_all_prompts_*.json)
  *   - Claude Code JSONL (default fallback)
  *
  * Returns: { events, turns, metadata } or null
@@ -11,6 +12,7 @@
 
 import { detectAtif, parseAtifJSON } from "./atifParser";
 import { detectCopilotCli, parseCopilotCliJSONL } from "./copilotCliParser";
+import { detectCopilotPrompts, parseCopilotPromptsJSON } from "./copilotCostParser";
 import { parseClaudeCodeJSONL } from "./parser";
 import { detectVSCodeChat, parseVSCodeChatJSON } from "./vscodeSessionParser";
 import type { ParsedSession, SessionFormat } from "./sessionTypes";
@@ -19,6 +21,7 @@ export function detectFormat(text: string): SessionFormat {
   if (detectAtif(text)) return "atif";
   if (detectCopilotCli(text)) return "copilot-cli";
   if (detectVSCodeChat(text)) return "vscode-chat";
+  if (detectCopilotPrompts(text)) return "copilot-prompts";
   return "claude-code";
 }
 
@@ -29,6 +32,7 @@ export function parseSession(text: string): ParsedSession | null {
   if (format === "atif") parsed = parseAtifJSON(text);
   else if (format === "copilot-cli") parsed = parseCopilotCliJSONL(text);
   else if (format === "vscode-chat") parsed = parseVSCodeChatJSON(text);
+  else if (format === "copilot-prompts") parsed = parseCopilotPromptsJSON(text);
   else parsed = parseClaudeCodeJSONL(text);
 
   if (parsed) pairToolCallsWithResults(parsed);

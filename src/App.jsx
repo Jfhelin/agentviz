@@ -20,6 +20,7 @@ import TracksView from "./components/TracksView.jsx";
 import StatsView from "./components/StatsView.jsx";
 import WaterfallView from "./components/WaterfallView.jsx";
 var GraphView = React.lazy(function () { return lazyImport(function () { return import("./components/GraphView.jsx"); }); });
+var CostView = React.lazy(function () { return lazyImport(function () { return import("./components/CostView.jsx"); }); });
 import CommandPalette from "./components/CommandPalette.jsx";
 import ShortcutsModal from "./components/ShortcutsModal.jsx";
 import AppHeader from "./components/app/AppHeader.jsx";
@@ -88,6 +89,18 @@ function renderActiveView(activeView, props) {
           eventEntries={props.filteredEventEntries}
           totalTime={props.session.total}
           timeMap={props.timeMap}
+          turns={props.session.turns}
+        />
+      </React.Suspense>
+    );
+  }
+
+  if (activeView === "cost") {
+    return (
+      <React.Suspense fallback={<div style={{ padding: 40, color: theme.text.dim, textAlign: "center" }}>Loading cost view...</div>}>
+        <CostView
+          events={props.filteredEvents}
+          metadata={props.session.metadata}
           turns={props.session.turns}
         />
       </React.Suspense>

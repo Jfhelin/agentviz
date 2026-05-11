@@ -12,12 +12,20 @@ describe("autonomy metrics", function () {
     expect(getSessionCost({ format: "claude-code" })).toBeNull();
   });
 
-  it("returns null for non-Claude model (e.g. GPT)", function () {
+  it("returns null for unpriced non-Claude models", function () {
     expect(getSessionCost({
       format: "claude-code",
-      primaryModel: "gpt-4o",
+      primaryModel: "gemini-pro",
       tokenUsage: { inputTokens: 1000, outputTokens: 1000 },
     })).toBeNull();
+  });
+
+  it("estimates cost for priced OpenAI/Copilot models", function () {
+    expect(getSessionCost({
+      format: "copilot-prompts",
+      primaryModel: "gpt-4o",
+      tokenUsage: { inputTokens: 1000, outputTokens: 1000 },
+    })).toBeGreaterThan(0);
   });
 
   it("estimates cost for Claude Code with recognized model", function () {
