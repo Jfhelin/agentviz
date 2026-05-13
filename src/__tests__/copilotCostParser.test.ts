@@ -86,4 +86,27 @@ describe("parseCopilotPromptsJSON", function () {
     const parsed = parseCopilotPromptsJSON(wrapped);
     expect(parsed!.metadata.promptCallCount).toBe(2);
   });
+
+  it("truncates prompt text exceeding MAX_DISPLAY_TEXT_LENGTH", function () {
+    const longPrompt = JSON.stringify([
+      {
+        request: {
+          model: "gpt-4.1",
+          messages: [
+            { role: "user", content: "x".repeat(5000) },
+          ],
+        },
+        response: {
+          usage: {
+            prompt_tokens: 1000,
+            completion_tokens: 100,
+          },
+        },
+      },
+    ]);
+    const parsed = parseCopilotPromptsJSON(longPrompt);
+    expect(parsed).not.toBeNull();
+    expect(parsed!.events[0].text.length).toBe(4000);
+    expect(parsed!.events[0].text.endsWith("…")).toBe(true);
+  });
 });

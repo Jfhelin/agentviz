@@ -174,7 +174,7 @@ function ContextBars({ calls }) {
         })}
         <div style={{ border: "1px solid " + theme.border.default, background: theme.bg.surface, borderRadius: theme.radius.lg, padding: theme.space.lg, marginTop: theme.space.sm }}>
           <div style={labelStyle()}>Context growth</div>
-          <div style={{ color: theme.text.muted, marginTop: theme.space.md }}>Use cache-miss warnings to spot tool schema or prompt changes that force recommits.</div>
+          <div style={{ color: theme.text.muted, marginTop: theme.space.md }}>Use cache-miss warnings to spot tool schema or prompt changes that force cache misses.</div>
         </div>
       </div>
     </Panel>

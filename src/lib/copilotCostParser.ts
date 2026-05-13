@@ -2,7 +2,7 @@ import { computeCacheHitRate } from "./cacheMetrics";
 import { estimateMultiModelCost } from "./pricing.js";
 import type { NormalizedEvent, ParsedSession, SessionMetadata, SessionTurn, TokenUsage } from "./sessionTypes";
 
-const MAX_TEXT_LENGTH = 4000;
+const MAX_DISPLAY_TEXT_LENGTH = 4000;
 
 type AnyRecord = Record<string, any>;
 
@@ -79,8 +79,11 @@ function normalizeContent(content: unknown): string {
   return "";
 }
 
-function truncate(text: string): string {
-  return text.length > MAX_TEXT_LENGTH ? text.slice(0, MAX_TEXT_LENGTH - 1) + "…" : text;
+function truncateForDisplay(text: string): string {
+  if (text.length <= MAX_DISPLAY_TEXT_LENGTH) return text;
+  const visibleLength = Math.max(MAX_DISPLAY_TEXT_LENGTH - 1, 0);
+  if (visibleLength === 0) return "…";
+  return text.slice(0, visibleLength) + "…";
 }
 
 function estimateTextTokens(text: string): number {
@@ -226,7 +229,7 @@ function makeEvent(index: number, call: PromptCall): NormalizedEvent | null {
     t: index,
     agent: "assistant",
     track: "output",
-    text: truncate(userText),
+    text: truncateForDisplay(userText),
     duration: 1,
     intensity: usage ? Math.min(1, Math.max(0.25, ((usage.inputTokens || 0) + (usage.outputTokens || 0)) / 100000)) : 0.4,
     raw: {

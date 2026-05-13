@@ -1,8 +1,6 @@
 import { computeCacheHitRate, computeEffectiveInputTokens } from "./cacheMetrics";
 import { estimateCost } from "./pricing.js";
 
-var RECOMMIT_GROWTH_MULTIPLIER = 1.5;
-var RECOMMIT_MIN_TOKENS = 2000;
 var CACHE_MISS_MAX_CACHE_READ_RATIO = 0.35;
 var CACHE_MISS_FRESH_SPIKE_MULTIPLIER = 1.5;
 var CACHE_MISS_MIN_FRESH_DELTA = 1000;
@@ -99,10 +97,6 @@ export function buildCostAnalysis(events, metadata) {
     var cacheHitRate = usage.cacheHitRate != null
       ? usage.cacheHitRate
       : computeCacheHitRate(usage.inputTokens || 0, cacheWriteTokens, cachedInputTokens) || 0;
-    // Recommit means re-writing previously cached content back into the cache. Treat
-    // cache writes that substantially exceed context growth as recommits.
-    var recommitThreshold = Math.max(netNewTokens * RECOMMIT_GROWTH_MULTIPLIER, RECOMMIT_MIN_TOKENS);
-    var recommitTokens = cacheWriteTokens > recommitThreshold ? cacheWriteTokens - netNewTokens : 0;
     peakContext = Math.max(peakContext, contextBreakdown.total || usage.inputTokens || 0);
 
     var call = {
@@ -120,7 +114,6 @@ export function buildCostAnalysis(events, metadata) {
       cumulativeCost: totalCost,
       contextBreakdown: contextBreakdown,
       netNewTokens: netNewTokens,
-      recommitTokens: recommitTokens,
       cacheHitRate: cacheHitRate,
       toolNames: toolNames,
       toolDiff: toolDiff,
