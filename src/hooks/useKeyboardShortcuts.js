@@ -78,6 +78,10 @@ export function handleKeyboardShortcut(e, options) {
     return true;
   }
   if (e.key === "6") {
+    options.onSetView("cost");
+    return true;
+  }
+  if (e.key === "7") {
     options.onSetView("coach");
     return true;
   }

@@ -103,6 +103,7 @@ describe("projectConfig", function () {
   it("getRelevantSurfaces filters by format", function () {
     var claudeSurfaces = getRelevantSurfaces("claude-code");
     var copilotSurfaces = getRelevantSurfaces("copilot-cli");
+    var promptExportSurfaces = getRelevantSurfaces("copilot-prompts");
     var allSurfaces = getRelevantSurfaces(null);
 
     // claude-code should include claude-md and agents but not copilot-instructions
@@ -118,6 +119,7 @@ describe("projectConfig", function () {
     expect(copilotIds).toContain("agents-md"); // "both"
     expect(copilotIds).not.toContain("claude-md");
     expect(copilotIds).not.toContain("mcp-json");
+    expect(promptExportSurfaces.map(function (s) { return s.id; })).toEqual(copilotIds);
 
     // null = all surfaces
     expect(allSurfaces).toHaveLength(KNOWN_CONFIG_SURFACES.length);

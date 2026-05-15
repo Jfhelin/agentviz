@@ -2,7 +2,7 @@ import { parseSession } from "./parseSession";
 import { getSessionTotal } from "./session";
 import type { ParsedSession } from "./sessionTypes";
 
-export const SUPPORTED_FORMATS_ERROR = "Could not parse any events. Supported formats: Claude Code JSONL, Copilot CLI JSONL, VS Code Copilot Chat JSON.";
+export const SUPPORTED_FORMATS_ERROR = "Could not parse any events. Supported formats: Claude Code JSONL, Copilot CLI JSONL, VS Code Copilot Chat JSON, Copilot prompt export JSON, ATIF / Harbor trajectory JSON.";
 
 export interface ParsedSessionTextResult {
   result: ParsedSession | null;
