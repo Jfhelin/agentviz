@@ -227,7 +227,7 @@ function makeEvent(index: number, call: PromptCall): NormalizedEvent | null {
   const contextBreakdown = buildContextBreakdown(messages, tools);
   return {
     t: index,
-    agent: "assistant",
+    agent: "user",
     track: "output",
     text: truncateForDisplay(userText),
     duration: 1,

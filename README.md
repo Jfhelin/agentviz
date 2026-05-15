@@ -246,6 +246,10 @@ A **Tools &amp; Skills** panel surfaces every skill, instruction file, custom ag
 
 Per-call token spend, cache read/write usage, context composition, and cumulative cost for sessions with token usage. Copilot prompt exports include prompt context breakdowns so the view can highlight fresh input spikes, cache misses, tool schema growth, and which parts of the prompt are filling the context window.
 
+<div align="center">
+<img src="docs/screenshots/cost-view.png" alt="Cost View" width="800" />
+</div>
+
 ### Coach View
 
 AI-powered session coaching available directly from any session. The coach reads your autonomy metrics, project config (`.github/copilot-instructions.md`, MCP servers, skills), and session patterns to produce evidence-backed recommendations for prompts, tooling, and workflow. Click **Analyze** to run, then accept or ignore each draft recommendation. Requires the CLI server -- run via `node bin/agentviz.js` or the MCP tool.
@@ -268,7 +272,7 @@ AI-powered session coaching available directly from any session. The coach reads
 | **Track Filters** | Toggle visibility per track type with filter chips in the header. |
 | **Playback Control** | Play/pause with variable speed (0.5x to 8x). Seek with arrow keys. |
 | **Diff Viewer** | Inline unified diff with dual-gutter line numbers for file-editing tool calls. |
-| **Auto-detect Format** | Supports Claude Code JSONL, Copilot CLI JSONL, VS Code Copilot Chat JSON or JSONL, and ATIF / Harbor trajectory JSON. Auto-detected. |
+| **Auto-detect Format** | Supports Claude Code JSONL, Copilot CLI JSONL, VS Code Copilot Chat JSON or JSONL, Copilot prompt export JSON, and ATIF / Harbor trajectory JSON. Auto-detected. |
 | **Session Comparison** | Load two traces side by side. Scorecard and tool-usage chart with delta badges. |
 | **HTML Export** | One-click export of any session or comparison to a self-contained shareable `.html` file. |
 | **Inbox Auto-discovery** | Automatically finds recent Claude Code, Copilot CLI, and VS Code sessions and ranks them by review priority. |

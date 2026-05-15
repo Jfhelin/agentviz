@@ -37,15 +37,16 @@ function agentvizBackend() {
   }
 }
 
-export default defineConfig(function ({ mode }) {
+export default defineConfig(function ({ command, mode }) {
   var isDebugBuild = mode === 'debug'
+  var shouldStartBackend = command === 'serve' && mode !== 'test'
 
   return {
     // Use VITE_BASE_PATH env var to override the base URL for built assets.
     // Defaults to './' (relative paths) so the SPA works when served from a
     // subdirectory (e.g. static manifest mode). Set to '/' for root deployments.
     base: process.env.VITE_BASE_PATH || './',
-    plugins: [react(), agentvizBackend()],
+    plugins: [react(), shouldStartBackend && agentvizBackend()].filter(Boolean),
     server: {
       port: 3000,
       open: true,
@@ -61,6 +62,7 @@ export default defineConfig(function ({ mode }) {
       sourcemap: isDebugBuild,
     },
     test: {
+      pool: 'forks',
       alias: {
         // In Node/Vitest, Worker is unavailable; use the self-contained bundle instead
         "elkjs/lib/elk-api.js": path.resolve(__dirname, "node_modules/elkjs/lib/elk.bundled.js"),

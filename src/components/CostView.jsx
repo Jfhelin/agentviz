@@ -115,7 +115,7 @@ function Chip({ children, warning }) {
 
 function CostBars({ calls, cacheMisses }) {
   var max = maxCallValue(calls, function (call) { return call.freshInputTokens + call.cachedInputTokens + call.cacheWriteTokens; });
-  var missByIndex = new Set(cacheMisses.map(function (miss) { return miss.callIndex; }));
+  var missByIndex = new Map(cacheMisses.map(function (miss) { return [miss.callIndex, miss]; }));
   return (
     <Panel label="Cumulative cost" title="Billed input/output by call" aside={<span style={{ color: theme.text.primary, border: "1px solid " + alpha(theme.accent.primary, 0.5), background: alpha(theme.accent.primary, 0.12), borderRadius: theme.radius.md, padding: theme.space.sm + "px " + theme.space.md + "px" }}>$ BILLED</span>}>
       <Legend items={[{ label: "fresh", color: theme.accent.primary }, { label: "cached", color: theme.semantic.success }, { label: "cache write", color: theme.track.context }]} />
@@ -128,7 +128,7 @@ function CostBars({ calls, cacheMisses }) {
                 <BarSegments max={max} segments={[{ key: "fresh", label: "Fresh input", value: call.freshInputTokens, color: theme.accent.primary }, { key: "cached", label: "Cached input", value: call.cachedInputTokens, color: theme.semantic.success }, { key: "write", label: "Cache write", value: call.cacheWriteTokens, color: theme.track.context }]} />
                 <div style={{ textAlign: "right", color: theme.text.primary, fontFamily: theme.font.mono }}>{formatCost(call.cumulativeCost)}</div>
               </div>
-              {missByIndex.has(call.index) && <CacheMissAnnotation miss={cacheMisses.find(function (miss) { return miss.callIndex === call.index; })} />}
+              {missByIndex.has(call.index) && <CacheMissAnnotation miss={missByIndex.get(call.index)} />}
             </div>
           );
         })}
@@ -211,7 +211,7 @@ export default function CostView({ events, metadata }) {
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: MAIN_GRID_3_COLUMNS, gap: theme.space.lg, minHeight: 0, flex: 1 }}>
-        <Panel label="Prompt & steps" title="Calls in session order" aside="expandable">
+        <Panel label="Prompt & steps" title="Calls in session order" aside="session order">
           <div style={{ padding: theme.space.md, overflow: "auto", display: "flex", flexDirection: "column", gap: theme.space.md }}>
             {calls.map(function (call) { return <CallRow key={call.index} call={call} miss={missByIndex.has(call.index)} />; })}
           </div>

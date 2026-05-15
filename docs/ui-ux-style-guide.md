@@ -776,7 +776,7 @@ Three overlay patterns exist:
   position: "fixed",
   inset: 0,
   background: alpha(theme.bg.base, 0.75),
-  zIndex: 9000,
+  zIndex: theme.z.modal,
 }
 ```
 
@@ -834,9 +834,7 @@ All overlays dismiss on backdrop click via `e.stopPropagation()` on the inner co
 | `theme.z.overlay` | 50 | Overlay backgrounds |
 | `theme.z.modal` | 100 | Modals, command palette |
 
-New code should use `theme.z.*` tokens. The codebase has legacy hardcoded z-indexes
-(e.g. `9000` in ShortcutsModal, `999` in AppLandingState) -- these should be migrated
-to theme tokens over time but are not blocking issues.
+New code must use `theme.z.*` tokens. Legacy hardcoded z-indexes should be migrated when touched.
 
 ---
 
@@ -1025,6 +1023,7 @@ Cache observability is shown when `cacheRead > 0` in token usage data.
 |----------|--------|------|-------|
 | StatsView summary card | `{n} cache read / [{n} cache write /] {pct}% hit` | `theme.font.mono` | `fontSize: theme.fontSize.xs`, `color: theme.text.muted` |
 | StatsView per-turn row | `{n} cache read / [{n} cache write /] cache hit rate {pct}%` | `theme.font.mono` | `fontSize: theme.fontSize.xs`, `color: theme.text.muted` |
+| CostView summary and call rows | `{n} fresh / {n} cached / {n} out`, `{pct}% cached input`, `$0.00`, `<$0.01`, `$0.XXX`, or `$X.XX` | `theme.font.mono` | Cache miss warnings use `theme.semantic.warning` with text labels |
 | CompareView scorecard | `{pct}%` or `N/A` | `theme.font.mono` | Same as other scorecard rows, `lowerIsBetter: null` (neutral) |
 | GraphView turn snippet | `{n} cache read / [{n} cache write /] cache hit rate {pct}%` | Plain text | Only shown for placeholder turns (no real user message) |
 | Q&A cost answer | `- Cache write: {n}\n- Cache hit rate: {pct}%` | Markdown list | Appended to existing token usage lines |
@@ -1064,10 +1063,11 @@ Percentages use `.toFixed(1)` (e.g. `85.3%`). Token counts use `.toLocaleString(
 |-----|--------|
 | `Space` | Play / Pause |
 | `ArrowRight` / `ArrowLeft` | Seek forward / back 2s |
-| `1` - `5` | Switch view (Replay, Tracks, Waterfall, Graph, Stats) |
+| `1` - `7` | Switch view (Replay, Tracks, Waterfall, Graph, Stats, Cost, Coach) |
 | `e` / `E` | Jump to next / previous error |
 | `/` | Focus search input |
 | `Cmd+K` / `Ctrl+K` | Open command palette |
+| `Cmd+Shift+K` / `Ctrl+Shift+K` | Toggle Session Q&A drawer |
 | `?` | Toggle shortcuts modal |
 
 ### Command Palette Navigation
@@ -1141,12 +1141,13 @@ import KeyboardHint from "./ui/KeyboardHint.jsx";
 
 ## 19. Component Conventions
 
-### Props-Only Architecture
+### State Architecture
 
-- No global state management (no Redux, Zustand, Context).
-- Components receive data as props. State lives in hooks (`usePlayback`, `useSearch`, etc.).
+- No external global state management (no Redux, Zustand, or similar libraries).
+- Components receive data as props by default. Stateful behavior lives in hooks (`usePlayback`, `useSearch`, etc.).
+- Context is reserved for cross-cutting session state that would otherwise cause prop drilling. `PlaybackContext` owns playback, search, track filtering, and derived session state.
 - Shared UI primitives: `ShellFrame`, `BrandWordmark`, `ToolbarButton`, `ExportStatusButton`,
-  `ResizablePanel`, `Icon`, `ErrorBoundary`.
+  `KeyboardHint`, `ResizablePanel`, `Icon`, `ErrorBoundary`.
 
 ### Shared UI Primitives
 
@@ -1156,6 +1157,7 @@ import KeyboardHint from "./ui/KeyboardHint.jsx";
 | `BrandWordmark` | "AGENTVIZ." logo with accent dot |
 | `ToolbarButton` | Standard button with icon + text |
 | `ExportStatusButton` | Async operation button (idle/loading/done/error) |
+| `KeyboardHint` | Shared keyboard shortcut badge |
 | `ResizablePanel` | Drag-to-resize split panel |
 | `Icon` | Lucide icon wrapper with defaults |
 | `ErrorBoundary` | React error boundary with recovery |
@@ -1166,9 +1168,9 @@ When building new UI, check if an existing primitive fits before creating a new 
 
 Views fall into two categories:
 
-**Session-state views** (require a loaded session): Replay, Tracks, Waterfall, Graph, Stats, Coach.
+**Session-state views** (require a loaded session): Replay, Tracks, Waterfall, Graph, Stats, Cost, Coach.
 These are registered in `APP_VIEWS` in `constants.js`, appear as tabs in `AppHeader`, and are
-switched via keyboard shortcuts 1-5. They receive session data (events, turns, metadata) as props
+switched via keyboard shortcuts 1-7. They receive session data (events, turns, metadata) as props
 via `renderActiveView()` in `App.jsx`.
 
 **Landing-state views** (operate on the session list): Landing page, Compare landing, Dashboard.

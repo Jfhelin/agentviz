@@ -62,6 +62,7 @@ describe("parseCopilotPromptsJSON", function () {
     expect(parsed!.events).toHaveLength(2);
     expect(parsed!.turns).toHaveLength(2);
     expect(parsed!.events[0].text).toBe("Build a parser");
+    expect(parsed!.events[0].agent).toBe("user");
     expect(parsed!.events[1].text).toBe("Now build the UI");
     expect(parsed!.metadata.format).toBe("copilot-prompts");
   });
