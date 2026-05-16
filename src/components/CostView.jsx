@@ -26,11 +26,11 @@ function labelStyle() {
   };
 }
 
-function SummaryCard({ label, value, sub, color }) {
+function SummaryCard({ label, value, sub, color, valueSize }) {
   return (
     <div style={Object.assign({}, panelStyle(), { padding: theme.space.lg + "px " + theme.space.xl + "px" })}>
       <div style={labelStyle()}>{label}</div>
-      <div style={{ fontSize: theme.fontSize.xxl, color: color || theme.text.primary, fontWeight: 800, marginTop: theme.space.md, whiteSpace: "nowrap" }}>{value}</div>
+      <div style={{ fontSize: valueSize || theme.fontSize.xxl, color: color || theme.text.primary, fontWeight: 800, marginTop: theme.space.md, whiteSpace: "nowrap" }}>{value}</div>
       {sub && <div style={{ color: theme.text.muted, fontSize: theme.fontSize.sm, marginTop: theme.space.sm, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sub}</div>}
     </div>
   );
@@ -42,7 +42,7 @@ function Panel({ label, title, aside, children }) {
       <div style={{ height: 48, borderBottom: "1px solid " + theme.border.default, padding: theme.space.md + "px " + theme.space.lg + "px", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: theme.space.lg, flexShrink: 0 }}>
         <div style={{ minWidth: 0 }}>
           <div style={labelStyle()}>{label}</div>
-          <div style={{ color: theme.text.primary, fontWeight: 800, marginTop: theme.space.xs, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</div>
+          <div style={{ color: theme.text.primary, fontSize: theme.fontSize.base, fontWeight: 800, marginTop: theme.space.xs, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</div>
         </div>
         {aside && <div style={{ color: theme.text.muted, fontSize: theme.fontSize.xs, flexShrink: 0 }}>{aside}</div>}
       </div>
@@ -93,14 +93,14 @@ function CallRow({ call, miss }) {
     }}>
       <div style={{ width: 28, height: 28, borderRadius: theme.radius.lg, background: theme.bg.raised, color: theme.text.secondary, display: "grid", placeItems: "center", fontFamily: theme.font.mono, fontSize: theme.fontSize.sm }}>{String(call.index + 1).padStart(2, "0")}</div>
       <div style={{ minWidth: 0 }}>
-        <div title={call.title} style={{ color: theme.text.primary, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{call.title}</div>
+        <div title={call.title} style={{ color: theme.text.primary, fontSize: theme.fontSize.sm, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{call.title}</div>
         <div style={{ display: "flex", gap: theme.space.sm, flexWrap: "wrap", marginTop: theme.space.md }}>
           <Chip>{call.model}</Chip>
           <Chip>{formatTokens(call.contextBreakdown.total || call.tokenUsage.inputTokens)} ctx</Chip>
           {miss && <Chip warning>cache miss</Chip>}
           <Chip>{formatCost(call.cost)}</Chip>
         </div>
-        <div style={{ color: theme.text.muted, marginTop: theme.space.md, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        <div style={{ color: theme.text.muted, fontSize: theme.fontSize.sm, marginTop: theme.space.md, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {formatTokens(call.freshInputTokens)} fresh · {formatTokens(call.cachedInputTokens)} cached · {formatTokens(call.outputTokens)} out
         </div>
       </div>
@@ -117,16 +117,16 @@ function CostBars({ calls, cacheMisses }) {
   var max = maxCallValue(calls, function (call) { return call.freshInputTokens + call.cachedInputTokens + call.cacheWriteTokens; });
   var missByIndex = new Map(cacheMisses.map(function (miss) { return [miss.callIndex, miss]; }));
   return (
-    <Panel label="Cumulative cost" title="Billed input/output by call" aside={<span style={{ color: theme.text.primary, border: "1px solid " + alpha(theme.accent.primary, 0.5), background: alpha(theme.accent.primary, 0.12), borderRadius: theme.radius.md, padding: theme.space.sm + "px " + theme.space.md + "px" }}>$ BILLED</span>}>
+    <Panel label="Cumulative cost" title="Billed input/output by call" aside={<span style={{ color: theme.text.primary, fontSize: theme.fontSize.xs, fontFamily: theme.font.mono, border: "1px solid " + alpha(theme.accent.primary, 0.5), background: alpha(theme.accent.primary, 0.12), borderRadius: theme.radius.md, padding: theme.space.sm + "px " + theme.space.md + "px" }}>$ BILLED</span>}>
       <Legend items={[{ label: "fresh", color: theme.accent.primary }, { label: "cached", color: theme.semantic.success }, { label: "cache write", color: theme.track.context }]} />
       <div style={{ padding: theme.space.lg, overflow: "auto" }}>
         {calls.map(function (call) {
           return (
             <div key={call.index} style={{ minHeight: 72 }}>
               <div style={{ display: "grid", gridTemplateColumns: "56px 1fr 72px", gap: theme.space.md, alignItems: "center", height: theme.space.giant }}>
-                <div style={{ color: theme.text.secondary, fontFamily: theme.font.mono }}>#{String(call.index + 1).padStart(2, "0")}</div>
+                <div style={{ color: theme.text.secondary, fontFamily: theme.font.mono, fontSize: theme.fontSize.sm }}>#{String(call.index + 1).padStart(2, "0")}</div>
                 <BarSegments max={max} segments={[{ key: "fresh", label: "Fresh input", value: call.freshInputTokens, color: theme.accent.primary }, { key: "cached", label: "Cached input", value: call.cachedInputTokens, color: theme.semantic.success }, { key: "write", label: "Cache write", value: call.cacheWriteTokens, color: theme.track.context }]} />
-                <div style={{ textAlign: "right", color: theme.text.primary, fontFamily: theme.font.mono }}>{formatCost(call.cumulativeCost)}</div>
+                <div style={{ textAlign: "right", color: theme.text.primary, fontFamily: theme.font.mono, fontSize: theme.fontSize.sm }}>{formatCost(call.cumulativeCost)}</div>
               </div>
               {missByIndex.has(call.index) && <CacheMissAnnotation miss={missByIndex.get(call.index)} />}
             </div>
@@ -148,7 +148,7 @@ function CacheMissAnnotation({ miss }) {
   var toolText = changes.length ? " Tool diff: " + changes.join("; ") + "." : "";
   var message = "Unexpected cache miss on call #" + (miss.callIndex + 1) + ". Fresh input jumped from " + fromTokens + " to " + toTokens + "." + toolText;
   return (
-    <div aria-label={message} style={{ border: "1px solid " + alpha(theme.semantic.warning, 0.45), background: alpha(theme.semantic.warning, 0.08), borderRadius: theme.radius.lg, padding: theme.space.md + "px " + theme.space.lg + "px", color: theme.semantic.warning, fontWeight: 700, lineHeight: 1.35 }}>
+    <div aria-label={message} style={{ border: "1px solid " + alpha(theme.semantic.warning, 0.45), background: alpha(theme.semantic.warning, 0.08), borderRadius: theme.radius.lg, padding: theme.space.md + "px " + theme.space.lg + "px", color: theme.semantic.warning, fontSize: theme.fontSize.sm, fontWeight: 700, lineHeight: 1.35 }}>
       <span>Unexpected cache miss on call #{miss.callIndex + 1}.</span>{" "}
       <span>Fresh input jumped from {fromTokens} to {toTokens}.</span>
       {toolText && <span>{toolText}</span>}
@@ -166,15 +166,15 @@ function ContextBars({ calls }) {
           var b = call.contextBreakdown;
           return (
             <div key={call.index} style={{ display: "grid", gridTemplateColumns: "56px 1fr 48px", gap: theme.space.md, alignItems: "center", minHeight: 80 }}>
-              <div style={{ color: theme.text.secondary, fontFamily: theme.font.mono }}>{formatTokens(b.total || call.tokenUsage.inputTokens)}</div>
+              <div style={{ color: theme.text.secondary, fontFamily: theme.font.mono, fontSize: theme.fontSize.sm }}>{formatTokens(b.total || call.tokenUsage.inputTokens)}</div>
               <BarSegments max={max} segments={[{ key: "system", label: "System", value: b.system, color: theme.track.context }, { key: "tools", label: "Tools", value: b.tools, color: theme.track.tool_call }, { key: "history", label: "History", value: b.history, color: theme.accent.primary }, { key: "results", label: "Tool results", value: b.toolResults, color: theme.semantic.success }, { key: "user", label: "User", value: b.user, color: theme.agent.user }]} />
-              <div style={{ textAlign: "right", color: theme.text.primary, fontFamily: theme.font.mono }}>#{String(call.index + 1).padStart(2, "0")}</div>
+              <div style={{ textAlign: "right", color: theme.text.primary, fontFamily: theme.font.mono, fontSize: theme.fontSize.sm }}>#{String(call.index + 1).padStart(2, "0")}</div>
             </div>
           );
         })}
         <div style={{ border: "1px solid " + theme.border.default, background: theme.bg.surface, borderRadius: theme.radius.lg, padding: theme.space.lg, marginTop: theme.space.sm }}>
           <div style={labelStyle()}>Context growth</div>
-          <div style={{ color: theme.text.muted, marginTop: theme.space.md }}>Use cache-miss warnings to spot tool schema or prompt changes that force cache misses.</div>
+          <div style={{ color: theme.text.muted, fontSize: theme.fontSize.sm, marginTop: theme.space.md }}>Use cache-miss warnings to spot tool schema or prompt changes that force cache misses.</div>
         </div>
       </div>
     </Panel>
@@ -201,9 +201,9 @@ export default function CostView({ events, metadata }) {
   var missByIndex = new Set(analysis.cacheMisses.map(function (miss) { return miss.callIndex; }));
 
   return (
-    <div style={{ padding: theme.space.xl, display: "flex", flexDirection: "column", gap: theme.space.lg, minHeight: 0, height: "100%", overflow: "hidden" }}>
+    <div style={{ padding: theme.space.xl, display: "flex", flexDirection: "column", gap: theme.space.lg, minHeight: 0, height: "100%", overflow: "hidden", fontFamily: theme.font.mono, fontSize: theme.fontSize.base }}>
       <div style={{ display: "grid", gridTemplateColumns: SUMMARY_GRID_5_COLUMNS, gap: theme.space.lg }}>
-        <SummaryCard label="Cost view" value="Token spend & context buildup" sub="Full context, net-new tokens, and billed API usage." />
+        <SummaryCard label="Cost view" value="Token spend & context buildup" valueSize={theme.fontSize.lg} sub="Full context, net-new tokens, and billed API usage." />
         <SummaryCard label="Total spend" value={formatCost(totals.cost)} sub={cachePercent + "% cached input"} />
         <SummaryCard label="Input tokens" value={formatTokens(totals.inputTokens)} sub={formatTokens(totals.freshInputTokens) + " fresh · " + formatTokens(totals.cacheRead) + " cached"} />
         <SummaryCard label="Peak context" value={formatTokens(totals.peakContext)} sub="tools + history dominate context" />
