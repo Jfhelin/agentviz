@@ -33,7 +33,7 @@ AI coding agents (Claude Code, VS Code Copilot Chat, Copilot CLI, ATIF / Harbor,
 - **Inspect cost** with per-call token spend, cache reads/writes, context composition, and cache-miss warnings
 - **Debug** failures by jumping directly between errors with one keystroke
 - **Stream live** as a session unfolds -- the view updates in real time
-- **Discover sessions** automatically from the Copilot CLI and VS Code session stores
+- **Discover sessions** automatically from Claude Code, Copilot CLI, and VS Code Copilot Chat stores
 - **Get AI coaching** on prompt engineering, skills, and MCP setup grounded in best practices
 - **Switch themes** between dark, light, and system-matched modes with one click
 
@@ -43,7 +43,7 @@ AI coding agents (Claude Code, VS Code Copilot Chat, Copilot CLI, ATIF / Harbor,
 npx agentviz
 ```
 
-Opens AGENTVIZ in your browser. Drop a `.jsonl` or `.json` session file or click **load a demo session** to try it instantly. Copilot CLI and VS Code Copilot Chat sessions are auto-discovered.
+Opens AGENTVIZ in your browser. Drop a `.jsonl` or `.json` session file or click **load a demo session** to try it instantly. Claude Code, Copilot CLI, and VS Code Copilot Chat sessions are auto-discovered.
 
 ### CLI (live streaming)
 
@@ -144,7 +144,7 @@ To stop it, ask: "Close agentviz"
 
 When running via the CLI, AGENTVIZ automatically discovers recent Claude Code, Copilot CLI, and VS Code Copilot Chat sessions and shows them on the landing screen in two interchangeable modes: a row-based inbox sorted by review priority and a dashboard card grid with aggregate stats, filters, refresh, and the same one-click open flow.
 
-Each session also gets an AI Coach analysis powered by the `@github/copilot-sdk` (gpt-4o). The coach reads your actual project config (`.github/copilot-instructions.md`, skills, MCP servers) and produces actionable recommendations for prompts, skills, and tooling setup. Recommendations can be applied directly with one click.
+Each loaded session can get an AI Coach analysis powered by the `@github/copilot-sdk` (gpt-4o). The coach reads your actual project config (`.github/copilot-instructions.md`, skills, MCP servers) and produces actionable recommendations for prompts, skills, and tooling setup. Recommendations can be applied directly with one click.
 
 ## Session Comparison
 
@@ -252,7 +252,7 @@ Per-call token spend, cache read/write usage, context composition, and cumulativ
 
 ### Coach View
 
-AI-powered session coaching available directly from any session. The coach reads your autonomy metrics, project config (`.github/copilot-instructions.md`, MCP servers, skills), and session patterns to produce evidence-backed recommendations for prompts, tooling, and workflow. Click **Analyze** to run, then accept or ignore each draft recommendation. Requires the CLI server -- run via `node bin/agentviz.js` or the MCP tool.
+AI-powered session coaching available directly from any session. The coach reads your autonomy metrics, project config (`.github/copilot-instructions.md`, MCP servers, skills), and session patterns to produce evidence-backed recommendations for prompts, tooling, and workflow. Click **Analyze** to run, then accept or ignore each draft recommendation. Requires the CLI server -- run via `npx agentviz`, `npm start`, or the MCP tool.
 
 <div align="center">
 <img src="docs/screenshots/coach-view.png" alt="Coach View" width="800" />
@@ -275,7 +275,7 @@ AI-powered session coaching available directly from any session. The coach reads
 | **Auto-detect Format** | Supports Claude Code JSONL, Copilot CLI JSONL, VS Code Copilot Chat JSON or JSONL, Copilot prompt export JSON, and ATIF / Harbor trajectory JSON. Auto-detected. |
 | **Session Comparison** | Load two traces side by side. Scorecard and tool-usage chart with delta badges. |
 | **HTML Export** | One-click export of any session or comparison to a self-contained shareable `.html` file. |
-| **Inbox Auto-discovery** | Automatically finds recent Claude Code, Copilot CLI, and VS Code sessions and ranks them by review priority. |
+| **Inbox Auto-discovery** | Automatically finds recent Claude Code, Copilot CLI, and VS Code Copilot Chat sessions and ranks them by review priority. |
 | **Inbox Refresh** | Rescan session directories with a one-click refresh button. Reconciles evicted content and prunes dead entries. |
 | **File Path Tooltips** | Hover over inbox session rows to see the full file path or reconstructed session location. |
 | **Static Manifest Mode** | Deploy as a pure static site with `?manifest=URL` pointing to a JSON manifest of sessions. Tag-based filtering, no backend required. |
@@ -333,9 +333,10 @@ Modals, drawers, and overlay panels render keyboard hints with a shared `<kbd>` 
 | Copilot prompt export | `.json` prompt export arrays or wrappers | Prompt calls with `request.messages` and `response.usage` |
 | ATIF / Harbor | `.json` trajectory from the Harbor framework | Top-level `schema_version: "ATIF-v1.6"` with `agent` and `steps` |
 
-ATIF (Agent Trajectory Interchange Format) sessions are loaded via drag-and-drop, the `--file` flag, or `?manifest=` URLs. Auto-discovery is not wired up because Harbor has no canonical output directory.
+ATIF (Agent Trajectory Interchange Format) sessions are loaded via drag-and-drop, a positional CLI path, or `?manifest=` URLs. Auto-discovery is not wired up because Harbor has no canonical output directory.
 
 More formats planned -- see [Roadmap](#roadmap).
+
 ## Static Manifest Mode
 
 Deploy AGENTVIZ as a pure static site with pre-populated sessions -- no backend required. Pass a `?manifest=` query parameter pointing to a JSON manifest:
@@ -364,6 +365,7 @@ The manifest lists sessions with display names, relative URLs, and freeform tags
 ```
 
 Session URLs are resolved relative to the manifest location. Tags appear as filter chips in the inbox (AND logic). Pre-apply filters with `&tag=X` query params.
+
 ## Architecture
 
 ```
@@ -381,7 +383,7 @@ src/
     useFeatureFlag.js    # localStorage-backed feature flag evaluation
     useLiveStream.js     # SSE EventSource hook with 500ms debounce for live mode
     usePersistentState.js    # localStorage-backed useState with debounced writes
-    useDiscoveredSessions.js # Auto-discovery of Copilot CLI and VS Code sessions via /api/sessions
+    useDiscoveredSessions.js # Auto-discovery via /api/sessions or ?manifest= URL
     useHashRouter.js     # Hash-based routing between inbox and session views
     useAsyncStatus.js    # Async operation state machine (idle/loading/success/error)
   lib/
@@ -408,12 +410,15 @@ src/
     constants.js         # Sample events for demo mode
     replayLayout.js      # Virtualized windowing for large sessions
     commandPalette.js    # Precomputed fuzzy search index
+    searchIndex.js       # Precomputed lowercase search cache for event filtering
     diffUtils.js         # Diff detection and Myers line diff algorithm
     waterfall.ts         # Waterfall view helpers: item building, stats, layout
     graphLayout.js       # ELKjs graph builder, fork/join DAG for parallel agents, layout merger
     costAnalysis.js      # Per-call cost, context, cache-miss, and token aggregation helpers
     pricing.js           # Claude and OpenAI/Copilot model pricing table and cost estimation
+    pricing.d.ts         # TypeScript declarations for pricing.js
     exportHtml.js        # Self-contained HTML export for single sessions and comparisons
+    formatTime.d.ts      # TypeScript declarations for formatTime.js
     formatTime.js        # Duration and date formatting utilities
     landingSessions.js   # Shared landing browser labels, filters, and format options
     lazyImport.js        # Dynamic import wrapper with stale-chunk reload recovery
@@ -468,7 +473,7 @@ server.js                # HTTP server shell: static serving, file watcher, rout
 { index, startTime, endTime, eventIndices, userMessage, toolCount, hasError }
 
 // Session-level stats
-{ totalEvents, totalTurns, totalToolCalls, errorCount, duration, models, primaryModel, tokenUsage }
+{ totalEvents, totalTurns, totalToolCalls, errorCount, duration, models, primaryModel, tokenUsage, totalCost? }
 ```
 
 ## Usage
