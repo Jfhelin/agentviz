@@ -86,7 +86,8 @@ function serveStatic(res, filePath) {
 
 export function createServer({ sessionFile, distDir }) {
   var clients = new Set();
-  var lastLineIdx = 0;
+  var lastByteOffset = 0;
+  var partialLine = "";
   var watcher = null;
   var watcherClosed = false;
   var pollInterval = null;
@@ -94,14 +95,38 @@ export function createServer({ sessionFile, distDir }) {
   function broadcastNewLines() {
     if (!sessionFile || clients.size === 0) return;
     try {
-      var content = fs.readFileSync(sessionFile, "utf8");
-      var update = getJsonlStreamChunk(content, lastLineIdx);
-      var newLines = update.lines;
-      lastLineIdx = update.nextLineIdx;
-      if (newLines.length === 0) return;
-      var payload = "data: " + JSON.stringify({ lines: newLines.join("\n") }) + "\n\n";
-      for (var client of clients) {
-        try { client.write(payload); } catch (e) { clients.delete(client); }
+      var stat = fs.statSync(sessionFile);
+
+      // Handle file truncation/recreation (e.g. session restart)
+      if (stat.size < lastByteOffset) {
+        lastByteOffset = 0;
+        partialLine = "";
+      }
+
+      // Fast exit -- no new data
+      if (stat.size === lastByteOffset) return;
+
+      var fd = fs.openSync(sessionFile, "r");
+      try {
+        var bufSize = stat.size - lastByteOffset;
+        var buf = Buffer.alloc(bufSize);
+        var bytesRead = fs.readSync(fd, buf, 0, bufSize, lastByteOffset);
+        lastByteOffset += bytesRead;
+
+        var chunk = partialLine + buf.subarray(0, bytesRead).toString("utf8");
+        chunk = chunk.replace(/\r\n/g, "\n");
+        var lines = chunk.split("\n");
+        partialLine = lines.pop() || "";
+
+        var newLines = lines.filter(function (line) { return line.trim(); });
+        if (newLines.length === 0) return;
+
+        var payload = "data: " + JSON.stringify({ lines: newLines.join("\n") }) + "\n\n";
+        for (var client of clients) {
+          try { client.write(payload); } catch (e) { clients.delete(client); }
+        }
+      } finally {
+        fs.closeSync(fd);
       }
     } catch (e) {}
   }
@@ -109,7 +134,14 @@ export function createServer({ sessionFile, distDir }) {
   if (sessionFile) {
     try {
       var initContent = fs.readFileSync(sessionFile, "utf8");
-      lastLineIdx = getCompleteJsonlLines(initContent).length;
+      var lastNewlinePos = initContent.lastIndexOf("\n");
+      if (lastNewlinePos === -1) {
+        lastByteOffset = 0;
+        partialLine = initContent;
+      } else {
+        lastByteOffset = Buffer.byteLength(initContent.substring(0, lastNewlinePos + 1), "utf8");
+        partialLine = initContent.substring(lastNewlinePos + 1);
+      }
     } catch (e) {}
 
     function attachWatcher() {
@@ -119,6 +151,8 @@ export function createServer({ sessionFile, distDir }) {
             broadcastNewLines();
             if (eventType === "rename") {
               try { watcher.close(); } catch (e) {}
+              lastByteOffset = 0;
+              partialLine = "";
               setTimeout(function () {
                 if (watcherClosed) return;
                 try { fs.accessSync(sessionFile); } catch (e) { return; }
