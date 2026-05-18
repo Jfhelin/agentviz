@@ -62,6 +62,13 @@ export default function Timeline({ currentTime, totalTime, timeMap, onSeek, isPl
     return turns[turns.length - 1];
   }, [currentTime, turns]);
 
+  // Memoize bin calculation -- depends only on event data, not currentTime,
+  // so it avoids re-running O(events) work on every 100ms playback tick.
+  var bins = useMemo(function () {
+    if (eventEntries.length <= TIMELINE_BINS) return null;
+    return buildTimelineBins(eventEntries, totalTime, timeMap, matchSet);
+  }, [eventEntries, totalTime, timeMap, matchSet]);
+
   return (
     <div style={{ paddingBottom: theme.space.md }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
@@ -134,8 +141,7 @@ export default function Timeline({ currentTime, totalTime, timeMap, onSeek, isPl
             }} />
           );
         })}
-        {eventEntries.length > TIMELINE_BINS ? (function () {
-          var bins = buildTimelineBins(eventEntries, totalTime, timeMap, matchSet);
+        {bins ? (function () {
           var result = [];
           for (var j = 0; j < TIMELINE_BINS; j++) {
             if (bins[j].count === 0) continue;
