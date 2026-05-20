@@ -47,10 +47,37 @@ var MIME = {
   ".ttf": "font/ttf",
 };
 
-function readInitialStreamState(filePath) {
+var STREAM_READ_SIZE = 64 * 1024;
+
+export function getCompleteJsonlLines(content) {
+  if (!content) return [];
+  var normalized = content.replace(/\r\n/g, "\n");
+  var hasTrailingNewline = normalized.endsWith("\n");
+  var lines = normalized.split("\n");
+
+  if (!hasTrailingNewline) {
+    lines.pop();
+  }
+
+  return lines.filter(function (line) { return line.trim(); });
+}
+
+export function getJsonlStreamChunk(content, lastLineIdx) {
+  var completeLines = getCompleteJsonlLines(content);
+
+  if (completeLines.length <= lastLineIdx) {
+    return { lines: [], nextLineIdx: lastLineIdx };
+  }
+
+  return {
+    lines: completeLines.slice(lastLineIdx),
+    nextLineIdx: completeLines.length,
+  };
+}
+
+function readInitialStreamState(filePath, initialDecoder) {
   var fd = fs.openSync(filePath, "r");
   try {
-    var TAIL_READ_SIZE = 64 * 1024;
     var fileSize = fs.fstatSync(fd).size;
     if (fileSize === 0) return { byteOffset: 0, partialLine: "" };
 
@@ -59,7 +86,7 @@ function readInitialStreamState(filePath) {
     var position = fileSize;
 
     while (position > 0) {
-      var chunkSize = Math.min(TAIL_READ_SIZE, position);
+      var chunkSize = Math.min(STREAM_READ_SIZE, position);
       position -= chunkSize;
 
       var chunk = Buffer.alloc(chunkSize);
@@ -91,7 +118,7 @@ function readInitialStreamState(filePath) {
       offset += chunks[i].length;
     }
 
-    return { byteOffset: fileSize, partialLine: suffix.toString("utf8") };
+    return { byteOffset: fileSize, partialLine: initialDecoder.write(suffix) };
   } finally {
     fs.closeSync(fd);
   }
@@ -132,24 +159,28 @@ export function createServer({ sessionFile, distDir }) {
 
       if (stat.size === lastByteOffset) return;
 
+      var targetSize = stat.size;
       var fd = fs.openSync(sessionFile, "r");
       try {
-        var bufSize = stat.size - lastByteOffset;
-        var buf = Buffer.alloc(bufSize);
-        var bytesRead = fs.readSync(fd, buf, 0, bufSize, lastByteOffset);
-        lastByteOffset += bytesRead;
+        while (lastByteOffset < targetSize) {
+          var bufSize = Math.min(STREAM_READ_SIZE, targetSize - lastByteOffset);
+          var buf = Buffer.alloc(bufSize);
+          var bytesRead = fs.readSync(fd, buf, 0, bufSize, lastByteOffset);
+          if (bytesRead === 0) return;
+          lastByteOffset += bytesRead;
 
-        var chunk = partialLine + decoder.write(buf.subarray(0, bytesRead));
-        chunk = chunk.replace(/\r\n/g, "\n");
-        var lines = chunk.split("\n");
-        partialLine = lines.pop() || "";
+          var chunk = partialLine + decoder.write(buf.subarray(0, bytesRead));
+          chunk = chunk.replace(/\r\n/g, "\n");
+          var lines = chunk.split("\n");
+          partialLine = lines.pop() || "";
 
-        var newLines = lines.filter(function (line) { return line.trim(); });
-        if (newLines.length === 0) return;
+          var newLines = lines.filter(function (line) { return line.trim(); });
+          if (newLines.length === 0) continue;
 
-        var payload = "data: " + JSON.stringify({ lines: newLines.join("\n") }) + "\n\n";
-        for (var client of clients) {
-          try { client.write(payload); } catch (e) { clients.delete(client); }
+          var payload = "data: " + JSON.stringify({ lines: newLines.join("\n") }) + "\n\n";
+          for (var client of clients) {
+            try { client.write(payload); } catch (e) { clients.delete(client); }
+          }
         }
       } finally {
         fs.closeSync(fd);
@@ -159,7 +190,7 @@ export function createServer({ sessionFile, distDir }) {
 
   if (sessionFile) {
     try {
-      var initialState = readInitialStreamState(sessionFile);
+      var initialState = readInitialStreamState(sessionFile, decoder);
       lastByteOffset = initialState.byteOffset;
       partialLine = initialState.partialLine;
     } catch (e) {}
