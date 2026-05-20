@@ -8,6 +8,7 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import url from "url";
+import { StringDecoder } from "string_decoder";
 
 import { handle as handleSessions } from "./routes/sessions.js";
 import { handle as handleAI } from "./routes/ai.js";
@@ -46,30 +47,54 @@ var MIME = {
   ".ttf": "font/ttf",
 };
 
-export function getCompleteJsonlLines(content) {
-  if (!content) return [];
-  var normalized = content.replace(/\r\n/g, "\n");
-  var hasTrailingNewline = normalized.endsWith("\n");
-  var lines = normalized.split("\n");
+function readInitialStreamState(filePath) {
+  var fd = fs.openSync(filePath, "r");
+  try {
+    var TAIL_READ_SIZE = 64 * 1024;
+    var fileSize = fs.fstatSync(fd).size;
+    if (fileSize === 0) return { byteOffset: 0, partialLine: "" };
 
-  if (!hasTrailingNewline) {
-    lines.pop();
+    var chunks = [];
+    var trailingLength = 0;
+    var position = fileSize;
+
+    while (position > 0) {
+      var chunkSize = Math.min(TAIL_READ_SIZE, position);
+      position -= chunkSize;
+
+      var chunk = Buffer.alloc(chunkSize);
+      var bytesRead = fs.readSync(fd, chunk, 0, chunkSize, position);
+      var scanChunk = bytesRead === chunkSize ? chunk : chunk.subarray(0, bytesRead);
+      var newlineIdx = scanChunk.lastIndexOf(10);
+
+      if (newlineIdx !== -1) {
+        var afterNewline = scanChunk.subarray(newlineIdx + 1);
+        if (afterNewline.length > 0) {
+          chunks.push(afterNewline);
+          trailingLength += afterNewline.length;
+        }
+        break;
+      }
+
+      chunks.push(scanChunk);
+      trailingLength += scanChunk.length;
+    }
+
+    if (trailingLength === 0) {
+      return { byteOffset: fileSize, partialLine: "" };
+    }
+
+    var suffix = Buffer.alloc(trailingLength);
+    var offset = 0;
+    for (var i = chunks.length - 1; i >= 0; i -= 1) {
+      chunks[i].copy(suffix, offset);
+      offset += chunks[i].length;
+    }
+
+    return { byteOffset: fileSize, partialLine: suffix.toString("utf8") };
+  } finally {
+    fs.closeSync(fd);
   }
-
-  return lines.filter(function (line) { return line.trim(); });
-}
-
-export function getJsonlStreamChunk(content, lastLineIdx) {
-  var completeLines = getCompleteJsonlLines(content);
-
-  if (completeLines.length <= lastLineIdx) {
-    return { lines: [], nextLineIdx: lastLineIdx };
-  }
-
-  return {
-    lines: completeLines.slice(lastLineIdx),
-    nextLineIdx: completeLines.length,
-  };
 }
 
 function serveStatic(res, filePath) {
@@ -88,6 +113,7 @@ export function createServer({ sessionFile, distDir }) {
   var clients = new Set();
   var lastByteOffset = 0;
   var partialLine = "";
+  var decoder = new StringDecoder("utf8");
   var watcher = null;
   var watcherClosed = false;
   var pollInterval = null;
@@ -101,9 +127,9 @@ export function createServer({ sessionFile, distDir }) {
       if (stat.size < lastByteOffset) {
         lastByteOffset = 0;
         partialLine = "";
+        decoder = new StringDecoder("utf8");
       }
 
-      // Fast exit -- no new data
       if (stat.size === lastByteOffset) return;
 
       var fd = fs.openSync(sessionFile, "r");
@@ -113,7 +139,7 @@ export function createServer({ sessionFile, distDir }) {
         var bytesRead = fs.readSync(fd, buf, 0, bufSize, lastByteOffset);
         lastByteOffset += bytesRead;
 
-        var chunk = partialLine + buf.subarray(0, bytesRead).toString("utf8");
+        var chunk = partialLine + decoder.write(buf.subarray(0, bytesRead));
         chunk = chunk.replace(/\r\n/g, "\n");
         var lines = chunk.split("\n");
         partialLine = lines.pop() || "";
@@ -133,32 +159,30 @@ export function createServer({ sessionFile, distDir }) {
 
   if (sessionFile) {
     try {
-      var initContent = fs.readFileSync(sessionFile, "utf8");
-      var lastNewlinePos = initContent.lastIndexOf("\n");
-      if (lastNewlinePos === -1) {
-        lastByteOffset = 0;
-        partialLine = initContent;
-      } else {
-        lastByteOffset = Buffer.byteLength(initContent.substring(0, lastNewlinePos + 1), "utf8");
-        partialLine = initContent.substring(lastNewlinePos + 1);
-      }
+      var initialState = readInitialStreamState(sessionFile);
+      lastByteOffset = initialState.byteOffset;
+      partialLine = initialState.partialLine;
     } catch (e) {}
 
     function attachWatcher() {
       try {
         watcher = fs.watch(sessionFile, function (eventType) {
-          if (eventType === "change" || eventType === "rename") {
+          if (eventType === "rename") {
+            try { watcher.close(); } catch (e) {}
+            lastByteOffset = 0;
+            partialLine = "";
+            decoder = new StringDecoder("utf8");
             broadcastNewLines();
-            if (eventType === "rename") {
-              try { watcher.close(); } catch (e) {}
-              lastByteOffset = 0;
-              partialLine = "";
-              setTimeout(function () {
-                if (watcherClosed) return;
-                try { fs.accessSync(sessionFile); } catch (e) { return; }
-                attachWatcher();
-              }, 50);
-            }
+            setTimeout(function () {
+              if (watcherClosed) return;
+              try { fs.accessSync(sessionFile); } catch (e) { return; }
+              attachWatcher();
+            }, 50);
+            return;
+          }
+
+          if (eventType === "change") {
+            broadcastNewLines();
           }
         });
         watcher.on("error", function (err) {
