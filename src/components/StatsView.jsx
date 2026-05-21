@@ -337,6 +337,7 @@ export default function StatsView({ events, totalTime, metadata, turns, autonomy
   var [showAllTurns, setShowAllTurns] = useState(false);
   var TURNS_PREVIEW = 15;
   var cardStyle = getCardStyle();
+  var themeMode = theme.mode;
 
   // Memoize O(n) event iterations so they don't re-run on every parent re-render.
   var trackStats = useMemo(function () {
@@ -412,7 +413,7 @@ export default function StatsView({ events, totalTime, metadata, turns, autonomy
       { label: "Errors", value: errorCount, color: errorCount > 0 ? theme.semantic.error : theme.text.muted },
       { label: "Duration", value: formatDurationLong(totalTime), color: theme.track.context },
     ];
-  }, [events.length, metadata, turns, totalTime, trackStats, userMsgs, errorCount]);
+  }, [events.length, metadata, turns, totalTime, trackStats, userMsgs, errorCount, themeMode]);
   var autonomySummary = useMemo(function () {
     return buildAutonomySummary(autonomyMetrics);
   }, [autonomyMetrics]);
@@ -486,7 +487,7 @@ export default function StatsView({ events, totalTime, metadata, turns, autonomy
       ? Object.entries(metadata.models).sort(function (a, b) { return b[1] - a[1]; })
       : null;
     return { usageCards: usageCards, allModelsEntries: allModelsEntries };
-  }, [metadata, modelTokenMap]);
+  }, [metadata, modelTokenMap, themeMode]);
 
   return (
     <ResizablePanel initialSplit={0.72} minPx={200} direction="horizontal">
