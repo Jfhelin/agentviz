@@ -337,63 +337,86 @@ export default function StatsView({ events, totalTime, metadata, turns, autonomy
   var [showAllTurns, setShowAllTurns] = useState(false);
   var TURNS_PREVIEW = 15;
   var cardStyle = getCardStyle();
+  var themeMode = theme.mode;
 
-  var trackStats = {};
-  events.forEach(function (e) {
-    if (!trackStats[e.track]) trackStats[e.track] = { count: 0 };
-    trackStats[e.track].count++;
-  });
+  // Memoize O(n) event iterations so they don't re-run on every parent re-render.
+  var trackStats = useMemo(function () {
+    var stats = {};
+    events.forEach(function (e) {
+      if (!stats[e.track]) stats[e.track] = { count: 0 };
+      stats[e.track].count++;
+    });
+    return stats;
+  }, [events]);
 
-  // Compute subagent stats
-  var agentStats = {};
-  events.forEach(function (e) {
-    if (e.agentName) {
-      if (!agentStats[e.agentName]) {
-        agentStats[e.agentName] = { count: 0, totalDuration: 0, displayName: e.agentDisplayName || e.agentName, errors: 0 };
+  var agentData = useMemo(function () {
+    var stats = {};
+    events.forEach(function (e) {
+      if (e.agentName) {
+        if (!stats[e.agentName]) {
+          stats[e.agentName] = { count: 0, totalDuration: 0, displayName: e.agentDisplayName || e.agentName, errors: 0 };
+        }
+        stats[e.agentName].count++;
+        if (e.track === "agent" && e.duration > 0) stats[e.agentName].totalDuration += e.duration;
+        if (e.isError) stats[e.agentName].errors++;
       }
-      agentStats[e.agentName].count++;
-      if (e.track === "agent" && e.duration > 0) agentStats[e.agentName].totalDuration += e.duration;
-      if (e.isError) agentStats[e.agentName].errors++;
-    }
-  });
-  var agentEntries = Object.entries(agentStats).sort(function (a, b) { return b[1].count - a[1].count; });
-  var totalAgentEvents = agentEntries.reduce(function (sum, e) { return sum + e[1].count; }, 0);
+    });
+    var entries = Object.entries(stats).sort(function (a, b) { return b[1].count - a[1].count; });
+    var total = entries.reduce(function (sum, e) { return sum + e[1].count; }, 0);
+    return { agentStats: stats, agentEntries: entries, totalAgentEvents: total };
+  }, [events]);
+  var agentStats = agentData.agentStats;
+  var agentEntries = agentData.agentEntries;
+  var totalAgentEvents = agentData.totalAgentEvents;
 
-  var userMsgs = events.filter(function (e) { return e.agent === "user"; }).length;
-  var errorCount = metadata ? metadata.errorCount : events.filter(function (e) { return e.isError; }).length;
+  var eventCounts = useMemo(function () {
+    var userMsgs = events.filter(function (e) { return e.agent === "user"; }).length;
+    var errorCount = metadata ? metadata.errorCount : events.filter(function (e) { return e.isError; }).length;
+    return { userMsgs: userMsgs, errorCount: errorCount };
+  }, [events, metadata]);
+  var userMsgs = eventCounts.userMsgs;
+  var errorCount = eventCounts.errorCount;
 
-  // Aggregate token usage per turn
-  var turnTokenMap = {};
-  var modelTokenMap = {};
-  events.forEach(function (e) {
-    if (e.tokenUsage) {
-      if (e.turnIndex !== undefined) {
-        var t = summarizeTokenUsage([turnTokenMap[e.turnIndex], e.tokenUsage]);
-        turnTokenMap[e.turnIndex] = t;
+  var tokenMaps = useMemo(function () {
+    var turnMap = {};
+    var modelMap = {};
+    events.forEach(function (e) {
+      if (e.tokenUsage) {
+        if (e.turnIndex !== undefined) {
+          var t = summarizeTokenUsage([turnMap[e.turnIndex], e.tokenUsage]);
+          turnMap[e.turnIndex] = t;
+        }
+        var modelKey = e.model || (metadata && metadata.primaryModel) || "__unknown__";
+        var m = modelMap[modelKey] || { inputTokens: 0, outputTokens: 0, cacheRead: 0, cacheWrite: 0 };
+        m.inputTokens += e.tokenUsage.inputTokens || 0;
+        m.outputTokens += e.tokenUsage.outputTokens || 0;
+        m.cacheRead += e.tokenUsage.cacheRead || 0;
+        m.cacheWrite += e.tokenUsage.cacheWrite || 0;
+        modelMap[modelKey] = m;
       }
-      // Bucket by model; fall back to primaryModel for events without a model field
-      var modelKey = e.model || (metadata && metadata.primaryModel) || "__unknown__";
-      var m = modelTokenMap[modelKey] || { inputTokens: 0, outputTokens: 0, cacheRead: 0, cacheWrite: 0 };
-      m.inputTokens += e.tokenUsage.inputTokens || 0;
-      m.outputTokens += e.tokenUsage.outputTokens || 0;
-      m.cacheRead += e.tokenUsage.cacheRead || 0;
-      m.cacheWrite += e.tokenUsage.cacheWrite || 0;
-      modelTokenMap[modelKey] = m;
-    }
-  });
-  var sessionCacheSummary = metadata && metadata.tokenUsage
-    ? formatCacheUsageSummary(metadata.tokenUsage, { variant: "compact" })
-    : null;
+    });
+    var cacheSummary = metadata && metadata.tokenUsage
+      ? formatCacheUsageSummary(metadata.tokenUsage, { variant: "compact" })
+      : null;
+    return { turnTokenMap: turnMap, modelTokenMap: modelMap, sessionCacheSummary: cacheSummary };
+  }, [events, metadata]);
+  var turnTokenMap = tokenMaps.turnTokenMap;
+  var modelTokenMap = tokenMaps.modelTokenMap;
+  var sessionCacheSummary = tokenMaps.sessionCacheSummary;
 
-  var cards = [
-    { label: "Total Events", value: events.length, color: theme.text.primary },
-    { label: "Turns", value: metadata ? metadata.totalTurns : (turns ? turns.length : 0), color: theme.accent.primary },
-    { label: "User Messages", value: userMsgs, color: theme.accent.primary },
-    { label: "Tool Calls", value: (trackStats.tool_call || {}).count || 0, color: theme.track.tool_call },
-    { label: "Errors", value: errorCount, color: errorCount > 0 ? theme.semantic.error : theme.text.muted },
-    { label: "Duration", value: formatDurationLong(totalTime), color: theme.track.context },
-  ];
-  var autonomySummary = buildAutonomySummary(autonomyMetrics);
+  var cards = useMemo(function () {
+    return [
+      { label: "Total Events", value: events.length, color: theme.text.primary },
+      { label: "Turns", value: metadata ? metadata.totalTurns : (turns ? turns.length : 0), color: theme.accent.primary },
+      { label: "User Messages", value: userMsgs, color: theme.accent.primary },
+      { label: "Tool Calls", value: (trackStats.tool_call || {}).count || 0, color: theme.track.tool_call },
+      { label: "Errors", value: errorCount, color: errorCount > 0 ? theme.semantic.error : theme.text.muted },
+      { label: "Duration", value: formatDurationLong(totalTime), color: theme.track.context },
+    ];
+  }, [events.length, metadata, turns, totalTime, trackStats, userMsgs, errorCount, themeMode]);
+  var autonomySummary = useMemo(function () {
+    return buildAutonomySummary(autonomyMetrics);
+  }, [autonomyMetrics]);
 
   function getAutonomyItemColor(label) {
     if (!autonomyMetrics) return theme.accent.primary;
@@ -423,9 +446,8 @@ export default function StatsView({ events, totalTime, metadata, turns, autonomy
     return theme.accent.primary;
   }
 
-  // Pre-compute model usage data for the Model & Usage section
-  var modelUsageData = null;
-  if (metadata && metadata.primaryModel) {
+  var modelUsageData = useMemo(function () {
+    if (!metadata || !metadata.primaryModel) return null;
     var hasTokens = metadata.tokenUsage && (metadata.tokenUsage.inputTokens + metadata.tokenUsage.outputTokens) > 0;
     var hasApiCost = metadata.totalCost != null;
     var perModelData = metadata.modelTokenUsage || (Object.keys(modelTokenMap).length > 0 ? modelTokenMap : null);
@@ -464,8 +486,8 @@ export default function StatsView({ events, totalTime, metadata, turns, autonomy
     var allModelsEntries = Object.keys(metadata.models).length > 1
       ? Object.entries(metadata.models).sort(function (a, b) { return b[1] - a[1]; })
       : null;
-    modelUsageData = { usageCards: usageCards, allModelsEntries: allModelsEntries };
-  }
+    return { usageCards: usageCards, allModelsEntries: allModelsEntries };
+  }, [metadata, modelTokenMap, themeMode]);
 
   return (
     <ResizablePanel initialSplit={0.72} minPx={200} direction="horizontal">

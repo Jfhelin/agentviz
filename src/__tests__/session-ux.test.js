@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { buildReplayLayout, getReplayWindow } from "../lib/replayLayout.js";
 import { buildCommandPaletteIndex, searchCommandPalette } from "../lib/commandPalette.js";
 import { buildTimelineBins } from "../components/Timeline.jsx";
+import { theme } from "../lib/theme.js";
 
 describe("replay layout helpers", function () {
   it("adds extra height for turn headers", function () {
@@ -100,5 +101,25 @@ describe("timeline binning", function () {
     }, 0);
 
     expect(filled).toBeGreaterThan(1);
+  });
+
+  it("preserves agent type colors when binning agent events", function () {
+    var entries = [
+      {
+        index: 0,
+        event: {
+          t: 0,
+          duration: 1,
+          intensity: 0.5,
+          isError: false,
+          track: "agent",
+          agentName: "task",
+        },
+      },
+    ];
+
+    var bins = buildTimelineBins(entries, 100, null, null);
+
+    expect(bins[0].color).toBe(theme.agentType.task);
   });
 });
