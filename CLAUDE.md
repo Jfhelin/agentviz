@@ -34,6 +34,7 @@ src/
     parser.ts          # parseClaudeCodeJSONL() - Claude Code JSONL parser
     copilotCliParser.ts # parseCopilotCliJSONL() - Copilot CLI JSONL parser
     copilotCostParser.ts # parseCopilotPromptsJSON() - Copilot prompt export parser for token/cost analysis
+    copilotChatExportParser.ts # parseCopilotChatExport() - VS Code Copilot Chat export parser; attaches metadata.costAnalysis in compareCost-compatible shape
     vscodeSessionParser.ts # parseVSCodeChatJSON() - VS Code Copilot Chat JSON parser
     atifParser.ts       # parseAtifJSON() - ATIF / Harbor trajectory JSON parser (schema_version ATIF-v1.6)
     liveSessionParser.ts # Incremental live JSONL parser for appended session text
@@ -54,8 +55,13 @@ src/
     diffUtils.js       # Diff detection (isFileEditEvent) + Myers line diff algorithm
     waterfall.ts       # Waterfall view helpers: item building, stats, layout, windowing
     graphLayout.js     # Graph view helpers: ELKjs DAG builder, layout runner, position merger
-    costAnalysis.js    # Per-call cost, context, cache-miss, and token aggregation helpers
-    pricing.js         # Claude and OpenAI/Copilot model pricing table and cost estimation
+    costAnalysis.js    # Per-call cost, context, cache-miss, and token aggregation helpers; buildCompareCostShape() projects to compareCost-compatible shape
+    cacheAnalysis.ts   # Per-model cache scoping, recommit math, unexpected-miss diagnosis (TTL vs tool defs changed)
+    compareCost.ts     # Pure two-run cost analytics: verdict, KPIs, bucket deltas, cache pollution, drift, divergence, prefix-tax projection, behavioral KPIs
+    exportComparison.ts # CostComparison -> paste-friendly markdown
+    runDisplayName.ts  # Prettifies session file names for compare labels
+    imageTokenEstimate.js # Per-model image token estimation for chat exports
+    pricing.js         # Claude/OpenAI/Anthropic/Copilot model pricing (May 2026 rates); per-model cache ratios
     exportHtml.js      # Self-contained HTML export for single sessions and comparisons
     dataInspector.js   # Payload summary and preview helpers for inspector panels
     formatTime.js      # Duration and date formatting utilities
@@ -73,8 +79,9 @@ src/
     WaterfallView.jsx  # Tool execution waterfall with nesting, inspector sidebar
     GraphView.jsx      # Interactive DAG of turns/tool calls with ELKjs layout, pan/zoom, animations
     StatsView.jsx      # Aggregate metrics, tool ranking, turn summary
-    CostView.jsx       # Token spend, cache, and context-composition analysis
-    CompareView.jsx    # Side-by-side session comparison: Scorecard + Tools tabs
+    CostView.jsx       # Token spend, cache, context-composition view with BILLED/CTX/NET lenses, USD/AI Credits unit toggle, overhead filter, unexpected cache-miss panel
+    CompareView.jsx    # Side-by-side session comparison: Scorecard + Tools + Cost tabs
+    CostCompare.jsx    # Side-by-side cost analytics for two Copilot Chat exports (verdict, KPIs, bucket waterfall, behavioral KPIs, drift, copy-as-markdown)
     CommandPalette.jsx # Cmd+K fuzzy search overlay (events, turns, views)
     DiffViewer.jsx     # Inline unified diff view for file-editing tool calls
     DataInspector.jsx  # Readable payload inspector with summaries and copy support

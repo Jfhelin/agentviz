@@ -246,9 +246,23 @@ A **Tools &amp; Skills** panel surfaces every skill, instruction file, custom ag
 
 Per-call token spend, cache read/write usage, context composition, and cumulative cost for sessions with token usage. Copilot prompt exports include prompt context breakdowns so the view can highlight fresh input spikes, cache misses, tool schema growth, and which parts of the prompt are filling the context window.
 
+Three lenses share the same per-call timeline:
+
+- **BILLED** -- what the API charged this call (fresh input / cache write / cached read / output). Default.
+- **CTX** -- how the full prompt context broke down across system, tool defs, history, tool results, current prompt, and the response.
+- **NET** -- truly-new vs cache-recommit tokens per call, plus output. Makes it obvious when a call paid full prompt rates because the cache prefix had to be re-written.
+
+Costs can be displayed in **USD** or **AI Credits** (1 credit = $0.01, matching GitHub Copilot's pricing surface). An **Overhead toggle** filters out non-user calls like `title`, `promptCategorization`, and `summarization` so the timeline shows just the calls you originated.
+
+When an Anthropic call paid full prompt rates that should have been served from the prompt cache, the view surfaces an **Unexpected cache-miss panel** above the summary cards with a structured diagnosis -- either "tool defs changed: X, Y, Z" or "tool defs unchanged - likely TTL expiry" -- driven by the `cacheAnalysis` per-model recommit math.
+
+VS Code Copilot Chat exports (`copilot_all_prompts_*.json`) carry the richest data and unlock every signal above; Claude Code JSONL and Copilot CLI JSONL sessions populate the same view with whatever cost data their formats expose.
+
 <div align="center">
 <img src="docs/screenshots/cost-view.png" alt="Cost View" width="800" />
 </div>
+
+The **Compare view** gains a dedicated **Cost tab** when both compared sessions are Copilot Chat exports. It produces a side-by-side cost analysis: headline verdict and tone, A/B/delta cards, per-bucket cost waterfall (sorted by absolute delta), a behavioral KPI table (path-noise-resistant metrics like output tokens, primary assistant turns, and unique tool kinds), cache-pollution warnings, run drift (model / tools / system text hash divergence), and rule-driven recommendations. A **Copy summary as markdown** button writes a self-contained reference of the comparison to the clipboard for paste-into-chat sharing.
 
 ### Coach View
 
@@ -391,6 +405,7 @@ src/
     parser.ts            # Claude Code JSONL parser
     copilotCliParser.ts  # Copilot CLI JSONL parser
     copilotCostParser.ts # Copilot prompt export JSON parser for token/cost analysis
+    copilotChatExportParser.ts # VS Code Copilot Chat export parser (copilot_all_prompts_*.json) with per-call cost, context buildup, and cache analysis
     vscodeSessionParser.ts # VS Code Copilot Chat JSON parser
     atifParser.ts        # ATIF / Harbor trajectory JSON parser
     dataInspector.js     # Payload summary and preview helpers for inspector panels
@@ -414,8 +429,13 @@ src/
     diffUtils.js         # Diff detection and Myers line diff algorithm
     waterfall.ts         # Waterfall view helpers: item building, stats, layout
     graphLayout.js       # ELKjs graph builder, fork/join DAG for parallel agents, layout merger
-    costAnalysis.js      # Per-call cost, context, cache-miss, and token aggregation helpers
-    pricing.js           # Claude and OpenAI/Copilot model pricing table and cost estimation
+    costAnalysis.js      # Per-call cost, context, cache-miss, and token aggregation helpers. Also exports buildCompareCostShape() which projects analysis into the compareCost-compatible shape.
+    cacheAnalysis.ts     # Per-model cache scoping, prompt-prefix recommit math, unexpected-miss diagnosis (TTL expiry vs tool defs changed)
+    compareCost.ts       # Pure two-run cost analytics: verdict, KPIs, bucket deltas, cache pollution, run drift, divergence split, prefix-tax projection, behavioral KPIs
+    exportComparison.ts  # Pure formatter that turns a CostComparison into a paste-friendly markdown blob
+    runDisplayName.ts    # Strips noise prefixes from session file names; formats ISO timestamps as YYYY-MM-DD HH:MM
+    imageTokenEstimate.js # Per-model image token estimation for chat exports with attached images
+    pricing.js           # Claude, OpenAI/Copilot, and Anthropic model pricing table (May 2026 rates); cost estimation with per-model cache ratios
     pricing.d.ts         # TypeScript declarations for pricing.js
     exportHtml.js        # Self-contained HTML export for single sessions and comparisons
     formatTime.d.ts      # TypeScript declarations for formatTime.js
@@ -432,8 +452,9 @@ src/
     WaterfallView.jsx    # Tool execution waterfall with nesting and inspector
     GraphView.jsx        # Interactive turn graph with expandable tool-call nodes (lazy-loaded)
     StatsView.jsx        # Aggregate metrics, tool ranking, turn summary
-    CostView.jsx         # Token spend, cache, and context-composition analysis
-    CompareView.jsx      # Side-by-side session comparison (Scorecard + Tools tabs)
+    CostView.jsx         # Token spend, cache, and context-composition analysis with BILLED/CTX/NET lenses, USD/AI Credits unit toggle, overhead-call filter, and unexpected cache-miss panel
+    CompareView.jsx      # Side-by-side session comparison (Scorecard + Tools + Cost tabs)
+    CostCompare.jsx      # Side-by-side cost analytics for two Copilot Chat exports (lazy-loaded via CompareView): verdict, KPIs, bucket waterfall, behavioral KPIs, drift, copy-as-markdown
     CommandPalette.jsx   # Cmd+K fuzzy search overlay
     Timeline.jsx         # Scrubable playback bar with event markers
     DiffViewer.jsx       # Inline unified diff for file-editing tool calls
