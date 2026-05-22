@@ -101,6 +101,21 @@ export interface Theme {
     lg: string;
     inset: string;
   };
+  cost: {
+    fresh: string;
+    cwrite: string;
+    cached: string;
+    output: string;
+    ctxSystem: string;
+    ctxToolDefs: string;
+    ctxHistory: string;
+    ctxToolResults: string;
+    ctxCurrent: string;
+    ctxOutput: string;
+    kindMcp: string;
+    kindExtension: string;
+    kindBuiltin: string;
+  };
   focus: { ring: string };
   transition: {
     fast: string;
