@@ -1,5 +1,6 @@
 import { computeCacheHitRate, computeEffectiveInputTokens } from "./cacheMetrics";
 import { estimateCost } from "./pricing.js";
+import { analyzeSessionCalls, emptyComponents } from "./cacheAnalysis";
 
 var CACHE_MISS_MAX_CACHE_READ_RATIO = 0.35;
 var CACHE_MISS_FRESH_SPIKE_MULTIPLIER = 1.5;
@@ -151,6 +152,7 @@ export function buildCostAnalysis(events, metadata) {
   }
 
   var cacheHitRate = computeCacheHitRate(totals.inputTokens, totals.cacheWrite, totals.cacheRead) || 0;
+  var enhancedCacheAnalysis = buildEnhancedCacheAnalysis(calls);
   return {
     calls: calls,
     totals: {
@@ -164,6 +166,125 @@ export function buildCostAnalysis(events, metadata) {
       peakContext: peakContext,
     },
     cacheMisses: cacheMisses,
+    cacheAnalysis: enhancedCacheAnalysis,
     hasCostData: calls.length > 0,
   };
+}
+
+/**
+ * Run the per-model cache analysis (cacheAnalysis.ts) over the calls already
+ * built by buildCostAnalysis. Returns a parallel array of CallAnalysis (one
+ * per call, same order) plus an `unexpectedMisses` array of calls flagged as
+ * unexpected cache misses with structured diagnosis. The new CostView consumes
+ * this; the legacy heuristic `cacheMisses` is kept for backward compatibility.
+ */
+function buildEnhancedCacheAnalysis(calls) {
+  if (!calls || calls.length === 0) {
+    return { perCall: [], unexpectedMisses: [], unexpectedMissCost: 0 };
+  }
+  var promptGroups = groupCallsByPrompt(calls);
+  var groupResults = analyzeSessionCalls(promptGroups.groups);
+  var perCallByEventIndex = {};
+  for (var g = 0; g < groupResults.length; g += 1) {
+    var groupCallIds = promptGroups.callIds[g];
+    var analyzed = groupResults[g].calls;
+    for (var i = 0; i < analyzed.length; i += 1) {
+      perCallByEventIndex[groupCallIds[i]] = analyzed[i];
+    }
+  }
+
+  var perCall = [];
+  var unexpectedMisses = [];
+  var unexpectedMissCost = 0;
+  for (var c = 0; c < calls.length; c += 1) {
+    var call = calls[c];
+    var key = String(call.eventIndex);
+    var analysis = perCallByEventIndex[key] || null;
+    perCall.push(analysis);
+    if (analysis && analysis.unexpectedMiss) {
+      unexpectedMissCost += call.cost || 0;
+      unexpectedMisses.push({
+        callIndex: call.index,
+        eventIndex: call.eventIndex,
+        model: call.model,
+        promptTokens: call.tokenUsage ? call.tokenUsage.inputTokens || 0 : 0,
+        cost: call.cost || 0,
+        diag: analysis.cacheMissDiag,
+      });
+    }
+  }
+  return { perCall: perCall, unexpectedMisses: unexpectedMisses, unexpectedMissCost: unexpectedMissCost };
+}
+
+function getCostPromptForCall(call) {
+  var event = call && call.event;
+  var raw = event && event.raw;
+  return raw && raw.costPrompt ? raw.costPrompt : null;
+}
+
+function getToolDefs(call) {
+  var prompt = getCostPromptForCall(call);
+  if (!prompt || !Array.isArray(prompt.tools)) return [];
+  return prompt.tools.map(function (tool, idx) {
+    if (tool && typeof tool === "object") {
+      var name = tool.name || (tool.function && tool.function.name) || ("tool_" + idx);
+      var copy = Object.assign({}, tool);
+      copy.name = name;
+      return copy;
+    }
+    return { name: "tool_" + idx, value: tool };
+  });
+}
+
+function getComponentsFromBreakdown(breakdown) {
+  return {
+    system: breakdown.system || 0,
+    tool_defs: breakdown.tools || 0,
+    history: breakdown.history || 0,
+    tool_results: breakdown.toolResults || 0,
+    current: breakdown.user || 0,
+  };
+}
+
+/**
+ * Group calls into "prompts" for cacheAnalysis. We use event.turnIndex as the
+ * grouping key when available; otherwise each call is its own prompt. Returns
+ * parallel arrays so we can map results back to call.eventIndex.
+ */
+function groupCallsByPrompt(calls) {
+  var groups = [];
+  var callIds = [];
+  var currentKey = null;
+  var current = null;
+  var currentIds = null;
+  for (var i = 0; i < calls.length; i += 1) {
+    var call = calls[i];
+    var key = call.event && typeof call.event.turnIndex === "number"
+      ? "turn:" + call.event.turnIndex
+      : "call:" + call.eventIndex;
+    if (key !== currentKey || !current) {
+      if (current) { groups.push(current); callIds.push(currentIds); }
+      current = { calls: [], cacheWriteSum: 0 };
+      currentIds = [];
+      currentKey = key;
+    }
+    var usage = call.tokenUsage || {};
+    var components = getComponentsFromBreakdown(call.contextBreakdown || emptyComponents());
+    current.calls.push({
+      id: String(call.eventIndex),
+      model: call.model || "unknown",
+      usage: {
+        prompt_tokens: usage.inputTokens || 0,
+        completion_tokens: usage.outputTokens || 0,
+        cached_tokens: usage.cacheRead || 0,
+        cache_write: usage.cacheWrite || 0,
+      },
+      tools: getToolDefs(call),
+      components: components,
+    });
+    current.cacheWriteSum += usage.cacheWrite || 0;
+    currentIds.push(String(call.eventIndex));
+  }
+  if (current) { groups.push(current); callIds.push(currentIds); }
+  return { groups: groups, callIds: callIds };
 }

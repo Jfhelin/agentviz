@@ -60,6 +60,34 @@ describe("buildCostAnalysis", function () {
     expect(analysis.hasCostData).toBe(false);
     expect(analysis.calls).toHaveLength(0);
   });
+
+  it("attaches enhanced cacheAnalysis with per-call records and unexpectedMisses", function () {
+    var analysis = buildCostAnalysis([
+      event(0, { inputTokens: 8000, outputTokens: 100, cacheRead: 0, cacheWrite: 8000 }, "claude-sonnet-4.6", 8000, ["search"]),
+      event(1, { inputTokens: 8200, outputTokens: 120, cacheRead: 0, cacheWrite: 8200 }, "claude-sonnet-4.6", 8200, ["search"]),
+    ], { primaryModel: "claude-sonnet-4.6" });
+
+    expect(analysis.cacheAnalysis).toBeDefined();
+    expect(analysis.cacheAnalysis.perCall).toHaveLength(2);
+    expect(analysis.cacheAnalysis.perCall[0]).not.toBeNull();
+    expect(analysis.cacheAnalysis.unexpectedMisses.length).toBeGreaterThan(0);
+    var miss = analysis.cacheAnalysis.unexpectedMisses[0];
+    expect(miss.callIndex).toBe(1);
+    expect(miss.diag).toBeDefined();
+    // Same tool defs across both calls -> TTL expiry path
+    expect(miss.diag.likelyTtlExpiry).toBe(true);
+    expect(analysis.cacheAnalysis.unexpectedMissCost).toBeGreaterThan(0);
+  });
+
+  it("does not flag an unexpected miss across a model switch", function () {
+    var analysis = buildCostAnalysis([
+      event(0, { inputTokens: 8000, outputTokens: 100, cacheRead: 0, cacheWrite: 8000 }, "claude-sonnet-4.6", 8000),
+      event(1, { inputTokens: 8000, outputTokens: 100, cacheRead: 0, cacheWrite: 0 }, "gpt-4o", 8000),
+    ], {});
+
+    expect(analysis.cacheAnalysis.unexpectedMisses).toHaveLength(0);
+    expect(analysis.cacheAnalysis.perCall[1].modelSwitched).toBe(true);
+  });
 });
 
 describe("formatTokens", function () {
