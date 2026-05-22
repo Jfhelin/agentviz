@@ -4,6 +4,7 @@ import { formatCost } from "../lib/pricing.js";
 import { formatDurationLong as formatDuration } from "../lib/formatTime.js";
 import { buildAutonomyMetrics, formatAutonomyEfficiency, getSessionCost } from "../lib/autonomyMetrics.js";
 import ToolbarButton from "./ui/ToolbarButton.jsx";
+import CostCompare from "./CostCompare.jsx";
 
 function fmt(n) {
   if (n == null || n === 0) return "--";
@@ -359,6 +360,7 @@ function ToolsChart({ mA, mB, fileA, fileB }) {
 var TABS = [
   { id: "scorecard", label: "Scorecard" },
   { id: "tools", label: "Tools" },
+  { id: "cost", label: "Cost" },
 ];
 
 export default function CompareView({ sessionA, sessionB, onOpenSessionA, onOpenSessionB }) {
@@ -406,6 +408,7 @@ export default function CompareView({ sessionA, sessionB, onOpenSessionA, onOpen
       }}>
         {tab === "scorecard" && <Scorecard mA={mA} mB={mB} fileA={sessionA.file} fileB={sessionB.file} onOpenSessionA={onOpenSessionA} onOpenSessionB={onOpenSessionB} />}
         {tab === "tools" && <ToolsChart mA={mA} mB={mB} fileA={sessionA.file} fileB={sessionB.file} />}
+        {tab === "cost" && <CostCompare sessionA={sessionA} sessionB={sessionB} />}
       </div>
     </div>
   );

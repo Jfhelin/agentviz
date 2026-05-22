@@ -50,6 +50,8 @@
 import { computeCacheHitRate } from "./cacheMetrics";
 import { estimateImageTokens } from "./imageTokenEstimate.js";
 import { estimateMultiModelCost } from "./pricing.js";
+// @ts-ignore -- costAnalysis.js has no .d.ts but the functions we use are well-typed.
+import { buildCostAnalysis, buildCompareCostShape } from "./costAnalysis.js";
 import type { NormalizedEvent, ParsedSession, SessionMetadata, SessionTurn, TokenUsage } from "./sessionTypes";
 
 const MAX_DISPLAY_TEXT_LENGTH = 4000;
@@ -292,10 +294,14 @@ function normalizeMessages(rawMessages: unknown): NormalizedMessage[] {
   return out;
 }
 
-function buildContextBreakdown(messages: NormalizedMessage[]): AnyRecord {
+function buildContextBreakdown(
+  messages: NormalizedMessage[],
+  tools: unknown[] | undefined | null,
+  realPromptTokens: number,
+): AnyRecord {
   const breakdown = {
     system: 0,
-    tools: 0, // tool defs are not surfaced in chat exports; folded into system text
+    tools: 0,
     history: 0,
     toolResults: 0,
     user: 0,
@@ -316,6 +322,34 @@ function buildContextBreakdown(messages: NormalizedMessage[]): AnyRecord {
     else breakdown.history += tokens;
   }
 
+  // Tool definitions: serialize each tool to JSON and use chars-to-tokens.
+  // Chat exports often list tools under metadata.tools at the per-log level.
+  if (Array.isArray(tools)) {
+    for (let i = 0; i < tools.length; i += 1) {
+      const tool = tools[i];
+      try {
+        const json = JSON.stringify(tool);
+        if (typeof json === "string") {
+          breakdown.tools += estimateTextTokens(json);
+        }
+      } catch {
+        // Ignore non-serializable tool definitions.
+      }
+    }
+  }
+
+  const estTotal = breakdown.system + breakdown.tools + breakdown.history + breakdown.toolResults + breakdown.user;
+  // Rescale estimated component tokens onto the real prompt_tokens count so
+  // that downstream "fixed share" math reflects what the API actually billed.
+  if (estTotal > 0 && realPromptTokens > 0) {
+    const scale = realPromptTokens / estTotal;
+    breakdown.system = Math.round(breakdown.system * scale);
+    breakdown.tools = Math.round(breakdown.tools * scale);
+    breakdown.history = Math.round(breakdown.history * scale);
+    breakdown.toolResults = Math.round(breakdown.toolResults * scale);
+    breakdown.user = Math.round(breakdown.user * scale);
+  }
+
   breakdown.total = breakdown.system + breakdown.tools + breakdown.history + breakdown.toolResults + breakdown.user;
   return breakdown;
 }
@@ -327,6 +361,30 @@ function getLastUserText(messages: NormalizedMessage[]): string {
     if (text) return text;
   }
   return "LLM call";
+}
+
+function getFirstSystemText(messages: NormalizedMessage[]): string {
+  for (let index = 0; index < messages.length; index += 1) {
+    const role = messages[index].role;
+    if (role !== "system" && role !== "developer") continue;
+    const text = messages[index].content.trim();
+    if (text) return text;
+  }
+  return "";
+}
+
+function previewOf(s: string, max: number): string {
+  if (!s) return "";
+  if (s.length <= max) return s;
+  return s.slice(0, max);
+}
+
+function hashStr(s: string): string {
+  let h = 5381;
+  for (let i = 0; i < s.length; i += 1) {
+    h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
+  }
+  return h.toString(16).padStart(8, "0");
 }
 
 function getResponseText(response: AnyRecord | undefined | null): string {
@@ -353,7 +411,8 @@ function makeEvent(eventIndex: number, ctx: ParsedLogEvent): NormalizedEvent | n
 
   const rawMessages = isRecord(log.requestMessages) ? log.requestMessages.messages : undefined;
   const messages = normalizeMessages(rawMessages);
-  const contextBreakdown = buildContextBreakdown(messages);
+  const toolsRaw = Array.isArray(metadata.tools) ? (metadata.tools as unknown[]) : null;
+  const contextBreakdown = buildContextBreakdown(messages, toolsRaw, usage.inputTokens || 0);
 
   // Aggregate image attachments across all messages in the prompt
   let imageTokens = 0;
@@ -369,9 +428,13 @@ function makeEvent(eventIndex: number, ctx: ParsedLogEvent): NormalizedEvent | n
   const category = categorizeCallName(callName);
   const responseText = getResponseText(log.response);
   const userText = getLastUserText(messages);
+  const systemText = getFirstSystemText(messages);
   const displayText = category === "overhead"
     ? `[${callName}] ${responseText || userText}`
     : userText;
+  const SYS_PREVIEW_MAX = 4000;
+  const RESP_PREVIEW_MAX = 4000;
+  const USER_PREVIEW_MAX = 4000;
 
   return {
     t: eventIndex,
@@ -397,12 +460,26 @@ function makeEvent(eventIndex: number, ctx: ParsedLogEvent): NormalizedEvent | n
       costPrompt: {
         index: eventIndex,
         messages: messages.map((m) => m.raw),
-        tools: [],          // chat exports do not list tool definitions
-        toolNames: [],
+        tools: toolsRaw || [],
+        toolNames: Array.isArray(toolsRaw)
+          ? toolsRaw
+              .map((t) => {
+                if (isRecord(t) && typeof t.name === "string") return t.name;
+                if (isRecord(t) && isRecord(t.function) && typeof t.function.name === "string") return t.function.name;
+                return null;
+              })
+              .filter((n): n is string => typeof n === "string")
+          : [],
         contextBreakdown,
         callName,
         category,
         imageTokens,
+        responsePreview: previewOf(responseText, RESP_PREVIEW_MAX),
+        currentText: previewOf(userText === "LLM call" ? "" : userText, USER_PREVIEW_MAX),
+        userPromptText: ctx.promptText || (userText === "LLM call" ? "" : userText),
+        systemPreview: previewOf(systemText, SYS_PREVIEW_MAX),
+        systemChars: systemText.length,
+        systemHash: systemText ? hashStr(systemText) : undefined,
       },
     },
     turnIndex: ctx.promptIndex,
@@ -514,5 +591,15 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
     };
   });
 
-  return { events, turns, metadata: buildMetadata(events, root.prompts.length) };
+  const metadata = buildMetadata(events, root.prompts.length);
+  // Attach a self-contained `costAnalysis` in the compareCost-compatible
+  // shape so CompareView's Cost tab and the markdown export can consume it
+  // without re-running buildCostAnalysis. CostView still calls buildCostAnalysis
+  // directly on the events; both paths produce the same numbers.
+  const rawAnalysis = buildCostAnalysis(events, metadata);
+  const compareShape = buildCompareCostShape(rawAnalysis);
+  if (compareShape) {
+    (metadata as SessionMetadata & { costAnalysis?: unknown }).costAnalysis = compareShape;
+  }
+  return { events, turns, metadata };
 }

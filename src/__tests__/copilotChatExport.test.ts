@@ -141,14 +141,17 @@ describe("copilotChatExportParser", () => {
 
     it("ignores type=3 cache-marker parts when computing breakdown text", () => {
       // The fixture's role=1 user message has a cache marker part; only the
-      // text part should contribute to the breakdown.
+      // text part should contribute to the breakdown. After rescaling onto
+      // real prompt_tokens the user bucket grows, so we check share rather
+      // than absolute token count.
       const parsed = parseCopilotChatExport(loadFixture());
       const event = parsed!.events[1];
       const cb: any = (event.raw as any).costPrompt.contextBreakdown;
-      // The last user message text is "Please help with my task." (~6 tokens).
-      // Cache marker contributes nothing.
+      // The last user message text is "Please help with my task." -- a small
+      // sliver of the prompt. Cache marker contributes nothing.
       expect(cb.user).toBeGreaterThan(0);
-      expect(cb.user).toBeLessThan(20);
+      // Sanity: user bucket isn't absurdly inflated by a stray cache marker.
+      expect(cb.user / cb.total).toBeLessThan(0.5);
     });
   });
 

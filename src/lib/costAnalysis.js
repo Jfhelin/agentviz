@@ -288,3 +288,113 @@ function groupCallsByPrompt(calls) {
   if (current) { groups.push(current); callIds.push(currentIds); }
   return { groups: groups, callIds: callIds };
 }
+
+/**
+ * Project the upstream-shape analysis (calls[], totals.inputTokens...) into the
+ * shape compareCost.ts and exportComparison.ts expect (prompts[], totals.promptTokens...).
+ *
+ * Used by parsers that want to expose a self-contained `metadata.costAnalysis`
+ * for the Compare view and the markdown export, without forcing every consumer
+ * to re-run buildCostAnalysis. The upstream-shape `analysis` is still authoritative
+ * for CostView; this is purely an additional consumer-facing surface.
+ */
+export function buildCompareCostShape(analysis) {
+  if (!analysis || !Array.isArray(analysis.calls) || analysis.calls.length === 0) {
+    return null;
+  }
+
+  var prompts = [];
+  var currentKey = null;
+  var current = null;
+
+  function freshFromUsage(usage) {
+    return computeEffectiveInputTokens(usage.inputTokens || 0, usage.cacheRead || 0);
+  }
+
+  for (var i = 0; i < analysis.calls.length; i += 1) {
+    var call = analysis.calls[i];
+    var event = call.event || {};
+    var prompt = getCostPromptForCall(call) || {};
+    var usage = call.tokenUsage || {};
+    var bd = call.contextBreakdown || emptyComponents();
+    var fresh = freshFromUsage(usage);
+    var cached = usage.cacheRead || 0;
+    var cacheWrite = usage.cacheWrite || 0;
+    var output = usage.outputTokens || 0;
+    var promptTokens = usage.inputTokens || 0;
+    var cost = call.cost || 0;
+
+    var key = typeof event.turnIndex === "number" ? "turn:" + event.turnIndex : "call:" + call.eventIndex;
+    if (key !== currentKey || !current) {
+      current = {
+        index: prompts.length,
+        cost: 0, output: 0, cached: 0, fresh: 0, cacheWrite: 0, promptTokens: 0,
+        llmCount: 0,
+        events: [],
+      };
+      if (typeof prompt.userPromptText === "string") current.label = prompt.userPromptText;
+      else if (typeof prompt.callName === "string") current.label = prompt.callName;
+      prompts.push(current);
+      currentKey = key;
+    }
+
+    var eventLike = {
+      name: prompt.callName || event.text || "LLM call",
+      model: call.model || "unknown",
+      cost: cost,
+      output: output,
+      cached: cached,
+      fresh: fresh,
+      cacheWrite: cacheWrite,
+      promptTokens: promptTokens,
+      components: {
+        system: bd.system || 0,
+        tool_defs: bd.tools || 0,
+        history: bd.history || 0,
+        tool_results: bd.toolResults || 0,
+        current: bd.user || 0,
+        output: output,
+      },
+      kind: "llm",
+    };
+    if (typeof prompt.category === "string") eventLike.category = prompt.category;
+    if (typeof prompt.responsePreview === "string") eventLike.responsePreview = prompt.responsePreview;
+    if (typeof prompt.currentText === "string") eventLike.currentText = prompt.currentText;
+    if (typeof prompt.systemPreview === "string") {
+      eventLike.systemPreview = prompt.systemPreview;
+      if (typeof prompt.systemChars === "number") eventLike.systemChars = prompt.systemChars;
+      if (typeof prompt.systemHash === "string") eventLike.systemHash = prompt.systemHash;
+    }
+    if (typeof prompt.argsSummary === "string") eventLike.argsSummary = prompt.argsSummary;
+    if (typeof prompt.rawArgs === "string") eventLike.rawArgs = prompt.rawArgs;
+
+    current.events.push(eventLike);
+    current.cost += cost;
+    current.output += output;
+    current.cached += cached;
+    current.fresh += fresh;
+    current.cacheWrite += cacheWrite;
+    current.promptTokens += promptTokens;
+    current.llmCount += 1;
+  }
+
+  var t = analysis.totals || {};
+  var totalDenom = (t.cacheRead || 0) + (t.cacheWrite || 0) + (t.freshInputTokens || 0);
+  var totals = {
+    promptTokens: t.inputTokens || 0,
+    output: t.outputTokens || 0,
+    cached: t.cacheRead || 0,
+    fresh: t.freshInputTokens || 0,
+    cacheWrite: t.cacheWrite || 0,
+    cost: t.cost || 0,
+    llmCalls: analysis.calls.length,
+    toolCalls: 0,
+    cacheHitRate: totalDenom > 0 ? (t.cacheRead || 0) / totalDenom : 0,
+  };
+  if (analysis.cacheAnalysis) {
+    totals.unexpectedMissCount = (analysis.cacheAnalysis.unexpectedMisses || []).length;
+    totals.unexpectedMissCost = analysis.cacheAnalysis.unexpectedMissCost || 0;
+  }
+
+  return { prompts: prompts, totals: totals };
+}
