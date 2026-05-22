@@ -11,6 +11,7 @@
  */
 
 import { detectAtif, parseAtifJSON } from "./atifParser";
+import { detectCopilotChatExport, parseCopilotChatExport } from "./copilotChatExportParser";
 import { detectCopilotCli, parseCopilotCliJSONL } from "./copilotCliParser";
 import { detectCopilotPrompts, parseCopilotPromptsJSON } from "./copilotCostParser";
 import { parseClaudeCodeJSONL } from "./parser";
@@ -21,6 +22,10 @@ export function detectFormat(text: string): SessionFormat {
   if (detectAtif(text)) return "atif";
   if (detectCopilotCli(text)) return "copilot-cli";
   if (detectVSCodeChat(text)) return "vscode-chat";
+  // Real Copilot Chat exports (`copilot_all_prompts_*.json`) must be checked
+  // BEFORE the flat copilot-prompts detector: both have a top-level `prompts`
+  // array, but the chat export wraps each prompt's calls in a `logs[]` shape.
+  if (detectCopilotChatExport(text)) return "copilot-chat-export";
   if (detectCopilotPrompts(text)) return "copilot-prompts";
   return "claude-code";
 }
@@ -32,6 +37,7 @@ export function parseSession(text: string): ParsedSession | null {
   if (format === "atif") parsed = parseAtifJSON(text);
   else if (format === "copilot-cli") parsed = parseCopilotCliJSONL(text);
   else if (format === "vscode-chat") parsed = parseVSCodeChatJSON(text);
+  else if (format === "copilot-chat-export") parsed = parseCopilotChatExport(text);
   else if (format === "copilot-prompts") parsed = parseCopilotPromptsJSON(text);
   else parsed = parseClaudeCodeJSONL(text);
 
