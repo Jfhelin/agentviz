@@ -645,13 +645,38 @@ function LLMDetail(props) {
       {(function () {
         var hasText = ev.responsePreview && ev.responsePreview.trim().length > 0;
         var calls = ev.producedToolCalls || [];
-        if (!hasText && calls.length === 0) return null;
+        var silent = ev.silentToolCall;
+        if (!hasText && calls.length === 0 && !silent) return null;
         return (
           <div style={{ marginTop: 14 }}>
             <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 5, fontWeight: 600 }}>
               Response ({fmtT(ev.output)} output tok)
             </div>
             {hasText && <div style={textBlockStyle}>{ev.responsePreview}</div>}
+            {!hasText && calls.length === 0 && silent && (
+              <div style={{
+                background: theme.bg.base, border: "1px dashed " + theme.border.default,
+                borderRadius: 3, padding: "8px 10px",
+              }}>
+                <div style={{ color: theme.text.secondary, fontStyle: "italic", fontSize: theme.fontSize.sm, marginBottom: 6 }}>
+                  No text content. The model spent its {fmtT(silent.outputTokens)} output tokens emitting a tool call that the export does not capture inline.
+                </div>
+                <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, marginBottom: 4 }}>
+                  Likely tool{silent.likelyTools.length === 1 ? "" : "s"} (from the {silent.likelyTools.length === 1 ? "single tool" : "tools"} exposed on this call):
+                </div>
+                {silent.likelyTools.map(function (n, i) {
+                  return (
+                    <div key={i} style={{ display: "flex", gap: 8, alignItems: "baseline", fontFamily: theme.font.mono, fontSize: theme.fontSize.xs, lineHeight: 1.7 }}>
+                      <span style={{ color: theme.text.muted }}>→</span>
+                      <span style={{ color: theme.text.primary, fontWeight: 600 }}>{n}</span>
+                      {silent.likelyTools.length === 1 && (
+                        <span style={{ color: theme.text.muted }}>(only tool offered, so this is what got called)</span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
             {!hasText && calls.length > 0 && (
               <div style={{ ...textBlockStyle, color: theme.text.secondary, fontStyle: "italic", marginBottom: 6 }}>
                 No text content -- the model spent its {fmtT(ev.output)} output tokens emitting {calls.length} tool call{calls.length === 1 ? "" : "s"}:

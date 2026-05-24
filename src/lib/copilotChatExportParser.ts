@@ -460,6 +460,15 @@ export interface CostAnalysisCall {
    * in the export. Lets us show *what the model did* instead of an empty
    * response box. */
   producedToolCalls: { name: string; argsSummary: string }[];
+  /** Set when the model emitted output tokens but neither a text response
+   * nor a captured tool call. This is the classic "internal tool call"
+   * pattern used by overhead calls like promptCategorization: the model
+   * invoked a single exposed tool that the host consumed directly without
+   * logging a separate toolCall entry. We surface the exposed tools so the
+   * detail panel can say "model likely called X" instead of rendering an
+   * empty `{"type":"success","message":[""]}` blob. Null when the response
+   * text was non-empty or the model produced visible tool calls. */
+  silentToolCall: { likelyTools: string[]; outputTokens: number } | null;
   model: string;
   duration: number;
   promptTokens: number;
@@ -914,6 +923,22 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
         category: categorizeCallName(log.name),
         responsePreview: summarizeResponse(log.response),
         producedToolCalls,
+        silentToolCall: (function () {
+          const respText = (summarizeResponse(log.response) || "").trim();
+          if (respText.length > 0) return null;
+          if (producedToolCalls.length > 0) return null;
+          if (out_t <= 0) return null;
+          const exposed: string[] = [];
+          const rawTools = log.metadata?.tools ?? [];
+          for (const t of rawTools) {
+            const n = (t as { function?: { name?: string }; name?: string })?.function?.name
+              ?? (t as { name?: string })?.name
+              ?? null;
+            if (n) exposed.push(n);
+          }
+          if (exposed.length === 0) return null;
+          return { likelyTools: exposed.slice(0, 5), outputTokens: out_t };
+        })(),
         model,
         duration: log.metadata?.duration ?? 0,
         promptTokens: usage.prompt_tokens,
