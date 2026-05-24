@@ -2287,20 +2287,20 @@ export default function CostView(props) {
                         {(function () {
                           var pillBg, pillText;
                           if (isLLM) {
-                            pillBg = theme.cost.cached;
+                            pillBg = "#4f46e5";
                             pillText = "LLM call";
                           } else if (ev.subagent) {
-                            pillBg = theme.cost.ctxToolDefs;
+                            pillBg = "#b45309";
                             pillText = "Subagent";
                           } else {
-                            pillBg = theme.cost.ctxHistory;
+                            pillBg = "#0f766e";
                             pillText = "Tool";
                           }
                           return (
                             <div style={{
-                              fontSize: theme.fontSize.xs, fontWeight: 600, padding: "2px 8px", borderRadius: 3,
+                              fontSize: theme.fontSize.xs, fontWeight: 700, padding: "2px 8px", borderRadius: 3,
                               display: "inline-flex", alignItems: "center", justifyContent: "center",
-                              color: theme.text.primary, marginTop: 1, background: pillBg,
+                              color: "#ffffff", marginTop: 1, background: pillBg,
                               textTransform: "uppercase", letterSpacing: 0.4, height: 18, whiteSpace: "nowrap",
                             }} title={isLLM ? "Roundtrip to the model. Billed." : ev.subagent ? "Tool that spawns its own LLM call internally. Has an estimated cost." : "Client-side tool execution. No LLM cost."}>{pillText}</div>
                           );
