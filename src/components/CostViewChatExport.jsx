@@ -795,7 +795,7 @@ function renderSystemAnatomy(ev) {
       ) : null,
     },
   ].filter(function (r) { return r.chars > 0; });
-  var openByDefault = { mode: true };
+  var openByDefault = {};
   if (!ev.chatMode && skills.length === 0) openByDefault.other = true;
   return (
     <div>
