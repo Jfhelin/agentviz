@@ -1532,12 +1532,11 @@ export default function CostView(props) {
 function colHeadStyle() {
   return {
     background: theme.bg.raised,
-    padding: "11px 14px",
-    fontSize: theme.fontSize.xs,
-    color: theme.text.muted,
-    textTransform: "uppercase",
-    letterSpacing: 0.6,
+    padding: "13px 16px",
+    fontSize: theme.fontSize.base,
+    color: theme.text.primary,
+    letterSpacing: 0.2,
     borderBottom: "1px solid " + theme.border.default,
-    fontWeight: 600,
+    fontWeight: 700,
   };
 }
