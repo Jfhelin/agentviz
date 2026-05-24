@@ -69,6 +69,55 @@ function friendlyCallName(name) {
   return name;
 }
 
+// Names of LLM calls that represent a real agent/chat turn (vs UI overhead
+// like title or promptCategorization). For these we want a richer "what
+// happened" label instead of the static friendlyCallName.
+var AGENT_TURN_NAMES = { "panel/editAgent": true, "panel/request": true };
+
+function firstLine(text) {
+  if (!text) return "";
+  var i = text.indexOf("\n");
+  var line = (i >= 0 ? text.slice(0, i) : text).trim();
+  if (line.length > 90) line = line.slice(0, 90) + "…";
+  return line;
+}
+
+function summarizeToolCalls(calls) {
+  if (!calls || calls.length === 0) return "";
+  var counts = {};
+  calls.forEach(function (c) {
+    var n = c && c.name ? c.name : "tool";
+    counts[n] = (counts[n] || 0) + 1;
+  });
+  var names = Object.keys(counts);
+  var parts = names.slice(0, 3).map(function (n) {
+    return counts[n] > 1 ? n + " \u00d7" + counts[n] : n;
+  });
+  if (names.length > 3) parts.push("+" + (names.length - 3) + " more");
+  return parts.join(", ");
+}
+
+// Build a smart label for an agent-turn LLM event. Prefers the tools the
+// model called this turn; falls back to the first line of the response.
+function smartTurnLabel(ev) {
+  var toolPart = summarizeToolCalls(ev.producedToolCalls);
+  if (toolPart) return "\u2192 " + toolPart;
+  var text = firstLine(ev.responsePreview);
+  if (text) return "\u201c" + text + "\u201d";
+  return "";
+}
+
+// Returns { index, total } for ev within its prompt's LLM events with the
+// same name. 1-based. total=1 when there's only one such call (we suppress
+// the counter in that case).
+function turnIndexWithinPrompt(promptEvents, targetEvent) {
+  var matches = (promptEvents || []).filter(function (e) {
+    return e.kind === "llm" && e.name === targetEvent.name;
+  });
+  var idx = matches.indexOf(targetEvent);
+  return { index: idx + 1, total: matches.length };
+}
+
 function fmt$(n) {
   if (n == null || isNaN(n)) return isCredits() ? "0 cr" : "$0";
   if (isCredits()) {
@@ -1506,12 +1555,37 @@ export default function CostView(props) {
                         }}>{isLLM ? "L" : "T"}</div>
                         <div>
                           <div style={{ color: theme.text.primary, fontSize: theme.fontSize.base, fontWeight: 500, lineHeight: 1.4, display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap" }}>
-                            <span title={isLLM ? ev.name : undefined}>{isLLM ? friendlyCallName(ev.name) : ev.name}</span>
-                            {isLLM && ev.name && friendlyCallName(ev.name) !== ev.name && (
-                              <span style={{ color: theme.text.ghost, fontWeight: 400, fontSize: theme.fontSize.xs, fontFamily: theme.font.mono }}>
-                                {ev.name}
-                              </span>
-                            )}
+                            {(function () {
+                              if (!isLLM) return <span>{ev.name}</span>;
+                              var isAgentTurn = AGENT_TURN_NAMES[ev.name];
+                              var smart = isAgentTurn ? smartTurnLabel(ev) : "";
+                              if (smart) {
+                                var pos = turnIndexWithinPrompt(p.events, ev);
+                                return (
+                                  <>
+                                    <span title={ev.responsePreview || ev.name}>{smart}</span>
+                                    {pos.total > 1 && (
+                                      <span style={{ color: theme.text.muted, fontWeight: 400, fontSize: theme.fontSize.xs }}>
+                                        Step {pos.index} of {pos.total}
+                                      </span>
+                                    )}
+                                    <span style={{ color: theme.text.ghost, fontWeight: 400, fontSize: theme.fontSize.xs, fontFamily: theme.font.mono }}>
+                                      {ev.name}
+                                    </span>
+                                  </>
+                                );
+                              }
+                              return (
+                                <>
+                                  <span title={ev.name}>{friendlyCallName(ev.name)}</span>
+                                  {ev.name && friendlyCallName(ev.name) !== ev.name && (
+                                    <span style={{ color: theme.text.ghost, fontWeight: 400, fontSize: theme.fontSize.xs, fontFamily: theme.font.mono }}>
+                                      {ev.name}
+                                    </span>
+                                  )}
+                                </>
+                              );
+                            })()}
                             {isLLM && ev.category === "overhead" && (
                               <span style={{
                                 fontSize: theme.fontSize.xs, fontWeight: 600, letterSpacing: 0.4,
