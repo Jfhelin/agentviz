@@ -246,6 +246,8 @@ interface ScaffoldingSection {
   tag: string;
   /** Length of the section's inner text in chars. */
   chars: number;
+  /** Inner text body, truncated to ~1500 chars for hover preview. */
+  body: string;
 }
 
 interface FileAttachment {
@@ -433,11 +435,14 @@ const SCAFFOLDING_TAGS = [
 
 function extractScaffolding(systemText: string): ScaffoldingSection[] {
   const out: ScaffoldingSection[] = [];
+  const MAX_BODY = 1500;
   for (const tag of SCAFFOLDING_TAGS) {
     const re = new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`, "gi");
     let m: RegExpExecArray | null;
     while ((m = re.exec(systemText)) !== null) {
-      out.push({ tag, chars: m[1].length });
+      const inner = m[1];
+      const body = inner.length > MAX_BODY ? inner.slice(0, MAX_BODY).trim() + "\n…[truncated]" : inner.trim();
+      out.push({ tag, chars: inner.length, body });
     }
   }
   return out;

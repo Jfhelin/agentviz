@@ -658,7 +658,7 @@ function renderSystemAnatomy(ev) {
           <div style={{ marginTop: 6, fontFamily: theme.font.mono, fontSize: theme.fontSize.xs }}>
             {scaff.map(function (s, i) {
               return (
-                <div key={i} style={{ display: "flex", gap: 8, padding: "2px 0" }} title={"<" + s.tag + "> · " + s.chars.toLocaleString() + " chars"}>
+                <div key={i} style={{ display: "flex", gap: 8, padding: "2px 0", cursor: s.body ? "help" : "default" }} title={s.body ? "<" + s.tag + ">  ·  " + s.chars.toLocaleString() + " chars\n\n" + s.body : "<" + s.tag + ">  ·  " + s.chars.toLocaleString() + " chars"}>
                   <span style={{ color: theme.text.primary }}>&lt;{s.tag}&gt;</span>
                   <span style={{ color: theme.text.muted, marginLeft: "auto" }}>~{fmtT(charsToScaledTok(s.chars))} tok</span>
                 </div>
