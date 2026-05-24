@@ -1443,7 +1443,6 @@ function computePromptCostByBucket(p) {
     ? "Estimated vision input tokens from model + detail field.\nAlready included in billed prompt_tokens; shown here so reused images on cached calls are visible."
     : "";
 
-  // Output: model's response totals.
   // Output: model's response totals. We have three honest char-based signals
   // we can attribute (visible response text, thinking text, tool-call args)
   // plus an "unattributed" residual that catches whatever completion_tokens
@@ -1459,10 +1458,16 @@ function computePromptCostByBucket(p) {
     var nLlm = llmEvents.length;
     var callStr = nLlm + " call" + (nLlm === 1 ? "" : "s");
     if (anyChars > 0) {
-      byBucket.output.sample = "across " + callStr + " · "
-        + fmtT(visCh) + " visible chars · "
-        + fmtT(thinkCh) + " thinking chars · "
-        + fmtT(argsCh) + " tool-args chars";
+      var estVisH = Math.round(visCh / 4);
+      var estThinkH = Math.round(thinkCh / 4);
+      var estArgsH = Math.round(argsCh / 4);
+      var estResidH = Math.max(0, totalOutputTok - estVisH - estThinkH - estArgsH);
+      var parts = [];
+      if (estVisH > 0) parts.push("~" + fmtT(estVisH) + " visible");
+      if (estThinkH > 0) parts.push("~" + fmtT(estThinkH) + " thinking");
+      if (estArgsH > 0) parts.push("~" + fmtT(estArgsH) + " tool-args");
+      if (estResidH > 0) parts.push("~" + fmtT(estResidH) + " unattributed");
+      byBucket.output.sample = "across " + callStr + " · " + parts.join(" · ") + " tok";
     } else if (totalReasoning > 0) {
       byBucket.output.sample = "model wrote " + fmtT(totalOutputTok - totalReasoning)
         + " visible + " + fmtT(totalReasoning) + " thinking tok across " + callStr;
@@ -1520,7 +1525,7 @@ function PromptCostBreakdown(props) {
           // Cache-effect summary (right-aligned on header line).
           var cacheText = null;
           if (k === "output") {
-            cacheText = <span style={{ color: theme.text.muted, fontStyle: "italic" }}>output (no cache)</span>;
+            cacheText = <span style={{ color: theme.text.muted, fontStyle: "italic" }}>billed at output rate</span>;
           } else if (k === "current") {
             cacheText = <span style={{ color: theme.text.muted, fontStyle: "italic" }}>fresh each call</span>;
           } else if (totalTok > 0) {
@@ -1619,6 +1624,11 @@ function PromptCostBreakdown(props) {
                     </span>
                   ) : null}
                   <span style={{ fontStyle: "italic", opacity: 0.7 }}>(est.)</span>
+                  {k === "output" ? (
+                    <div style={{ flexBasis: "100%", marginTop: 4, fontSize: theme.fontSize.xs, color: theme.text.muted, opacity: 0.8 }}>
+                      Output tokens are billed at the output rate when generated, but the response text becomes conversation history that IS eligible for caching on subsequent calls (counted in the Conversation bucket).
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
             </details>
