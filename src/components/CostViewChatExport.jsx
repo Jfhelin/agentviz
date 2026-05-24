@@ -1454,12 +1454,28 @@ function PromptCostBreakdown(props) {
           );
         })}
       </div>
-      <div style={{ display: "grid", gap: 8, fontSize: theme.fontSize.sm }}>
+      <div style={{ display: "grid", gap: 2, fontSize: theme.fontSize.sm }}>
         {CTX_KEYS.map(function (k) {
           var b = byBucket[k];
           if (!b.cost || b.cost <= 0) return null;
           var pct = 100 * b.cost / total;
-          // Build receipt segments (only non-zero ones).
+          var totalTok = b.cachedTok + b.newTok;
+          var cachedPct = totalTok > 0 ? Math.round(100 * b.cachedTok / totalTok) : 0;
+          // Cache-effect summary (right-aligned on header line).
+          var cacheText = null;
+          if (k === "output") {
+            cacheText = <span style={{ color: theme.text.muted, fontStyle: "italic" }}>output (no cache)</span>;
+          } else if (k === "current") {
+            cacheText = <span style={{ color: theme.text.muted, fontStyle: "italic" }}>fresh each call</span>;
+          } else if (totalTok > 0) {
+            cacheText = (
+              <span>
+                <b style={{ color: theme.cost.cached }}>{cachedPct}%</b> cached
+                {b.savings > 0 ? <span style={{ color: theme.text.muted }}> · saved <b style={{ color: theme.cost.cached }}>{fmt$(b.savings)}</b></span> : null}
+              </span>
+            );
+          }
+          // Build receipt segments for the expandable detail.
           var seg = [];
           if (k === "output") {
             if (b.outputTok > 0) seg.push({ label: "output", tok: b.outputTok, cost: b.outputCost, color: theme.cost.fresh });
@@ -1469,30 +1485,32 @@ function PromptCostBreakdown(props) {
             if (b.cachedTok > 0) seg.push({ label: "cache-read", tok: b.cachedTok, cost: b.cachedCost, color: theme.cost.cached });
           }
           return (
-            <div key={k}
+            <details key={k}
               style={{
-                padding: "8px 0",
+                padding: "4px 0",
                 borderTop: "1px solid " + theme.border.subtle,
               }}>
-              <div style={{
+              <summary style={{
                 display: "grid",
-                gridTemplateColumns: "16px 130px 90px 56px 1fr",
+                gridTemplateColumns: "16px 130px 90px 56px minmax(140px,1fr) 2fr",
                 gap: 10, alignItems: "baseline",
+                cursor: "pointer", listStyle: "none",
               }}>
                 <span style={{ display: "inline-block", width: 10, height: 10, background: CTX_COLORS[k], borderRadius: 1 }} />
                 <span style={{ color: theme.text.primary, fontWeight: 500 }}>{CTX_LABELS[k]}</span>
                 <span style={{ color: theme.text.primary, fontVariantNumeric: "tabular-nums" }}>{fmt$(b.cost)}</span>
                 <span style={{ color: theme.text.muted, fontVariantNumeric: "tabular-nums" }}>{pct.toFixed(0)}%</span>
+                <span style={{ color: theme.text.secondary, fontVariantNumeric: "tabular-nums" }}>{cacheText}</span>
                 <span title={b.tooltip || ""}
                   style={{
                     color: theme.text.muted,
                     overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                    cursor: b.tooltip ? "help" : "default",
+                    cursor: b.tooltip ? "help" : "pointer",
                   }}>{b.sample}</span>
-              </div>
+              </summary>
               {seg.length > 0 ? (
                 <div style={{
-                  marginLeft: 26, marginTop: 4,
+                  marginLeft: 26, marginTop: 6, paddingBottom: 4,
                   display: "flex", flexWrap: "wrap", gap: "4px 14px",
                   fontSize: theme.fontSize.xs, color: theme.text.muted,
                   fontVariantNumeric: "tabular-nums",
@@ -1520,7 +1538,7 @@ function PromptCostBreakdown(props) {
                   <span style={{ fontStyle: "italic", opacity: 0.7 }}>(est.)</span>
                 </div>
               ) : null}
-            </div>
+            </details>
           );
         })}
       </div>
