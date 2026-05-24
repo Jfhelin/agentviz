@@ -206,13 +206,10 @@ describe("App browser regressions", function () {
     }, "expected evicted session to appear in inbox");
 
     // reconcileSessionLibrary should have corrected hasContent on startup,
-    // and the stale entry should now render a Re-import affordance instead
-    // of a dead-end disabled Open button.
+    // so the Open button should be disabled
     var openBtn = findExactButton(app.container, "Open");
-    expect(openBtn).toBeNull();
-    var reimportBtn = findExactButton(app.container, "Re-import");
-    expect(reimportBtn).toBeTruthy();
-    expect(reimportBtn.disabled).toBeFalsy();
+    expect(openBtn).toBeTruthy();
+    expect(openBtn.disabled).toBe(true);
 
     await app.unmount();
   });

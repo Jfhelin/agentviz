@@ -133,58 +133,6 @@ function getInitialTagsFromURL() {
 // Exported for testing
 export { filterByTags, collectAllTags, computeVisibleTags, getInitialTagsFromURL };
 
-function ReimportButton({ entry, onImport }) {
-  var inputRef = useRef(null);
-  var fileName = (entry && (entry.file || entry.filename)) || "session";
-
-  function handleClick() {
-    if (typeof onImport !== "function") return;
-    if (inputRef.current) inputRef.current.click();
-  }
-
-  function handleChange(e) {
-    var file = e.target && e.target.files && e.target.files[0];
-    e.target.value = "";
-    if (!file) return;
-    var reader = new FileReader();
-    reader.onload = function () {
-      var text = typeof reader.result === "string" ? reader.result : "";
-      if (text) onImport(text, file.name);
-    };
-    reader.readAsText(file);
-  }
-
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-      <input
-        ref={inputRef}
-        type="file"
-        accept=".jsonl,.json,.txt"
-        onChange={handleChange}
-        style={{ display: "none" }}
-      />
-      <button
-        type="button"
-        className="av-btn"
-        onClick={handleClick}
-        title={"Content for " + fileName + " is not cached locally. Pick the file again to load it."}
-        style={{
-          background: "transparent",
-          color: theme.text.secondary,
-          border: "1px dashed " + theme.border.default,
-          borderRadius: theme.radius.md,
-          padding: "6px 10px",
-          fontSize: theme.fontSize.base,
-          fontFamily: theme.font.mono,
-          cursor: "pointer",
-        }}
-      >
-        Re-import
-      </button>
-    </div>
-  );
-}
-
 export default function InboxView({ entries, onOpenSession, onImport, onLoadSample, onStartCompare, onRefresh, manifestError, isManifestMode }) {
   var [sortMode, setSortMode] = usePersistentState("agentviz:inbox-sort", "most-recent");
   var [formatFilter, setFormatFilter] = usePersistentState("agentviz:inbox-format", "all");
@@ -555,28 +503,26 @@ export default function InboxView({ entries, onOpenSession, onImport, onLoadSamp
                   )}
                 </div>
 
-                {canOpen ? (
-                  <button
-                    type="button"
-                    className="av-btn"
-                    onClick={function () { onOpenSession(entry); }}
-                    style={{
-                      background: alpha(theme.accent.primary, 0.12),
-                      color: theme.accent.primary,
-                      border: "1px solid " + theme.accent.primary,
-                      borderRadius: theme.radius.md,
-                      padding: "6px 10px",
-                      fontSize: theme.fontSize.base,
-                      fontFamily: theme.font.mono,
-                      cursor: "pointer",
-                      flexShrink: 0,
-                    }}
-                  >
-                    Open
-                  </button>
-                ) : (
-                  <ReimportButton entry={entry} onImport={onImport} />
-                )}
+                <button
+                  type="button"
+                  className="av-btn"
+                  disabled={!canOpen}
+                  onClick={function () { onOpenSession(entry); }}
+                  title={!canOpen ? "Session content not cached. Import the file again to reload." : ""}
+                  style={{
+                    background: canOpen ? alpha(theme.accent.primary, 0.12) : "transparent",
+                    color: canOpen ? theme.accent.primary : theme.text.ghost,
+                    border: "1px solid " + (canOpen ? theme.accent.primary : theme.border.default),
+                    borderRadius: theme.radius.md,
+                    padding: "6px 10px",
+                    fontSize: theme.fontSize.base,
+                    fontFamily: theme.font.mono,
+                    cursor: canOpen ? "pointer" : "default",
+                    flexShrink: 0,
+                  }}
+                >
+                  Open
+                </button>
               </div>
 
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
