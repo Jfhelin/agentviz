@@ -318,7 +318,11 @@ function StackBar(props) {
           fontSize: theme.fontSize.xs,
           color: theme.text.primary,
           fontVariantNumeric: "tabular-nums",
-          textShadow: "0 0 3px " + theme.bg.base + ",0 0 6px " + theme.bg.base,
+          background: theme.bg.base,
+          border: "1px solid " + theme.border.subtle,
+          borderRadius: 3,
+          padding: "0 5px",
+          lineHeight: "14px",
           pointerEvents: "none",
         }}>{lab}</div>
       )}
