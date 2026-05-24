@@ -317,7 +317,7 @@ interface ClassifiedCall {
    * larger than the actual question they typed. */
   currentParts: CurrentPart[];
   historyMsgs: { role: "user" | "assistant"; chars: number; tokens: number; preview: string }[];
-  toolResultMsgs: { chars: number; tokens: number; preview: string; label: string }[];
+  toolResultMsgs: { chars: number; tokens: number; preview: string; full: string; truncated: boolean; label: string }[];
   totalTools: number;
   toolGroups: { source: string; tools: { name: string; chars: number; tokens: number; description?: string; paramSummary?: string }[]; chars: number; tokens: number }[];
   /** Image attachments referenced by this call's request messages. The export
@@ -611,7 +611,18 @@ function classifyCall(log: RawLog): ClassifiedCall {
       const tcId = msg.toolCallId ?? msg.tool_call_id;
       const info = tcId ? toolCallMap.get(tcId) : undefined;
       const label = toolResultLabel(info, toolResultMsgs.length);
-      toolResultMsgs.push({ chars: len, tokens: 0, preview: text.slice(0, 240), label });
+      toolResultMsgs.push({
+        chars: len,
+        tokens: 0,
+        preview: text.slice(0, 240),
+        // Keep a much larger slice so the per-call detail panel can show a
+        // genuinely useful expanded view (line-wise summary, full text).
+        // 8KB covers ~120 lines of typical tool output without bloating
+        // memory for sessions with hundreds of calls.
+        full: text.slice(0, 8000),
+        truncated: text.length > 8000,
+        label,
+      });
     }
   });
 
@@ -899,6 +910,13 @@ export interface CostAnalysisToolCall {
   resultChars: number;
   resultTokens: number;
   resultPreview: string;
+  /** Larger slice of the tool result (up to ~8KB) used by the per-call
+   * detail panel's collapsible "show full result" view. May still be
+   * truncated for very long results -- see `resultTruncated`. */
+  resultFull: string;
+  /** True when `resultFull` was capped at the parser's 8KB limit, meaning
+   * the original tool result was longer than what we kept. */
+  resultTruncated: boolean;
   cumCostAfter: number;
   /**
    * For `runSubagent` calls only: extracted summary of the subagent invocation.
@@ -1202,6 +1220,8 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
           resultChars: 0,
           resultTokens: 0,
           resultPreview: "",
+          resultFull: "",
+          resultTruncated: false,
           cumCostAfter: cumCost,
           subagent: extractSubagent(log),
         };
@@ -1277,6 +1297,8 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
           pendingToolCalls[i].resultChars = tr.chars;
           pendingToolCalls[i].resultTokens = tr.tokens;
           pendingToolCalls[i].resultPreview = tr.preview;
+          pendingToolCalls[i].resultFull = tr.full;
+          pendingToolCalls[i].resultTruncated = tr.truncated;
         }
       });
       pendingToolCalls.length = 0;

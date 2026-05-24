@@ -63,6 +63,63 @@ function ImageThumb(props) {
     </span>
   );
 }
+
+// Smart tool-result preview. Tool results are flat plaintext strings; the
+// only natural unit we can lean on is line breaks. This component:
+//   - detects data:image/... results and renders the image inline with the
+//     standard ImageThumb hover preview;
+//   - inlines tiny results (<=3 lines, <=400 chars) with no toggle;
+//   - collapses larger results behind a one-line `<details>` summary that
+//     shows shape (N lines · X chars) + the first non-empty line, with the
+//     full body revealed on click.
+// `full` is the longer (8KB) slice from the parser; `preview` is the older
+// 240-char one used as a fallback. `truncated` indicates the original tool
+// output exceeded what we kept.
+function ToolResultPreview(props) {
+  var preview = props.preview || "";
+  var full = props.full || preview;
+  var truncated = !!props.truncated;
+  var totalChars = props.totalChars || full.length;
+  var accent = props.accent || theme.cost.ctxHistory;
+  var blockStyle = props.blockStyle;
+  if (!preview && !full) {
+    return <div style={{ color: theme.text.ghost, fontStyle: "italic", fontSize: theme.fontSize.sm }}>(no preview captured)</div>;
+  }
+  // Tool-returned single image (e.g. view_image).
+  if (/^data:image\//i.test(full.trim())) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 0" }}>
+        <ImageThumb url={full.trim()} alt="tool image result" size={48} />
+        <span style={{ color: theme.text.muted, fontSize: theme.fontSize.xs, fontFamily: theme.font.mono }}>
+          {(/^data:(image\/[a-z]+)/i.exec(full.trim()) || [, "image"])[1]} · {totalChars.toLocaleString()} chars (base64)
+        </span>
+      </div>
+    );
+  }
+  var lines = full.split("\n");
+  var nonEmpty = lines.filter(function (l) { return l.trim().length > 0; });
+  var firstLine = (nonEmpty[0] || "").trim();
+  if (firstLine.length > 100) firstLine = firstLine.slice(0, 100) + "…";
+  var isTiny = lines.length <= 3 && totalChars <= 400;
+  if (isTiny) {
+    return <div style={blockStyle}>{full}{truncated ? "\n\n…(truncated, full result was longer)" : ""}</div>;
+  }
+  var summary = "tool returned " + lines.length + " line" + (lines.length === 1 ? "" : "s")
+    + " · " + totalChars.toLocaleString() + " chars"
+    + (firstLine ? " · first: " + JSON.stringify(firstLine) : "");
+  return (
+    <details style={{ marginTop: 0 }}>
+      <summary style={{ cursor: "pointer", padding: "4px 0", color: theme.text.secondary, fontSize: theme.fontSize.sm, listStyle: "revert" }}>
+        {summary}
+      </summary>
+      <div style={Object.assign({}, blockStyle, { marginTop: 6 })}>
+        {full}
+        {truncated ? "\n\n…(original was longer; preview capped at 8KB)" : ""}
+      </div>
+    </details>
+  );
+}
+
 var CTX_KEYS = ["system", "tool_defs", "history", "tool_results", "current", "images", "output"];
 var CTX_INPUT_KEYS = ["system", "tool_defs", "history", "tool_results", "current", "images"];
 var CTX_COLORS = {
@@ -1391,9 +1448,14 @@ function ToolDetail(props) {
         <div style={{ color: theme.text.muted, fontSize: theme.fontSize.xs, marginBottom: 4 }}>
           → Will be folded into the <b style={{ color: theme.cost.ctxHistory }}>tool_results</b> bucket of the next LLM call's context.
         </div>
-        {ev.resultPreview
-          ? <div style={blockStyle(theme.cost.ctxHistory)}>{ev.resultPreview}{ev.resultPreview.length >= 200 ? "\n\n…(truncated preview)" : ""}</div>
-          : <div style={{ color: theme.text.ghost, fontStyle: "italic", fontSize: theme.fontSize.sm }}>(no preview captured)</div>}
+        <ToolResultPreview
+          preview={ev.resultPreview}
+          full={ev.resultFull}
+          truncated={ev.resultTruncated}
+          totalChars={ev.resultChars}
+          accent={theme.cost.ctxHistory}
+          blockStyle={blockStyle(theme.cost.ctxHistory)}
+        />
       </div>
     </div>
   );
