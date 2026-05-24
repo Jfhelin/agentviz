@@ -522,6 +522,11 @@ export interface CostAnalysisCall {
    * or the model has no documented image-token rule. Approximation only --
    * the export does not report exact image token usage. */
   imageTokensEst: number;
+  /** Estimated input tokens for ALL images on this call, including ones
+   * carried over from prior cached calls. Used by the view to surface vision
+   * weight on every call that contains images (not just the call that first
+   * introduced them). Per-image estimate via `imageTokenEstimate`. */
+  visionTokensTotal: number;
   totalTools: number;
   toolGroups: ClassifiedCall["toolGroups"];
   historyMsgs: ClassifiedCall["historyMsgs"];
@@ -963,6 +968,10 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
       for (const img of newImages) {
         imageTokensEst += estimateImageTokens(model, img.detail);
       }
+      let visionTokensTotal = 0;
+      for (const img of cls.images) {
+        visionTokensTotal += estimateImageTokens(model, img.detail);
+      }
       const componentsForDisplay: ComponentBreakdown = imageTokensEst > 0
         ? { ...cls.components, current: cls.components.current + imageTokensEst }
         : cls.components;
@@ -1012,6 +1021,7 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
         newPerBucket: ca.newPerBucket,
         components: componentsForDisplay,
         imageTokensEst,
+        visionTokensTotal,
         totalTools: cls.totalTools,
         toolGroups: cls.toolGroups,
         historyMsgs: cls.historyMsgs,

@@ -135,6 +135,7 @@ var DARK_THEME = {
     ctxToolResults: "#B8642F",
     ctxCurrent:     "#3DA9D4",
     ctxOutput:      "#2C7A99",
+    ctxImages:      "#C77BC2",
     // Tool-group kind chips
     kindMcp:        "#a371f7",
     kindExtension:  "#f4b340",
@@ -215,6 +216,7 @@ var LIGHT_THEME = {
     ctxToolResults: "#8a4a1f",
     ctxCurrent:     "#1e88c4",
     ctxOutput:      "#1c5f78",
+    ctxImages:      "#9b4f97",
     kindMcp:        "#7c5ce6",
     kindExtension:  "#ca8a04",
     kindBuiltin:    "#1e88c4",

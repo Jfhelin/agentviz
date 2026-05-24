@@ -27,14 +27,15 @@ var COST_LABELS = {
   cached: "Cached read",
   output: "Output",
 };
-var CTX_KEYS = ["system", "tool_defs", "history", "tool_results", "current", "output"];
-var CTX_INPUT_KEYS = ["system", "tool_defs", "history", "tool_results", "current"];
+var CTX_KEYS = ["system", "tool_defs", "history", "tool_results", "current", "images", "output"];
+var CTX_INPUT_KEYS = ["system", "tool_defs", "history", "tool_results", "current", "images"];
 var CTX_COLORS = {
   get system()       { return theme.cost.ctxSystem; },
   get tool_defs()    { return theme.cost.ctxToolDefs; },
   get history()      { return theme.cost.ctxHistory; },
   get tool_results() { return theme.cost.ctxToolResults; },
   get current()      { return theme.cost.ctxCurrent; },
+  get images()       { return theme.cost.ctxImages; },
   get output()       { return theme.cost.ctxOutput; },
 };
 var CTX_LABELS = {
@@ -43,6 +44,7 @@ var CTX_LABELS = {
   history: "History",
   tool_results: "Tool results",
   current: "Current prompt",
+  images: "Images (vision)",
   output: "Response",
 };
 var KIND_COLORS = {
@@ -673,6 +675,52 @@ function LLMDetail(props) {
       </div>
       {missCallout}
       {recommitCallout}
+      {ev.images && ev.images.length > 0 && (() => {
+        var vis = ev.visionTokensTotal || 0;
+        var pt = ev.promptTokens || 0;
+        var ocrChars = (ev.components && ev.components.tool_results) || 0;
+        var nonVis = Math.max(0, pt - vis);
+        var pct = function (n) { return pt > 0 ? (100 * n / Math.max(pt, vis + nonVis)).toFixed(1) + "%" : "—"; };
+        var price = ev.model ? getModelPrice(ev.model) : null;
+        var visDollars = imageDollarCost(price, vis);
+        return (
+        <div style={{
+          background: theme.bg.surface, border: "1px solid " + theme.border.default,
+          borderRadius: 5, padding: "9px 12px", marginBottom: 12,
+          fontSize: theme.fontSize.sm, color: theme.text.secondary, lineHeight: 1.5,
+        }}>
+          <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6, fontWeight: 600 }}>
+            Prompt content breakdown ({fmtT(pt)} billed input tok)
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "auto 1fr auto auto", gap: "4px 12px", alignItems: "baseline", fontFamily: theme.font.mono, fontSize: theme.fontSize.xs }}>
+            <span style={{ display: "inline-block", width: 10, height: 10, background: theme.cost.ctxImages, borderRadius: 2 }} />
+            <span style={{ color: theme.text.primary }} title="Estimated from each attachment's `detail` field + model's documented vision rule. The export does not report exact image tokens; these are an approximation.">
+              Vision ({ev.images.length} image{ev.images.length === 1 ? "" : "s"})
+            </span>
+            <span style={{ color: theme.text.muted, textAlign: "right" }}>~{fmtT(vis)} tok</span>
+            <span style={{ color: theme.text.muted, textAlign: "right" }}>{pct(vis)}{visDollars > 0 ? " · ~" + fmt$(visDollars) : ""}</span>
+
+            <span style={{ display: "inline-block", width: 10, height: 10, background: theme.cost.ctxToolResults, borderRadius: 2 }} />
+            <span style={{ color: theme.text.primary }} title="Text returned by client-side tools (e.g. pdftotext output, file reads, terminal output). Already part of the billed prompt; shown here as the dominant non-vision input.">
+              Tool result text ({ev.toolResultMsgs.length} msg{ev.toolResultMsgs.length === 1 ? "" : "s"})
+            </span>
+            <span style={{ color: theme.text.muted, textAlign: "right" }}>~{fmtT(Math.round(ocrChars / 4))} tok</span>
+            <span style={{ color: theme.text.muted, textAlign: "right" }}>char-est</span>
+
+            <span style={{ display: "inline-block", width: 10, height: 10, background: theme.cost.ctxHistory, borderRadius: 2 }} />
+            <span style={{ color: theme.text.primary }}>
+              System + history + tool defs + current
+            </span>
+            <span style={{ color: theme.text.muted, textAlign: "right" }}>~{fmtT(Math.max(0, nonVis - Math.round(ocrChars / 4)))} tok</span>
+            <span style={{ color: theme.text.muted, textAlign: "right" }}>remainder</span>
+          </div>
+          <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, fontStyle: "italic", marginTop: 6 }}>
+            Vision tokens are already counted in the {fmtT(pt)} billed prompt total above — they don't add on top.
+            On cache-hit calls most of this is served at the cached rate ({fmtT(ev.cached || 0)} cached, {fmtT(ev.cacheWrite || 0)} cache-write).
+          </div>
+        </div>
+        );
+      })()}
       {ev.newImages && ev.newImages.length > 0 && (() => {
         var price = ev.model ? getModelPrice(ev.model) : null;
         var imgRows = ev.newImages.map(function (img) {
@@ -1086,8 +1134,8 @@ function computePromptCostByBucket(p) {
     var newTotal = (ev.fresh || 0) + (ev.cacheWrite || 0);
     var freshShare = newTotal > 0 ? (ev.fresh || 0) / newTotal : 1;
     CTX_INPUT_KEYS.forEach(function (k) {
-      var totalIn = comp[k] || 0;
-      var newB = npb[k] || 0;
+      var totalIn = k === "images" ? (ev.visionTokensTotal || 0) : (comp[k] || 0);
+      var newB    = k === "images" ? (ev.imageTokensEst   || 0) : (npb[k]  || 0);
       var cachedB = Math.max(0, totalIn - newB);
       var freshB = newB * freshShare;
       var cwB = newB * (1 - freshShare);
@@ -1153,6 +1201,19 @@ function computePromptCostByBucket(p) {
   var curTok = (lastLLM.components || {}).current || 0;
   byBucket.current.sample = curTok > 0 ? "user's request (" + fmtT(curTok) + " tok)" : "";
   byBucket.current.tooltip = lastLLM.currentText ? "Text:\n" + lastLLM.currentText.slice(0, 400) : "";
+
+  // Images: aggregate vision token cost across all LLM calls in this prompt.
+  var totalImgs = 0, totalImgTok = 0;
+  llmEvents.forEach(function (e) {
+    totalImgs += (e.images && e.images.length) || 0;
+    totalImgTok += e.visionTokensTotal || 0;
+  });
+  byBucket.images.sample = totalImgTok > 0
+    ? totalImgs + " image attachment" + (totalImgs === 1 ? "" : "s") + " (~" + fmtT(totalImgTok) + " tok est)"
+    : "";
+  byBucket.images.tooltip = totalImgTok > 0
+    ? "Estimated vision input tokens from model + detail field.\nAlready included in billed prompt_tokens; shown here so reused images on cached calls are visible."
+    : "";
 
   // Output: model's response totals.
   byBucket.output.sample = totalOutputTok > 0 ? "model wrote " + fmtT(totalOutputTok) + " tok across " + llmEvents.length + " call" + (llmEvents.length === 1 ? "" : "s") : "";
@@ -1422,7 +1483,9 @@ export default function CostView(props) {
   analysis.prompts.forEach(function (p) {
     p.events.forEach(function (e) { if (e.kind === "llm") allLLM.push(e); });
   });
-  var maxCtx = Math.max.apply(null, allLLM.map(function (e) { return e.promptTokens + (e.output || 0); }).concat([1]));
+  var maxCtx = Math.max.apply(null, allLLM.map(function (e) {
+    return e.promptTokens + (e.output || 0) + Math.max(0, (e.visionTokensTotal || 0) - (e.imageTokensEst || 0));
+  }).concat([1]));
 
   // Sum estimated subagent cost across the session. Estimates only apply to
   // runSubagent calls when we know the subagent's model; others are skipped
@@ -1752,6 +1815,27 @@ export default function CostView(props) {
                                 </>
                               );
                             })()}
+                            {isLLM && ev.images && ev.images.length > 0 && (() => {
+                              var vis = ev.visionTokensTotal || 0;
+                              var newN = (ev.newImages && ev.newImages.length) || 0;
+                              var reusedN = ev.images.length - newN;
+                              var label = "🖼 " + ev.images.length;
+                              if (vis > 0) label += " (~" + fmtT(vis) + " tok)";
+                              var tip = ev.images.length + " image" + (ev.images.length === 1 ? "" : "s") + " in this prompt"
+                                + (newN > 0 ? " · " + newN + " new" : "")
+                                + (reusedN > 0 ? " · " + reusedN + " cached from prior call" : "")
+                                + (vis > 0 ? "\nEstimated vision input ~" + fmtT(vis) + " tokens (from model + detail field)" : "");
+                              return (
+                                <span title={tip} style={{
+                                  fontSize: theme.fontSize.xs, fontWeight: 500,
+                                  padding: "1px 6px", borderRadius: 3,
+                                  background: theme.cost.ctxImages + "26",
+                                  color: theme.cost.ctxImages,
+                                  border: "1px solid " + theme.cost.ctxImages + "55",
+                                  fontFamily: theme.font.mono,
+                                }}>{label}</span>
+                              );
+                            })()}
                             {isLLM && ev.category === "overhead" && (
                               <span style={{
                                 fontSize: theme.fontSize.xs, fontWeight: 600, letterSpacing: 0.4,
@@ -1773,7 +1857,15 @@ export default function CostView(props) {
                     </div>
                     <div style={{ padding: "8px 12px", borderBottom: "1px solid " + theme.border.subtle, background: cellBg, borderLeft: "1px solid " + theme.border.default, display: "flex", alignItems: "center" }}>
                       {isLLM
-                        ? <StackBar parts={ev.components} keys={CTX_KEYS} colors={CTX_COLORS} labels={CTX_LABELS} maxVal={maxCtx} withLabel />
+                        ? (function () {
+                            var vis = ev.visionTokensTotal || 0;
+                            var newImgInCur = ev.imageTokensEst || 0;
+                            var parts = Object.assign({}, ev.components, {
+                              current: Math.max(0, (ev.components.current || 0) - newImgInCur),
+                              images: vis,
+                            });
+                            return <StackBar parts={parts} keys={CTX_KEYS} colors={CTX_COLORS} labels={CTX_LABELS} maxVal={maxCtx} withLabel />;
+                          })()
                         : <span style={{ color: theme.text.ghost, fontSize: theme.fontSize.xs, fontStyle: "italic" }}>→ result lands in next LLM call</span>}
                     </div>
                     {open && (isLLM ? <LLMDetail event={ev} /> : <ToolDetail event={ev} />)}
