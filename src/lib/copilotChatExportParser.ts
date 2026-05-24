@@ -738,6 +738,19 @@ export interface CostAnalysisCall {
    * either doesn't expose reasoning or wasn't asked to think extendedly.
    * Visible output = output - reasoningTokens. */
   reasoningTokens: number;
+  /** Character count of the user-visible response text from this call (full,
+   * not truncated). Used to attribute a portion of output tokens to "what
+   * the user saw" vs internal reasoning vs tool-call structured args. */
+  visibleResponseChars: number;
+  /** Total character count of `thinking.text` blocks attached to tool_use
+   * outputs produced by this LLM call. Anthropic surfaces extended thinking
+   * as plaintext blocks paired with each tool_use; some portions may be
+   * redacted/encrypted and thus not present here. */
+  thinkingChars: number;
+  /** Total character count of JSON tool-call arguments emitted by this LLM
+   * call. These count as output tokens (structured assistant message
+   * payload) but are not part of either visible response text or thinking. */
+  toolArgsChars: number;
   cost: number;
   prevPt: number;
   /** prompt_tokens of the previous call ON THE SAME MODEL, even when
@@ -969,6 +982,26 @@ function summarizeResponse(response: unknown): string {
   return "";
 }
 
+/** Total character count of the user-visible response text. Unlike
+ * summarizeResponse() this is the FULL length (not truncated) and
+ * extracts text from both string-array and structured-content shapes. */
+function visibleResponseChars(response: unknown): number {
+  if (response == null) return 0;
+  if (typeof response === "string") return response.length;
+  if (typeof response !== "object") return 0;
+  const obj = response as Record<string, unknown>;
+  let n = 0;
+  if (Array.isArray(obj.message)) {
+    for (const m of obj.message as unknown[]) {
+      if (typeof m === "string") n += m.length;
+      else if (m && typeof m === "object" && typeof (m as { text?: unknown }).text === "string") {
+        n += ((m as { text: string }).text).length;
+      }
+    }
+  }
+  return n;
+}
+
 function callUsage(log: RawLog): { prompt_tokens: number; cached_tokens: number; cache_write: number; completion_tokens: number; reasoning_tokens: number } {
   const u = log.metadata?.usage ?? {};
   const ptd = u.prompt_tokens_details ?? {};
@@ -1183,15 +1216,28 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
       // empty (model emitted only tool_use blocks, no message content).
       const producedToolCalls: { name: string; argsSummary: string }[] = [];
       const reasoningBlocks: { tool: string; text: string }[] = [];
+      let toolArgsChars = 0;
+      let thinkingChars = 0;
       for (let lookIdx = logIdx + 1; lookIdx < c.logs.length; lookIdx++) {
         const next = c.logs[lookIdx];
         if (next.kind === "request") break;
         if (next.kind === "toolCall") {
           producedToolCalls.push({ name: next.tool ?? "", argsSummary: shortArgs(next.args) });
           const thinkText = next.thinking?.text ?? "";
-          if (thinkText) reasoningBlocks.push({ tool: next.tool ?? "", text: thinkText });
+          if (thinkText) {
+            reasoningBlocks.push({ tool: next.tool ?? "", text: thinkText });
+            thinkingChars += thinkText.length;
+          }
+          // Tool-call args (JSON the model emitted) count as output tokens.
+          // Sum raw arg length to attribute the structured-output portion of
+          // completion_tokens.
+          if (typeof next.args === "string") toolArgsChars += next.args.length;
+          else if (next.args && typeof next.args === "object") {
+            try { toolArgsChars += JSON.stringify(next.args).length; } catch { /* ignore */ }
+          }
         }
       }
+      const visResp = visibleResponseChars(log.response);
 
       // Compute which images are newly added on this call vs. prior same-model
       // history. Re-sending the same imageUrl on subsequent calls is part of
@@ -1267,6 +1313,9 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
         fresh,
         output: out_t,
         reasoningTokens: usage.reasoning_tokens,
+        visibleResponseChars: visResp,
+        thinkingChars,
+        toolArgsChars,
         cost,
         prevPt: ca.prevPt,
         priorSameModelPt: ca.priorSameModelPt,

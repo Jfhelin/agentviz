@@ -1368,6 +1368,9 @@ function computePromptCostByBucket(p) {
     byBucket.output.outputTok += ev.output || 0;
     byBucket.output.newTok += ev.output || 0;
     byBucket.output.reasoningTok = (byBucket.output.reasoningTok || 0) + (ev.reasoningTokens || 0);
+    byBucket.output.visibleChars = (byBucket.output.visibleChars || 0) + (ev.visibleResponseChars || 0);
+    byBucket.output.thinkingChars = (byBucket.output.thinkingChars || 0) + (ev.thinkingChars || 0);
+    byBucket.output.toolArgsChars = (byBucket.output.toolArgsChars || 0) + (ev.toolArgsChars || 0);
     totalOutputTok += ev.output || 0;
   });
 
@@ -1441,19 +1444,30 @@ function computePromptCostByBucket(p) {
     : "";
 
   // Output: model's response totals.
-  // Output: model's response totals. Split visible vs reasoning when the
-  // model reported reasoning_tokens (OpenAI o-series, Claude extended
-  // thinking). Reasoning tokens are billed at the output rate.
+  // Output: model's response totals. We have three honest char-based signals
+  // we can attribute (visible response text, thinking text, tool-call args)
+  // plus an "unattributed" residual that catches whatever completion_tokens
+  // are left over (typically Claude's encrypted/redacted reasoning or model
+  // overhead). Falls back to reasoning_tokens or a single output line when
+  // chars data is missing.
   var totalReasoning = byBucket.output.reasoningTok || 0;
-  var visibleOut = totalOutputTok - totalReasoning;
+  var visCh = byBucket.output.visibleChars || 0;
+  var thinkCh = byBucket.output.thinkingChars || 0;
+  var argsCh = byBucket.output.toolArgsChars || 0;
+  var anyChars = visCh + thinkCh + argsCh;
   if (totalOutputTok > 0) {
     var nLlm = llmEvents.length;
-    if (totalReasoning > 0) {
-      byBucket.output.sample = "model wrote " + fmtT(visibleOut) + " visible + "
-        + fmtT(totalReasoning) + " thinking tok across " + nLlm + " call" + (nLlm === 1 ? "" : "s");
+    var callStr = nLlm + " call" + (nLlm === 1 ? "" : "s");
+    if (anyChars > 0) {
+      byBucket.output.sample = "across " + callStr + " · "
+        + fmtT(visCh) + " visible chars · "
+        + fmtT(thinkCh) + " thinking chars · "
+        + fmtT(argsCh) + " tool-args chars";
+    } else if (totalReasoning > 0) {
+      byBucket.output.sample = "model wrote " + fmtT(totalOutputTok - totalReasoning)
+        + " visible + " + fmtT(totalReasoning) + " thinking tok across " + callStr;
     } else {
-      byBucket.output.sample = "model wrote " + fmtT(totalOutputTok) + " tok across "
-        + nLlm + " call" + (nLlm === 1 ? "" : "s");
+      byBucket.output.sample = "model wrote " + fmtT(totalOutputTok) + " tok across " + callStr;
     }
   }
 
@@ -1521,14 +1535,32 @@ function PromptCostBreakdown(props) {
           var seg = [];
           if (k === "output") {
             if (b.outputTok > 0) {
-              var rTok = b.reasoningTok || 0;
-              var visTok = b.outputTok - rTok;
-              // Reasoning tokens are billed at the same output rate, so we
-              // split the cost proportionally for display.
-              var rCost = b.outputTok > 0 ? b.outputCost * rTok / b.outputTok : 0;
-              var visCost = b.outputCost - rCost;
-              if (visTok > 0) seg.push({ label: "visible output", tok: visTok, cost: visCost, color: theme.cost.fresh });
-              if (rTok > 0) seg.push({ label: "thinking", tok: rTok, cost: rCost, color: theme.cost.output });
+              var visCh2 = b.visibleChars || 0;
+              var thinkCh2 = b.thinkingChars || 0;
+              var argsCh2 = b.toolArgsChars || 0;
+              var sumCh = visCh2 + thinkCh2 + argsCh2;
+              if (sumCh > 0) {
+                // Attribute output tokens via char share, with a residual for
+                // what's left (typically Claude's encrypted/redacted thinking
+                // or model overhead).
+                var estVisTok = Math.round(visCh2 / 4);
+                var estThinkTok = Math.round(thinkCh2 / 4);
+                var estArgsTok = Math.round(argsCh2 / 4);
+                var attrTok = estVisTok + estThinkTok + estArgsTok;
+                var residTok = Math.max(0, b.outputTok - attrTok);
+                var perTok = b.outputCost / b.outputTok;
+                if (estVisTok > 0) seg.push({ label: "visible to user", tok: estVisTok, cost: estVisTok * perTok, color: theme.cost.fresh });
+                if (estThinkTok > 0) seg.push({ label: "thinking", tok: estThinkTok, cost: estThinkTok * perTok, color: theme.cost.output });
+                if (estArgsTok > 0) seg.push({ label: "tool-call args", tok: estArgsTok, cost: estArgsTok * perTok, color: theme.cost.ctxToolDefs });
+                if (residTok > 0) seg.push({ label: "unattributed", tok: residTok, cost: residTok * perTok, color: theme.text.muted });
+              } else {
+                var rTok = b.reasoningTok || 0;
+                var visTok = b.outputTok - rTok;
+                var rCost = b.outputTok > 0 ? b.outputCost * rTok / b.outputTok : 0;
+                var visCost = b.outputCost - rCost;
+                if (visTok > 0) seg.push({ label: "visible output", tok: visTok, cost: visCost, color: theme.cost.fresh });
+                if (rTok > 0) seg.push({ label: "thinking", tok: rTok, cost: rCost, color: theme.cost.output });
+              }
             }
           } else {
             if (b.freshTok > 0) seg.push({ label: "new", tok: b.freshTok, cost: b.freshCost, color: theme.cost.fresh });
