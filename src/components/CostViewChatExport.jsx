@@ -1292,7 +1292,12 @@ function computePromptCostByBucket(p) {
   // calls = array of per-call breakdown for the tooltip
   var byBucket = {};
   CTX_KEYS.forEach(function (k) {
-    byBucket[k] = { cost: 0, cachedTok: 0, newTok: 0, savings: 0, sample: "", tooltip: "" };
+    byBucket[k] = {
+      cost: 0,
+      cachedTok: 0, newTok: 0, freshTok: 0, cwTok: 0, outputTok: 0,
+      freshCost: 0, cwCost: 0, cachedCost: 0, outputCost: 0,
+      savings: 0, sample: "", tooltip: "",
+    };
   });
   if (!p || !p.events) return byBucket;
   var llmEvents = p.events.filter(function (e) { return e.kind === "llm"; });
@@ -1315,22 +1320,38 @@ function computePromptCostByBucket(p) {
       var cachedB = Math.max(0, totalIn - newB);
       var freshB = newB * freshShare;
       var cwB = newB * (1 - freshShare);
-      byBucket[k].cost    += estimateCost({ inputTokens: freshB, cacheRead: cachedB, cacheWrite: cwB }, ev.model);
+      var freshCost = estimateCost({ inputTokens: freshB }, ev.model);
+      var cwCost = estimateCost({ cacheWrite: cwB }, ev.model);
+      var cachedCost = estimateCost({ cacheRead: cachedB }, ev.model);
+      byBucket[k].cost += freshCost + cwCost + cachedCost;
+      byBucket[k].freshCost += freshCost;
+      byBucket[k].cwCost += cwCost;
+      byBucket[k].cachedCost += cachedCost;
       byBucket[k].cachedTok += cachedB;
       byBucket[k].newTok    += newB;
+      byBucket[k].freshTok  += freshB;
+      byBucket[k].cwTok     += cwB;
       // Savings = what cached_tokens would have cost at full input rate, minus
       // what they actually cost at the cache-read rate.
       byBucket[k].savings += cachedB * price.input * (1 - cacheReadRatio) / 1e6;
     });
-    byBucket.output.cost += estimateCost({ outputTokens: ev.output || 0 }, ev.model);
+    var outCost = estimateCost({ outputTokens: ev.output || 0 }, ev.model);
+    byBucket.output.cost += outCost;
+    byBucket.output.outputCost += outCost;
+    byBucket.output.outputTok += ev.output || 0;
     byBucket.output.newTok += ev.output || 0;
     totalOutputTok += ev.output || 0;
   });
 
-  // Per-bucket inline samples (one short line) + tooltips (multi-line).
-  // System: stable across calls; report the prompt size from any call.
-  var sysTok = (lastLLM.components || {}).system || 0;
-  byBucket.system.sample = sysTok > 0 ? "1 system prompt (" + fmtT(sysTok) + " tok)" : "";
+  // System: stable across calls; report the prompt size from chars (the only
+  // honest, call-independent measurement we have).
+  var sysChars = (lastLLM.systemChars || 0);
+  var sysTokEst = sysChars > 0 ? Math.round(sysChars / 4) : 0;
+  var nCalls = llmEvents.length;
+  byBucket.system.sample = sysChars > 0
+    ? ("1 system prompt · " + fmtT(sysChars) + " chars · ~" + fmtT(sysTokEst) + " tok"
+        + (nCalls > 1 ? " (identical across " + nCalls + " calls)" : ""))
+    : "";
   byBucket.system.tooltip = lastLLM.systemPreview ? "First 400 chars:\n" + lastLLM.systemPreview : "";
 
   // Tool defs: aggregate from last call (tools are stable per session).
@@ -1433,44 +1454,72 @@ function PromptCostBreakdown(props) {
           );
         })}
       </div>
-      <div style={{ display: "grid", gap: 4, fontSize: theme.fontSize.sm }}>
+      <div style={{ display: "grid", gap: 8, fontSize: theme.fontSize.sm }}>
         {CTX_KEYS.map(function (k) {
           var b = byBucket[k];
           if (!b.cost || b.cost <= 0) return null;
           var pct = 100 * b.cost / total;
-          var totalTok = b.cachedTok + b.newTok;
-          var cachedPct = totalTok > 0 ? Math.round(100 * b.cachedTok / totalTok) : 0;
-          // Cache-effect text: output bucket can't be cached, so omit.
-          var cacheText = null;
+          // Build receipt segments (only non-zero ones).
+          var seg = [];
           if (k === "output") {
-            cacheText = <span style={{ color: theme.text.muted, fontStyle: "italic" }}>output (no cache)</span>;
-          } else if (k === "current") {
-            cacheText = <span style={{ color: theme.text.muted, fontStyle: "italic" }}>fresh each call</span>;
-          } else if (totalTok > 0) {
-            cacheText = (
-              <span title={"Cached: " + fmtT(b.cachedTok) + " tok · New: " + fmtT(b.newTok) + " tok"}>
-                <b style={{ color: theme.cost.cached }}>{cachedPct}%</b> cached
-                {b.savings > 0 ? <span style={{ color: theme.text.muted }}> · saved <b style={{ color: theme.cost.cached }}>{fmt$(b.savings)}</b></span> : null}
-              </span>
-            );
+            if (b.outputTok > 0) seg.push({ label: "output", tok: b.outputTok, cost: b.outputCost, color: theme.cost.fresh });
+          } else {
+            if (b.freshTok > 0) seg.push({ label: "new", tok: b.freshTok, cost: b.freshCost, color: theme.cost.fresh });
+            if (b.cwTok > 0) seg.push({ label: "cache-write", tok: b.cwTok, cost: b.cwCost, color: theme.cost.cwrite });
+            if (b.cachedTok > 0) seg.push({ label: "cache-read", tok: b.cachedTok, cost: b.cachedCost, color: theme.cost.cached });
           }
           return (
             <div key={k}
-              title={b.tooltip || ""}
               style={{
-                display: "grid",
-                gridTemplateColumns: "16px 130px 90px 56px 1fr 2fr",
-                gap: 10, alignItems: "baseline",
-                padding: "3px 0",
+                padding: "8px 0",
                 borderTop: "1px solid " + theme.border.subtle,
-                cursor: b.tooltip ? "help" : "default",
               }}>
-              <span style={{ display: "inline-block", width: 10, height: 10, background: CTX_COLORS[k], borderRadius: 1 }} />
-              <span style={{ color: theme.text.primary, fontWeight: 500 }}>{CTX_LABELS[k]}</span>
-              <span style={{ color: theme.text.primary, fontVariantNumeric: "tabular-nums" }}>{fmt$(b.cost)}</span>
-              <span style={{ color: theme.text.muted, fontVariantNumeric: "tabular-nums" }}>{pct.toFixed(0)}%</span>
-              <span style={{ color: theme.text.secondary, fontVariantNumeric: "tabular-nums" }}>{cacheText}</span>
-              <span style={{ color: theme.text.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b.sample}</span>
+              <div style={{
+                display: "grid",
+                gridTemplateColumns: "16px 130px 90px 56px 1fr",
+                gap: 10, alignItems: "baseline",
+              }}>
+                <span style={{ display: "inline-block", width: 10, height: 10, background: CTX_COLORS[k], borderRadius: 1 }} />
+                <span style={{ color: theme.text.primary, fontWeight: 500 }}>{CTX_LABELS[k]}</span>
+                <span style={{ color: theme.text.primary, fontVariantNumeric: "tabular-nums" }}>{fmt$(b.cost)}</span>
+                <span style={{ color: theme.text.muted, fontVariantNumeric: "tabular-nums" }}>{pct.toFixed(0)}%</span>
+                <span title={b.tooltip || ""}
+                  style={{
+                    color: theme.text.muted,
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                    cursor: b.tooltip ? "help" : "default",
+                  }}>{b.sample}</span>
+              </div>
+              {seg.length > 0 ? (
+                <div style={{
+                  marginLeft: 26, marginTop: 4,
+                  display: "flex", flexWrap: "wrap", gap: "4px 14px",
+                  fontSize: theme.fontSize.xs, color: theme.text.muted,
+                  fontVariantNumeric: "tabular-nums",
+                }}
+                  title={"Per-bucket cost is estimated by allocating each call's prompt_tokens to buckets in proportion to their character share."}>
+                  {seg.map(function (s, i) {
+                    return (
+                      <span key={i}>
+                        <span style={{ color: s.color, fontWeight: 500 }}>{s.label}</span>
+                        {" "}
+                        <span>{fmtT(s.tok)} tok</span>
+                        {" · "}
+                        <span style={{ color: theme.text.secondary }}>{fmt$(s.cost)}</span>
+                      </span>
+                    );
+                  })}
+                  {b.savings > 0 ? (
+                    <span>
+                      <span style={{ color: theme.cost.cached, fontWeight: 500 }}>saved</span>
+                      {" "}
+                      <span style={{ color: theme.cost.cached }}>{fmt$(b.savings)}</span>
+                      {" vs uncached"}
+                    </span>
+                  ) : null}
+                  <span style={{ fontStyle: "italic", opacity: 0.7 }}>(est.)</span>
+                </div>
+              ) : null}
             </div>
           );
         })}
