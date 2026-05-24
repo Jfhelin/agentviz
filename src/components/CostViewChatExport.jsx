@@ -2282,13 +2282,29 @@ export default function CostView(props) {
                         padding: "8px 14px", borderBottom: "1px solid " + theme.border.subtle,
                         background: cellBg, display: "flex", alignItems: "center", minHeight: 38, cursor: "pointer",
                       }}>
-                      <div style={{ display: "grid", gridTemplateColumns: "18px 18px 1fr", gap: 8, alignItems: "start", width: "100%" }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "18px 78px 1fr", gap: 8, alignItems: "start", width: "100%" }}>
                         <div style={{ color: theme.text.muted, fontSize: theme.fontSize.xs, width: 14, textAlign: "center", marginTop: 3, transition: "transform .15s", transform: open ? "rotate(90deg)" : "none" }}>▶</div>
-                        <div style={{
-                          fontSize: theme.fontSize.xs, fontWeight: 600, width: 18, height: 18, borderRadius: 9,
-                          display: "flex", alignItems: "center", justifyContent: "center", color: theme.text.primary, marginTop: 1,
-                          background: isLLM ? theme.cost.cached : theme.cost.ctxHistory,
-                        }}>{isLLM ? "L" : "T"}</div>
+                        {(function () {
+                          var pillBg, pillText;
+                          if (isLLM) {
+                            pillBg = theme.cost.cached;
+                            pillText = "LLM call";
+                          } else if (ev.subagent) {
+                            pillBg = theme.cost.ctxToolDefs;
+                            pillText = "Subagent";
+                          } else {
+                            pillBg = theme.cost.ctxHistory;
+                            pillText = "Tool";
+                          }
+                          return (
+                            <div style={{
+                              fontSize: theme.fontSize.xs, fontWeight: 600, padding: "2px 8px", borderRadius: 3,
+                              display: "inline-flex", alignItems: "center", justifyContent: "center",
+                              color: theme.text.primary, marginTop: 1, background: pillBg,
+                              textTransform: "uppercase", letterSpacing: 0.4, height: 18, whiteSpace: "nowrap",
+                            }} title={isLLM ? "Roundtrip to the model. Billed." : ev.subagent ? "Tool that spawns its own LLM call internally. Has an estimated cost." : "Client-side tool execution. No LLM cost."}>{pillText}</div>
+                          );
+                        })()}
                         <div>
                           <div style={{ color: theme.text.primary, fontSize: theme.fontSize.base, fontWeight: 500, lineHeight: 1.4, display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap" }}>
                             {(function () {
