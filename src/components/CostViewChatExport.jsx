@@ -611,6 +611,16 @@ function renderSystemAnatomy(ev) {
           );
         })}
       </div>
+      {ev.systemPreamble && (
+        <details style={{ marginTop: 8 }} open={!ev.chatMode && (ev.skills || []).length === 0}>
+          <summary style={{ cursor: "pointer", color: theme.text.muted, fontSize: theme.fontSize.xs, userSelect: "none" }}>
+            Role preamble ({ev.systemPreamble.length.toLocaleString()} chars) — start of the system prompt
+          </summary>
+          <div style={Object.assign(textBlockStyle(), { marginTop: 6, maxHeight: 240, overflow: "auto" })}>
+            {ev.systemPreamble}
+          </div>
+        </details>
+      )}
       {ev.chatMode && ev.chatMode.body && (
         <details style={{ marginTop: 8 }}>
           <summary style={{ cursor: "pointer", color: theme.text.muted, fontSize: theme.fontSize.xs, userSelect: "none" }}>
@@ -832,58 +842,6 @@ function LLMDetail(props) {
       </div>
       {missCallout}
       {recommitCallout}
-      {(ev.chatMode || (ev.instructionAttachments && ev.instructionAttachments.length > 0)) && (() => {
-        var mode = ev.chatMode;
-        var atts = ev.instructionAttachments || [];
-        var bodyPreview = mode ? mode.body.slice(0, 600) : "";
-        return (
-        <div style={{
-          background: theme.bg.surface, border: "1px solid " + theme.border.default,
-          borderRadius: 5, padding: "10px 12px", marginBottom: 12,
-          fontSize: theme.fontSize.sm, color: theme.text.secondary, lineHeight: 1.5,
-        }}>
-          <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6, fontWeight: 600 }}>
-            ⚙ Custom chat mode
-          </div>
-          {mode && (
-            <>
-              <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 6 }}>
-                <span style={{ color: theme.accent.primary, fontFamily: theme.font.mono, fontSize: theme.fontSize.base, fontWeight: 600 }}>{mode.name}</span>
-                <span style={{ color: theme.text.muted, fontSize: theme.fontSize.xs, fontFamily: theme.font.mono }}>
-                  ~{fmtT(mode.tokensEst)} tok · {mode.body.length.toLocaleString()} chars
-                </span>
-              </div>
-              <details style={{ marginTop: 4 }}>
-                <summary style={{ cursor: "pointer", color: theme.text.muted, fontSize: theme.fontSize.xs, userSelect: "none" }}>
-                  Mode instructions ({mode.body.length > 600 ? "first 600 chars, click to expand" : "full body"})
-                </summary>
-                <div style={Object.assign(textBlockStyle(), { marginTop: 6, maxHeight: 360, overflow: "auto" })}>
-                  {mode.body}
-                </div>
-              </details>
-            </>
-          )}
-          {atts.length > 0 && (
-            <div style={{ marginTop: mode ? 10 : 0, paddingTop: mode ? 8 : 0, borderTop: mode ? "1px solid " + theme.border.subtle : "none" }}>
-              <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, marginBottom: 4 }}>
-                Workspace instruction file{atts.length === 1 ? "" : "s"} attached ({atts.length})
-              </div>
-              {atts.map(function (a, i) {
-                return (
-                  <div key={i} style={{ display: "flex", gap: 10, alignItems: "baseline", fontFamily: theme.font.mono, fontSize: theme.fontSize.xs }}>
-                    <span style={{ color: theme.text.primary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={a.filePath}>{a.filePath}</span>
-                    <span style={{ color: theme.text.muted, marginLeft: "auto" }}>~{fmtT(Math.round(a.chars / 4))} tok</span>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-          <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, fontStyle: "italic", marginTop: 8 }}>
-            These instructions are concatenated into the system prompt and are part of the cached prefix on subsequent calls.
-          </div>
-        </div>
-        );
-      })()}
       {ev.images && ev.images.length > 0 && (() => {
         var vis = ev.visionTokensTotal || 0;
         var pt = ev.promptTokens || 0;

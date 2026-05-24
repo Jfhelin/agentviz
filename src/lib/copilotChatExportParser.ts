@@ -282,6 +282,10 @@ interface ClassifiedCall {
   componentChars: ComponentBreakdown;
   systemPreview: string;
   systemChars: number;
+  /** Text at the start of the system prompt before any recognised tagged
+   * block (`<modeInstructions>`, `<skills>`, scaffolding, etc.). Typically
+   * the role preamble like "You are an expert AI programming assistant...". */
+  systemPreamble: string;
   systemHash: string;
   currentText: string;
   historyMsgs: { role: "user" | "assistant"; chars: number; tokens: number; preview: string }[];
@@ -636,6 +640,10 @@ function classifyCall(log: RawLog): ClassifiedCall {
     },
     systemPreview: systemText.slice(0, 400),
     systemChars: systemText.length,
+    systemPreamble: (function () {
+      const firstTag = systemText.search(/<[a-zA-Z][\w-]*[^>]*>/);
+      return firstTag > 0 ? systemText.slice(0, firstTag).trim() : systemText.slice(0, 800).trim();
+    })(),
     systemHash: fnv1aHex(systemText.trim().replace(/\s+/g, " ")),
     currentText: currentText.slice(0, 600),
     historyMsgs,
@@ -772,6 +780,7 @@ export interface CostAnalysisCall {
   newToolResultMsgs: ClassifiedCall["toolResultMsgs"];
   systemPreview: string;
   systemChars: number;
+  systemPreamble: string;
   systemHash: string;
   currentText: string;
   cumCostAfter: number;
@@ -1263,6 +1272,7 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
         newToolResultMsgs,
         systemPreview: cls.systemPreview,
         systemChars: cls.systemChars,
+        systemPreamble: cls.systemPreamble,
         systemHash: cls.systemHash,
         currentText: cls.currentText,
         cumCostAfter: cumCost,
