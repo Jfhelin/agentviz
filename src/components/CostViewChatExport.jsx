@@ -562,145 +562,147 @@ function renderSystemAnatomy(ev) {
   var pctOf = function (chars) {
     return sysChars > 0 ? (100 * chars / sysChars).toFixed(1) + "%" : "—";
   };
-  var scaffTagSummary = scaff.length > 0
-    ? "Stable Copilot scaffolding (built into every system prompt regardless of mode):\n" +
-      scaff.map(function (s) { return "  <" + s.tag + ">  ~" + fmtT(charsToScaledTok(s.chars)) + " tok"; }).join("\n")
-    : "";
-  var skillsTooltip = skills.length > 0
-    ? skills.length + " user-installed skills declared via <skills>:\n" +
-      skills.slice(0, 10).map(function (s) { return "  · " + s.name + "  ~" + fmtT(charsToScaledTok(s.chars)) + " tok"; }).join("\n") +
-      (skills.length > 10 ? "\n  … and " + (skills.length - 10) + " more (expand below for full list)" : "")
-    : "";
-  var modeTooltip = ev.chatMode
-    ? "Custom chat mode \"" + ev.chatMode.name + "\" injected via <modeInstructions>.\n" +
-      "Body length: " + (ev.chatMode.body ? ev.chatMode.body.length.toLocaleString() : 0) + " chars\n" +
-      (ev.chatMode.body ? "\nFirst 240 chars:\n" + ev.chatMode.body.slice(0, 240).trim() + (ev.chatMode.body.length > 240 ? "…" : "") : "")
-    : "";
-  var instTooltip = instAtts.length > 0
-    ? instAtts.length + " instruction file" + (instAtts.length === 1 ? "" : "s") + " attached:\n" +
-      instAtts.map(function (a) { return "  · " + a.filePath; }).join("\n")
-    : "";
-  var fileTooltip = fileAtts.length > 0
-    ? fileAtts.length + " ad-hoc #file: reference" + (fileAtts.length === 1 ? "" : "s") + ":\n" +
-      fileAtts.slice(0, 12).map(function (a) { return "  · " + a.filePath + "  ~" + fmtT(charsToScaledTok(a.chars)) + " tok"; }).join("\n") +
-      (fileAtts.length > 12 ? "\n  … and " + (fileAtts.length - 12) + " more" : "")
-    : "";
-  var otherTooltip = "Text in the system prompt that doesn't match any known tagged block — typically the role preamble (\"You are an expert AI…\") plus any custom system content not wrapped in a recognised <tag>.";
   var rows = [
-    { key: "scaff",   label: "Copilot built-in scaffolding (" + scaff.length + " section" + (scaff.length === 1 ? "" : "s") + ")", chars: scaffChars, color: theme.cost.ctxToolDefs, tip: scaffTagSummary },
-    { key: "skills",  label: "Skills (" + skills.length + ")", chars: skillsChars, color: theme.cost.kindMcp, tip: skillsTooltip },
-    { key: "mode",    label: "Custom chat mode" + (ev.chatMode ? ": " + ev.chatMode.name : ""), chars: modeChars, color: theme.accent.primary, tip: modeTooltip },
-    { key: "inst",    label: "Workspace instruction files (" + instAtts.length + ")", chars: instAttsChars, color: theme.cost.ctxHistory, tip: instTooltip },
-    { key: "files",   label: "Other file attachments (" + fileAtts.length + ")", chars: fileAttsChars, color: theme.cost.ctxToolResults, tip: fileTooltip },
-    { key: "other",   label: "Other / unclassified system text", chars: otherChars, color: theme.cost.ctxSystem, tip: otherTooltip },
+    {
+      key: "scaff",
+      label: "Copilot built-in scaffolding (" + scaff.length + " section" + (scaff.length === 1 ? "" : "s") + ")",
+      chars: scaffChars,
+      color: theme.cost.ctxToolDefs,
+      body: scaff.length > 0 ? (
+        <div style={{ marginTop: 6, fontFamily: theme.font.mono, fontSize: theme.fontSize.xs }}>
+          {scaff.map(function (s, i) {
+            return (
+              <div key={i} style={{ display: "flex", gap: 8, padding: "2px 0", cursor: s.body ? "help" : "default" }} title={s.body ? "<" + s.tag + ">  ·  " + s.chars.toLocaleString() + " chars\n\n" + s.body : "<" + s.tag + ">  ·  " + s.chars.toLocaleString() + " chars"}>
+                <span style={{ color: theme.text.primary }}>&lt;{s.tag}&gt;</span>
+                <span style={{ color: theme.text.muted, marginLeft: "auto" }}>~{fmtT(charsToScaledTok(s.chars))} tok</span>
+              </div>
+            );
+          })}
+          <div style={{ marginTop: 6, color: theme.text.muted, fontStyle: "italic", fontFamily: theme.font.sans }}>Hover any tag to preview its body text.</div>
+        </div>
+      ) : null,
+    },
+    {
+      key: "skills",
+      label: "Skills (" + skills.length + ")",
+      chars: skillsChars,
+      color: theme.cost.kindMcp,
+      body: skills.length > 0 ? (
+        <div style={{ marginTop: 6, maxHeight: 320, overflow: "auto" }}>
+          {skills.map(function (s, i) {
+            return (
+              <div key={i} style={{ padding: "4px 0", borderBottom: i === skills.length - 1 ? "none" : "1px solid " + theme.border.subtle, fontSize: theme.fontSize.xs, fontFamily: theme.font.mono }}>
+                <div style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
+                  <span style={{ color: theme.cost.kindMcp, fontWeight: 600 }}>{s.name}</span>
+                  <span style={{ color: theme.text.muted, marginLeft: "auto" }}>~{fmtT(charsToScaledTok(s.chars))} tok</span>
+                </div>
+                {s.file && <div style={{ color: theme.text.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.file}>{s.file}</div>}
+                {s.description && <div style={{ color: theme.text.secondary, marginTop: 2, fontFamily: theme.font.sans, lineHeight: 1.4 }} title={s.description}>{s.description.length > 240 ? s.description.slice(0, 240) + "…" : s.description}</div>}
+              </div>
+            );
+          })}
+        </div>
+      ) : null,
+    },
+    {
+      key: "mode",
+      label: "Custom chat mode" + (ev.chatMode ? ": " + ev.chatMode.name : ""),
+      chars: modeChars,
+      color: theme.accent.primary,
+      body: (ev.chatMode && ev.chatMode.body) ? (
+        <div style={Object.assign(textBlockStyle(), { marginTop: 6, maxHeight: 360, overflow: "auto" })}>
+          {ev.chatMode.body.length > 4000 ? ev.chatMode.body.slice(0, 4000) + "\n…[truncated]" : ev.chatMode.body}
+        </div>
+      ) : null,
+    },
+    {
+      key: "inst",
+      label: "Workspace instruction files (" + instAtts.length + ")",
+      chars: instAttsChars,
+      color: theme.cost.ctxHistory,
+      body: instAtts.length > 0 ? (
+        <div style={{ marginTop: 6, fontFamily: theme.font.mono, fontSize: theme.fontSize.xs }}>
+          {instAtts.map(function (a, i) {
+            return (
+              <div key={i} style={{ display: "flex", gap: 8, padding: "2px 0" }}>
+                <span style={{ color: theme.text.primary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={a.filePath}>{a.filePath}</span>
+                <span style={{ color: theme.text.muted, marginLeft: "auto" }}>~{fmtT(charsToScaledTok(a.chars))} tok</span>
+              </div>
+            );
+          })}
+        </div>
+      ) : null,
+    },
+    {
+      key: "files",
+      label: "Other file attachments (" + fileAtts.length + ")",
+      chars: fileAttsChars,
+      color: theme.cost.ctxToolResults,
+      body: fileAtts.length > 0 ? (
+        <div style={{ marginTop: 6, fontFamily: theme.font.mono, fontSize: theme.fontSize.xs }}>
+          {fileAtts.map(function (a, i) {
+            return (
+              <div key={i} style={{ display: "flex", gap: 8, padding: "2px 0" }}>
+                <span style={{ color: theme.text.primary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={a.filePath}>{a.filePath}</span>
+                <span style={{ color: theme.text.muted, marginLeft: "auto" }}>~{fmtT(charsToScaledTok(a.chars))} tok</span>
+              </div>
+            );
+          })}
+        </div>
+      ) : null,
+    },
+    {
+      key: "other",
+      label: "Other / unclassified system text" + (ev.systemPreamble ? " (incl. role preamble)" : ""),
+      chars: otherChars,
+      color: theme.cost.ctxSystem,
+      body: ev.systemPreamble ? (
+        <div>
+          <div style={{ marginTop: 4, color: theme.text.muted, fontSize: theme.fontSize.xs }}>
+            Role preamble — start of the system prompt before any tagged block ({ev.systemPreamble.length.toLocaleString()} chars):
+          </div>
+          <div style={Object.assign(textBlockStyle(), { marginTop: 6, maxHeight: 280, overflow: "auto" })}>
+            {ev.systemPreamble}
+          </div>
+        </div>
+      ) : null,
+    },
   ].filter(function (r) { return r.chars > 0; });
+  var openByDefault = { mode: true };
+  if (!ev.chatMode && skills.length === 0) openByDefault.other = true;
   return (
     <div>
-      <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, marginBottom: 6 }}>
-        {sysChars.toLocaleString()} chars · ~{fmtT(sysTok)} tok · hover any row for details
+      <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, marginBottom: 8 }}>
+        {sysChars.toLocaleString()} chars · ~{fmtT(sysTok)} tok · click ▸ to expand any section
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "auto 1fr auto auto", gap: "4px 12px", alignItems: "baseline", fontFamily: theme.font.mono, fontSize: theme.fontSize.xs }}>
+      <div style={{ fontFamily: theme.font.mono, fontSize: theme.fontSize.xs }}>
         {rows.map(function (r) {
+          var expandable = !!r.body;
+          var summary = (
+            <span style={{ display: "flex", alignItems: "center", gap: 8, width: "100%" }}>
+              <span style={{ display: "inline-block", width: 10, height: 10, background: r.color, borderRadius: 2, flex: "0 0 auto" }} />
+              <span style={{ color: theme.text.primary, flex: "1 1 auto" }}>{r.label}</span>
+              <span style={{ color: theme.text.muted, textAlign: "right", flex: "0 0 auto" }}>~{fmtT(charsToScaledTok(r.chars))} tok</span>
+              <span style={{ color: theme.text.muted, textAlign: "right", flex: "0 0 auto", width: 48 }}>{pctOf(r.chars)}</span>
+            </span>
+          );
+          if (!expandable) {
+            return (
+              <div key={r.key} style={{ display: "flex", alignItems: "center", padding: "3px 0 3px 18px" }}>
+                {summary}
+              </div>
+            );
+          }
           return (
-            <React.Fragment key={r.key}>
-              <span style={{ display: "inline-block", width: 10, height: 10, background: r.color, borderRadius: 2 }} />
-              <span style={{ color: theme.text.primary, cursor: r.tip ? "help" : "default" }} title={r.tip || undefined}>{r.label}</span>
-              <span style={{ color: theme.text.muted, textAlign: "right" }}>~{fmtT(charsToScaledTok(r.chars))} tok</span>
-              <span style={{ color: theme.text.muted, textAlign: "right" }}>{pctOf(r.chars)}</span>
-            </React.Fragment>
+            <details key={r.key} open={!!openByDefault[r.key]} style={{ padding: "1px 0" }}>
+              <summary style={{ cursor: "pointer", listStylePosition: "outside", padding: "2px 0", color: theme.text.muted }}>
+                {summary}
+              </summary>
+              <div style={{ padding: "4px 0 8px 18px" }}>{r.body}</div>
+            </details>
           );
         })}
       </div>
-      {ev.systemPreamble && (
-        <details style={{ marginTop: 8 }} open={!ev.chatMode && (ev.skills || []).length === 0}>
-          <summary style={{ cursor: "pointer", color: theme.text.muted, fontSize: theme.fontSize.xs, userSelect: "none" }}>
-            Role preamble ({ev.systemPreamble.length.toLocaleString()} chars) — start of the system prompt
-          </summary>
-          <div style={Object.assign(textBlockStyle(), { marginTop: 6, maxHeight: 240, overflow: "auto" })}>
-            {ev.systemPreamble}
-          </div>
-        </details>
-      )}
-      {ev.chatMode && ev.chatMode.body && (
-        <details style={{ marginTop: 8 }}>
-          <summary style={{ cursor: "pointer", color: theme.text.muted, fontSize: theme.fontSize.xs, userSelect: "none" }}>
-            Custom chat mode body ({ev.chatMode.name}) — {ev.chatMode.body.length.toLocaleString()} chars
-          </summary>
-          <div style={textBlockStyle()}>{ev.chatMode.body.length > 4000 ? ev.chatMode.body.slice(0, 4000) + "\n…[truncated]" : ev.chatMode.body}</div>
-        </details>
-      )}
-      {skills.length > 0 && (
-        <details style={{ marginTop: 6 }}>
-          <summary style={{ cursor: "pointer", color: theme.text.muted, fontSize: theme.fontSize.xs, userSelect: "none" }}>
-            Skills ({skills.length}) — name, file, description
-          </summary>
-          <div style={{ marginTop: 6, maxHeight: 280, overflow: "auto" }}>
-            {skills.map(function (s, i) {
-              return (
-                <div key={i} style={{ padding: "4px 0", borderBottom: i === skills.length - 1 ? "none" : "1px solid " + theme.border.subtle, fontSize: theme.fontSize.xs, fontFamily: theme.font.mono }}>
-                  <div style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
-                    <span style={{ color: theme.cost.kindMcp, fontWeight: 600 }}>{s.name}</span>
-                    <span style={{ color: theme.text.muted, marginLeft: "auto" }}>~{fmtT(charsToScaledTok(s.chars))} tok</span>
-                  </div>
-                  {s.file && <div style={{ color: theme.text.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.file}>{s.file}</div>}
-                  {s.description && <div style={{ color: theme.text.secondary, marginTop: 2, fontFamily: theme.font.sans, lineHeight: 1.4 }} title={s.description}>{s.description.length > 240 ? s.description.slice(0, 240) + "…" : s.description}</div>}
-                </div>
-              );
-            })}
-          </div>
-        </details>
-      )}
-      {scaff.length > 0 && (
-        <details style={{ marginTop: 6 }}>
-          <summary style={{ cursor: "pointer", color: theme.text.muted, fontSize: theme.fontSize.xs, userSelect: "none" }}>
-            Scaffolding sections ({scaff.length}) — stable Copilot boilerplate
-          </summary>
-          <div style={{ marginTop: 6, fontFamily: theme.font.mono, fontSize: theme.fontSize.xs }}>
-            {scaff.map(function (s, i) {
-              return (
-                <div key={i} style={{ display: "flex", gap: 8, padding: "2px 0", cursor: s.body ? "help" : "default" }} title={s.body ? "<" + s.tag + ">  ·  " + s.chars.toLocaleString() + " chars\n\n" + s.body : "<" + s.tag + ">  ·  " + s.chars.toLocaleString() + " chars"}>
-                  <span style={{ color: theme.text.primary }}>&lt;{s.tag}&gt;</span>
-                  <span style={{ color: theme.text.muted, marginLeft: "auto" }}>~{fmtT(charsToScaledTok(s.chars))} tok</span>
-                </div>
-              );
-            })}
-          </div>
-        </details>
-      )}
-      {fileAtts.length > 0 && (
-        <details style={{ marginTop: 6 }}>
-          <summary style={{ cursor: "pointer", color: theme.text.muted, fontSize: theme.fontSize.xs, userSelect: "none" }}>
-            File attachments ({fileAtts.length})
-          </summary>
-          <div style={{ marginTop: 6, fontFamily: theme.font.mono, fontSize: theme.fontSize.xs }}>
-            {fileAtts.map(function (a, i) {
-              return (
-                <div key={i} style={{ display: "flex", gap: 8, padding: "2px 0" }}>
-                  <span style={{ color: theme.text.primary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={a.filePath}>{a.filePath}</span>
-                  <span style={{ color: theme.text.muted, marginLeft: "auto" }}>~{fmtT(charsToScaledTok(a.chars))} tok</span>
-                </div>
-              );
-            })}
-          </div>
-        </details>
-      )}
-      {instAtts.length > 0 && (
-        <details style={{ marginTop: 6 }}>
-          <summary style={{ cursor: "pointer", color: theme.text.muted, fontSize: theme.fontSize.xs, userSelect: "none" }}>
-            Instruction files ({instAtts.length})
-          </summary>
-          <div style={{ marginTop: 6, fontFamily: theme.font.mono, fontSize: theme.fontSize.xs }}>
-            {instAtts.map(function (a, i) {
-              return (
-                <div key={i} style={{ display: "flex", gap: 8, padding: "2px 0" }}>
-                  <span style={{ color: theme.text.primary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={a.filePath}>{a.filePath}</span>
-                  <span style={{ color: theme.text.muted, marginLeft: "auto" }}>~{fmtT(charsToScaledTok(a.chars))} tok</span>
-                </div>
-              );
-            })}
-          </div>
-        </details>
-      )}
     </div>
   );
 }
