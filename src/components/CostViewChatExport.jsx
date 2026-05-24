@@ -69,6 +69,81 @@ function friendlyCallName(name) {
   return name;
 }
 
+// Split a shell command on top-level sequence operators (&&, ||, ;) outside
+// quotes. Not a full shell parser; good enough for the common Copilot
+// patterns (no nested quoted operators in the wild).
+function splitShellSteps(cmd) {
+  var out = [];
+  var buf = "";
+  var inSingle = false;
+  var inDouble = false;
+  var i = 0;
+  while (i < cmd.length) {
+    var ch = cmd[i];
+    if (ch === "'" && !inDouble) inSingle = !inSingle;
+    else if (ch === '"' && !inSingle) inDouble = !inDouble;
+    if (!inSingle && !inDouble) {
+      if (ch === ";") { if (buf.trim()) out.push(buf.trim()); buf = ""; i += 1; continue; }
+      if ((ch === "&" || ch === "|") && cmd[i + 1] === ch) {
+        if (buf.trim()) out.push(buf.trim());
+        buf = ""; i += 2; continue;
+      }
+    }
+    buf += ch; i += 1;
+  }
+  if (buf.trim()) out.push(buf.trim());
+  return out;
+}
+
+// First word of a step, after stripping leading env-var assignments and
+// common builtins that are setup-only (cd, export, set).
+function firstVerbOfStep(step) {
+  // Walk past VAR=value prefixes
+  var rest = step.replace(/^(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)+/, "");
+  // Pipeline: first command in the pipe is what matters
+  var firstPipe = rest.split(/\s\|\s/)[0] || rest;
+  var m = firstPipe.trim().match(/^(\S+)/);
+  return m ? m[1] : "";
+}
+
+function summarizeShellCommand(cmd) {
+  if (!cmd) return "";
+  var normalized = cmd.replace(/\\\r?\n/g, " ").replace(/\s+/g, " ").trim();
+  var steps = splitShellSteps(normalized);
+  // Strip a leading bare `cd <path>` (it's just setup, not real work).
+  if (steps.length > 1 && /^cd\s/.test(steps[0])) steps = steps.slice(1);
+  if (steps.length <= 1) {
+    return normalized.length > 90 ? normalized.slice(0, 90) + "\u2026" : normalized;
+  }
+  var verbs = steps.map(firstVerbOfStep).filter(Boolean);
+  var unique = [];
+  verbs.forEach(function (v) { if (unique.indexOf(v) < 0) unique.push(v); });
+  if (unique.length === 1 && verbs.length > 1) {
+    return verbs.length + "\u00d7 " + unique[0];
+  }
+  var shown = verbs.slice(0, 4).join(" \u2192 ");
+  return verbs.length > 4
+    ? shown + " \u2026 (" + verbs.length + " steps)"
+    : shown + " (" + verbs.length + " steps)";
+}
+
+// Try to extract the most informative one-line summary from a tool call's
+// raw arguments. Falls back to the parser-side argsSummary when nothing
+// special-cased applies.
+function summarizeToolArgs(ev) {
+  if (!ev) return "";
+  var parsed = null;
+  if (ev.rawArgs) {
+    try { parsed = JSON.parse(ev.rawArgs); } catch (_e) { parsed = null; }
+  }
+  if (parsed && typeof parsed === "object") {
+    if (typeof parsed.command === "string" && parsed.command.length > 0) {
+      return summarizeShellCommand(parsed.command);
+    }
+  }
+  return ev.argsSummary || "";
+}
+
 // Names of LLM calls that represent a real agent/chat turn (vs UI overhead
 // like title or promptCategorization). For these we want a richer "what
 // happened" label instead of the static friendlyCallName.
@@ -905,13 +980,14 @@ function ToolDetail(props) {
     });
   };
   var shape = detectResponseShape(ev.resultPreview);
+  var headerSummary = summarizeToolArgs(ev);
   return (
     <div style={{ gridColumn: "1 / -1", background: theme.bg.base, borderBottom: "1px solid " + theme.border.subtle, padding: "14px 22px" }}>
       <h4 style={{ margin: "0 0 10px", color: theme.text.primary, fontSize: theme.fontSize.base, fontWeight: 600, letterSpacing: 0.4 }}>
         <span style={{ textTransform: "uppercase", letterSpacing: 0.4 }}>Tool call · {ev.name}</span>
-        {ev.argsSummary && (
+        {headerSummary && (
           <span
-            title={ev.rawArgs && ev.rawArgs.length > 0 ? ev.rawArgs : ev.argsSummary}
+            title={ev.rawArgs && ev.rawArgs.length > 0 ? ev.rawArgs : headerSummary}
             style={{
               marginLeft: 10,
               fontFamily: theme.font.mono,
@@ -923,7 +999,7 @@ function ToolDetail(props) {
               borderLeft: "2px solid " + theme.border.default,
               paddingLeft: 10,
             }}
-          >{ev.argsSummary.length > 100 ? ev.argsSummary.slice(0, 100) + "\u2026" : ev.argsSummary}</span>
+          >{headerSummary.length > 110 ? headerSummary.slice(0, 110) + "\u2026" : headerSummary}</span>
         )}
       </h4>
 
