@@ -986,16 +986,44 @@ function LLMDetail(props) {
               <ToolResultList msgs={ev.newToolResultMsgs} />
             </>
           );
-          if (k === "current") return (
-            <>
-              <div style={textBlockStyle()}>{ev.currentText || "(empty)"}{ev.currentText && ev.currentText.length >= 400 ? "…" : ""}</div>
-              {ev.imageTokensEst > 0 && (
-                <div style={{ marginTop: 6, fontSize: theme.fontSize.xs, color: theme.text.muted, fontStyle: "italic" }}>
-                  Includes ~{fmtT(ev.imageTokensEst)} estimated image tokens (see 📎 attachment block above for per-image breakdown).
-                </div>
-              )}
-            </>
-          );
+          if (k === "current") {
+            var parts = ev.currentParts || [];
+            var totalCurChars = parts.reduce(function (a, p) { return a + p.chars; }, 0);
+            var curTok = (ev.components && ev.components.current) || 0;
+            var partToTok = function (chars) {
+              return totalCurChars > 0 && curTok > 0
+                ? Math.round(chars / totalCurChars * curTok)
+                : Math.round(chars / 4);
+            };
+            return (
+              <>
+                {parts.length > 0 ? (
+                  <div style={{ fontFamily: theme.font.mono, fontSize: theme.fontSize.xs }}>
+                    {parts.map(function (p, i) {
+                      var label = p.isTagged ? "<" + p.tag + ">" : p.tag;
+                      var tip = (p.isTagged ? "<" + p.tag + ">" : "(plaintext)")
+                        + "  ·  " + p.chars.toLocaleString() + " chars"
+                        + (p.body ? "\n\n" + p.body : "");
+                      return (
+                        <div key={i} style={{ display: "flex", gap: 8, padding: "2px 0", cursor: p.body ? "help" : "default" }} title={tip}>
+                          <span style={{ color: p.isTagged ? theme.text.primary : theme.text.muted, fontStyle: p.isTagged ? "normal" : "italic" }}>{label}</span>
+                          <span style={{ color: theme.text.muted, marginLeft: "auto" }}>~{fmtT(partToTok(p.chars))} tok</span>
+                        </div>
+                      );
+                    })}
+                    <div style={{ marginTop: 6, color: theme.text.muted, fontStyle: "italic", fontFamily: theme.font.sans }}>Hover any tag to preview its body.</div>
+                  </div>
+                ) : (
+                  <div style={textBlockStyle()}>{ev.currentText || "(empty)"}{ev.currentText && ev.currentText.length >= 400 ? "…" : ""}</div>
+                )}
+                {ev.imageTokensEst > 0 && (
+                  <div style={{ marginTop: 6, fontSize: theme.fontSize.xs, color: theme.text.muted, fontStyle: "italic" }}>
+                    Includes ~{fmtT(ev.imageTokensEst)} estimated image tokens (see 📎 attachment block above for per-image breakdown).
+                  </div>
+                )}
+              </>
+            );
+          }
           return null;
         };
         return (

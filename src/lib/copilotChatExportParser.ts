@@ -280,6 +280,19 @@ interface InstructionAttachment {
   chars: number;
 }
 
+export interface CurrentPart {
+  /** Either a tag name like `userRequest` / `attachments` / `editorContext`,
+   * or the literal `(plaintext)` for text outside any tag. */
+  tag: string;
+  /** Length of the inner content in chars (excluding the wrapping tags). */
+  chars: number;
+  /** Inner body, truncated for hover preview. */
+  body: string;
+  /** True when this part came from a recognised top-level XML tag in the
+   * user message, false for plaintext residuals. */
+  isTagged: boolean;
+}
+
 interface ClassifiedCall {
   components: ComponentBreakdown;
   /** Raw character counts per bucket (pre-scaling). Used by cacheAnalysis to
@@ -295,6 +308,14 @@ interface ClassifiedCall {
   systemPreamble: string;
   systemHash: string;
   currentText: string;
+  /** Per-section breakdown of the current (last-user) prompt, mirroring how
+   * we show the system prompt's anatomy. Each section is either a top-level
+   * `<tag>...</tag>` block (e.g. `<attachments>`, `<context>`,
+   * `<userRequest>`, `<editorContext>`, `<reminderInstructions>`) or a
+   * residual "(plaintext)" entry for any text outside such tags. Tooltips
+   * surface the body so users can see why their "current prompt" is much
+   * larger than the actual question they typed. */
+  currentParts: CurrentPart[];
   historyMsgs: { role: "user" | "assistant"; chars: number; tokens: number; preview: string }[];
   toolResultMsgs: { chars: number; tokens: number; preview: string; label: string }[];
   totalTools: number;
@@ -453,6 +474,49 @@ function extractScaffolding(systemText: string): ScaffoldingSection[] {
       const body = inner.length > MAX_BODY ? inner.slice(0, MAX_BODY).trim() + "\n…[truncated]" : inner.trim();
       out.push({ tag, chars: inner.length, body });
     }
+  }
+  return out;
+}
+
+// Walk the user-message text and extract top-level `<tag>...</tag>` blocks
+// regardless of which tag name they use (unlike extractScaffolding which is
+// limited to a fixed list for the system prompt). VS Code Copilot wraps the
+// user's actual question in scaffolding tags like `<attachments>`,
+// `<context>`, `<editorContext>`, `<reminderInstructions>`, `<userRequest>`
+// etc. Surfacing each as its own row makes it easy to see why a "current
+// prompt" can be 5x the size of what the user actually typed.
+function extractCurrentParts(text: string): CurrentPart[] {
+  const out: CurrentPart[] = [];
+  const MAX_BODY = 1500;
+  // Match top-level <tag>...</tag>. Use lazy match and require matching tag
+  // name on close. Tags themselves may not contain attributes for closing.
+  const re = /<([a-zA-Z][a-zA-Z0-9_]*)(?:\s[^>]*)?>([\s\S]*?)<\/\1>/g;
+  let cursor = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > cursor) {
+      const between = text.slice(cursor, m.index);
+      if (between.trim().length > 0) {
+        const body = between.length > MAX_BODY ? between.slice(0, MAX_BODY).trim() + "\n…[truncated]" : between.trim();
+        out.push({ tag: "(plaintext)", chars: between.length, body, isTagged: false });
+      }
+    }
+    const inner = m[2];
+    const body = inner.length > MAX_BODY ? inner.slice(0, MAX_BODY).trim() + "\n…[truncated]" : inner.trim();
+    out.push({ tag: m[1], chars: inner.length, body, isTagged: true });
+    cursor = m.index + m[0].length;
+  }
+  if (cursor < text.length) {
+    const tail = text.slice(cursor);
+    if (tail.trim().length > 0) {
+      const body = tail.length > MAX_BODY ? tail.slice(0, MAX_BODY).trim() + "\n…[truncated]" : tail.trim();
+      out.push({ tag: "(plaintext)", chars: tail.length, body, isTagged: false });
+    }
+  }
+  // If nothing matched at all, return a single plaintext part.
+  if (out.length === 0 && text.length > 0) {
+    const body = text.length > MAX_BODY ? text.slice(0, MAX_BODY).trim() + "\n…[truncated]" : text.trim();
+    out.push({ tag: "(plaintext)", chars: text.length, body, isTagged: false });
   }
   return out;
 }
@@ -660,6 +724,7 @@ function classifyCall(log: RawLog): ClassifiedCall {
     })(),
     systemHash: fnv1aHex(systemText.trim().replace(/\s+/g, " ")),
     currentText: currentText.slice(0, 600),
+    currentParts: extractCurrentParts(currentText),
     historyMsgs,
     toolResultMsgs,
     totalTools: tools.length,
@@ -815,6 +880,12 @@ export interface CostAnalysisCall {
   systemPreamble: string;
   systemHash: string;
   currentText: string;
+  /** Per-section anatomy of the current (last-user) prompt. See
+   * `CurrentPart` for shape; surfaces top-level tagged blocks like
+   * `<userRequest>`, `<attachments>`, `<context>`, plus any plaintext
+   * residual, so the user can see how much of the "current prompt" bucket
+   * is actually their question vs Copilot scaffolding. */
+  currentParts: CurrentPart[];
   cumCostAfter: number;
 }
 
@@ -1349,6 +1420,7 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
         systemPreamble: cls.systemPreamble,
         systemHash: cls.systemHash,
         currentText: cls.currentText,
+        currentParts: cls.currentParts,
         cumCostAfter: cumCost,
       };
       if (ca.unexpectedMiss) {
