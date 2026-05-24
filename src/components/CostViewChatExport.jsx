@@ -258,18 +258,18 @@ function ToolGroups(props) {
             {open && (
               <div style={{ paddingLeft: 10, color: theme.text.muted, fontSize: theme.fontSize.xs, borderLeft: "1px solid " + theme.border.default, marginBottom: 4 }}>
                 {g.top.map(function (t, j) {
+                  var tip = "";
+                  if (t.description) tip += t.description;
+                  if (t.paramSummary) tip += (tip ? "\n\n" : "") + "params: " + t.paramSummary;
                   return (
-                    <div key={j} style={{ padding: "4px 0" }}>
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 6, fontVariantNumeric: "tabular-nums" }}>
-                        <span style={{ color: theme.text.primary, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis" }}>{t.name}</span>
-                        <span>{fmtT(t.tokens)} tok</span>
-                      </div>
-                      {t.description && (
-                        <div style={{ color: theme.text.secondary, marginTop: 2, lineHeight: 1.45 }}>{t.description}</div>
-                      )}
-                      {t.paramSummary && (
-                        <div style={{ color: theme.text.muted, marginTop: 2, fontStyle: "italic" }}>params: {t.paramSummary}</div>
-                      )}
+                    <div key={j}
+                      title={tip || undefined}
+                      style={{ padding: "2px 0", display: "grid", gridTemplateColumns: "1fr auto", gap: 6, fontVariantNumeric: "tabular-nums", cursor: tip ? "help" : "default" }}>
+                      <span style={{ color: theme.text.secondary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {t.name}
+                        {tip && <span style={{ marginLeft: 6, opacity: 0.55 }}>ⓘ</span>}
+                      </span>
+                      <span>{fmtT(t.tokens)} tok</span>
                     </div>
                   );
                 })}
