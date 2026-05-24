@@ -588,19 +588,20 @@ function renderSystemAnatomy(ev) {
       chars: skillsChars,
       color: theme.cost.kindMcp,
       body: skills.length > 0 ? (
-        <div style={{ marginTop: 6, maxHeight: 320, overflow: "auto" }}>
+        <div style={{ marginTop: 6, maxHeight: 320, overflow: "auto", fontFamily: theme.font.mono, fontSize: theme.fontSize.xs }}>
           {skills.map(function (s, i) {
+            var tip = s.name +
+              (s.file ? "\n" + s.file : "") +
+              "\n~" + fmtT(charsToScaledTok(s.chars)) + " tok · " + s.chars.toLocaleString() + " chars" +
+              (s.description ? "\n\n" + s.description : "");
             return (
-              <div key={i} style={{ padding: "4px 0", borderBottom: i === skills.length - 1 ? "none" : "1px solid " + theme.border.subtle, fontSize: theme.fontSize.xs, fontFamily: theme.font.mono }}>
-                <div style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
-                  <span style={{ color: theme.cost.kindMcp, fontWeight: 600 }}>{s.name}</span>
-                  <span style={{ color: theme.text.muted, marginLeft: "auto" }}>~{fmtT(charsToScaledTok(s.chars))} tok</span>
-                </div>
-                {s.file && <div style={{ color: theme.text.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.file}>{s.file}</div>}
-                {s.description && <div style={{ color: theme.text.secondary, marginTop: 2, fontFamily: theme.font.sans, lineHeight: 1.4 }} title={s.description}>{s.description.length > 240 ? s.description.slice(0, 240) + "…" : s.description}</div>}
+              <div key={i} style={{ display: "flex", gap: 8, padding: "2px 0", cursor: "help" }} title={tip}>
+                <span style={{ color: theme.cost.kindMcp, fontWeight: 600 }}>{s.name}</span>
+                <span style={{ color: theme.text.muted, marginLeft: "auto" }}>~{fmtT(charsToScaledTok(s.chars))} tok</span>
               </div>
             );
           })}
+          <div style={{ marginTop: 6, color: theme.text.muted, fontStyle: "italic", fontFamily: theme.font.sans }}>Hover any skill for file path and full description.</div>
         </div>
       ) : null,
     },
@@ -623,13 +624,16 @@ function renderSystemAnatomy(ev) {
       body: instAtts.length > 0 ? (
         <div style={{ marginTop: 6, fontFamily: theme.font.mono, fontSize: theme.fontSize.xs }}>
           {instAtts.map(function (a, i) {
+            var base = a.filePath.split("/").pop() || a.filePath;
+            var tip = a.filePath + "\n~" + fmtT(charsToScaledTok(a.chars)) + " tok · " + a.chars.toLocaleString() + " chars";
             return (
-              <div key={i} style={{ display: "flex", gap: 8, padding: "2px 0" }}>
-                <span style={{ color: theme.text.primary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={a.filePath}>{a.filePath}</span>
+              <div key={i} style={{ display: "flex", gap: 8, padding: "2px 0", cursor: "help" }} title={tip}>
+                <span style={{ color: theme.text.primary }}>{base}</span>
                 <span style={{ color: theme.text.muted, marginLeft: "auto" }}>~{fmtT(charsToScaledTok(a.chars))} tok</span>
               </div>
             );
           })}
+          <div style={{ marginTop: 6, color: theme.text.muted, fontStyle: "italic", fontFamily: theme.font.sans }}>Hover for full path.</div>
         </div>
       ) : null,
     },
@@ -641,13 +645,16 @@ function renderSystemAnatomy(ev) {
       body: fileAtts.length > 0 ? (
         <div style={{ marginTop: 6, fontFamily: theme.font.mono, fontSize: theme.fontSize.xs }}>
           {fileAtts.map(function (a, i) {
+            var base = a.filePath.split("/").pop() || a.filePath;
+            var tip = a.filePath + "\n~" + fmtT(charsToScaledTok(a.chars)) + " tok · " + a.chars.toLocaleString() + " chars";
             return (
-              <div key={i} style={{ display: "flex", gap: 8, padding: "2px 0" }}>
-                <span style={{ color: theme.text.primary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={a.filePath}>{a.filePath}</span>
+              <div key={i} style={{ display: "flex", gap: 8, padding: "2px 0", cursor: "help" }} title={tip}>
+                <span style={{ color: theme.text.primary }}>{base}</span>
                 <span style={{ color: theme.text.muted, marginLeft: "auto" }}>~{fmtT(charsToScaledTok(a.chars))} tok</span>
               </div>
             );
           })}
+          <div style={{ marginTop: 6, color: theme.text.muted, fontStyle: "italic", fontFamily: theme.font.sans }}>Hover for full path.</div>
         </div>
       ) : null,
     },
