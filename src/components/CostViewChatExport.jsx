@@ -961,34 +961,45 @@ function LLMDetail(props) {
               <div style={{ display: "flex", width: "100%", height: 8, borderRadius: 2, overflow: "hidden", background: theme.bg.base }}>
                 {cached > 0 && (
                   <div style={{ width: slices[0].display + "%", background: slices[0].color }}
-                       title={fmtT(cached) + " tok served from cache" + (hasPx ? " (" + fmt$(cachedCost) + ")" : "")} />
+                       title={fmtT(cached) + " tok reused from cache (~10% input rate)" + (hasPx ? " · " + fmt$(cachedCost) : "")} />
                 )}
                 {fresh > 0 && (
                   <div style={{ width: slices[1].display + "%", background: slices[1].color }}
-                       title={fmtT(fresh) + " tok fresh, billed at full input rate" + (hasPx ? " (" + fmt$(freshCost) + ")" : "")} />
+                       title={fmtT(fresh) + " tok new, one-off (full input rate, won't be cached)" + (hasPx ? " · " + fmt$(freshCost) : "")} />
                 )}
                 {cwriteTok > 0 && (
                   <div style={{ width: slices[2].display + "%", background: slices[2].color }}
-                       title={fmtT(cwriteTok) + " tok cache-write, billed at premium (~1.25x input)" + (hasPx ? " (" + fmt$(cwriteCost) + ")" : "")} />
+                       title={fmtT(cwriteTok) + " tok new, being cached for next call (1.25x premium write)" + (hasPx ? " · " + fmt$(cwriteCost) : "")} />
                 )}
               </div>
             </div>
           )}
           <div style={{ fontSize: theme.fontSize.xs, color: theme.text.secondary, marginTop: 6, fontVariantNumeric: "tabular-nums", lineHeight: 1.5 }}>
             {cached > 0 && (
-              <div><span style={{ color: slices[0].color }}>■</span> {fmtT(cached)} tok cached · {pctCachedSize.toFixed(0)}%</div>
-            )}
-            {fresh > 0 && (
-              <div><span style={{ color: slices[1].color }}>■</span> {fmtT(fresh)} tok fresh · {pctFreshSize.toFixed(0)}%</div>
+              <div title="Tokens served from the prompt cache. Charged at ~10% of the input rate.">
+                <span style={{ color: slices[0].color }}>■</span> {fmtT(cached)} tok <b>reused from cache</b> · {pctCachedSize.toFixed(0)}%
+              </div>
             )}
             {cwriteTok > 0 && (
-              <div><span style={{ color: slices[2].color }}>■</span> {fmtT(cwriteTok)} tok cache-write · {pctCwriteSize.toFixed(0)}% <span style={{ color: theme.text.muted }}>(premium 1.25x)</span></div>
+              <div title="New material this call that the API is also committing to the cache. Costs 1.25x input rate now, but the next call gets it back at cache-read rate (much cheaper).">
+                <span style={{ color: slices[2].color }}>■</span> {fmtT(cwriteTok)} tok <b>new, cached for next call</b> · {pctCwriteSize.toFixed(0)}% <span style={{ color: theme.text.muted }}>(1.25x premium)</span>
+              </div>
+            )}
+            {fresh > 0 && (
+              <div title="New material this call that is not eligible for caching (typically the user's latest message at the tail of the prompt). Charged at full input rate.">
+                <span style={{ color: slices[1].color }}>■</span> {fmtT(fresh)} tok <b>new, one-off</b> · {pctFreshSize.toFixed(0)}% <span style={{ color: theme.text.muted }}>(won't help next call)</span>
+              </div>
+            )}
+            {(cwriteTok > 0 || fresh > 0) && (
+              <div style={{ color: theme.text.muted, marginTop: 3, fontStyle: "italic" }}>
+                new this call total: {fmtT(cwriteTok + fresh)} tok ({(pctCwriteSize + pctFreshSize).toFixed(0)}%)
+              </div>
             )}
             {(ev.deltaVsPrev || 0) !== 0 && (
               <div style={{ color: theme.text.muted, marginTop: 3 }}>
                 {ev.modelSwitched
                   ? "first call on this model"
-                  : (ev.prevPt ? "grew " + fmtTSigned(ev.deltaVsPrev) + " vs previous call" : "first call in session")}
+                  : (ev.prevPt ? "prompt grew " + fmtTSigned(ev.deltaVsPrev) + " vs previous call" : "first call in session")}
               </div>
             )}
           </div>
@@ -1038,7 +1049,7 @@ function LLMDetail(props) {
               <div><span style={{ color: theme.text.muted }}>input</span>  {fmt$(inputCost).padStart(7)} · {pctInputOfTotal}%</div>
               {cwriteCost > 0 && (
                 <div style={{ color: theme.text.muted, paddingLeft: 12, fontSize: theme.fontSize.xs }} title="Anthropic charges cache writes at 1.25x the input rate. Already counted in `input` above.">
-                  ├ cached read {fmt$(cachedCost)} · fresh {fmt$(freshCost)} · cache write {fmt$(cwriteCost)} <span style={{ color: theme.cost.cwrite }}>(1.25x)</span>
+                  ├ reused {fmt$(cachedCost)} · one-off {fmt$(freshCost)} · cached for next {fmt$(cwriteCost)} <span style={{ color: theme.cost.cwrite }}>(1.25x)</span>
                 </div>
               )}
               <div><span style={{ color: theme.text.muted }}>output</span> {fmt$(outputCost).padStart(7)} · {pctOutputOfTotal}%</div>
