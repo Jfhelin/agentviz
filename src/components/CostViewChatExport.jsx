@@ -715,8 +715,9 @@ function LLMDetail(props) {
       {(function () {
         var hasText = ev.responsePreview && ev.responsePreview.trim().length > 0;
         var calls = ev.producedToolCalls || [];
+        var reasoning = ev.reasoningBlocks || [];
         var silent = ev.silentToolCall;
-        if (!hasText && calls.length === 0 && !silent) return null;
+        if (!hasText && calls.length === 0 && reasoning.length === 0 && !silent) return null;
         return (
           <div style={{ marginTop: 14 }}>
             <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 5, fontWeight: 600 }}>
@@ -750,6 +751,56 @@ function LLMDetail(props) {
             {!hasText && calls.length > 0 && (
               <div style={{ color: theme.text.secondary, fontSize: theme.fontSize.sm, fontStyle: "italic", marginBottom: 6 }}>
                 No text reply this turn. The model used its {fmtT(ev.output)} output tokens to request {calls.length} tool execution{calls.length === 1 ? "" : "s"} from the client.
+              </div>
+            )}
+            {(ev.reasoningBlocks || []).length > 0 && (
+              <div style={{
+                background: theme.bg.base,
+                border: "1px solid " + theme.border.default,
+                borderLeft: "3px solid " + theme.text.muted,
+                borderRadius: 3, padding: "8px 10px", marginTop: 6,
+              }}>
+                <div
+                  title={
+                    "Extended thinking emitted by the model as part of this response, before each tool_use. " +
+                    "Billed as output tokens on this call. For Claude, thinking is discarded after the turn and is not re-sent as input on the next call."
+                  }
+                  style={{
+                    fontSize: theme.fontSize.xs, color: theme.text.muted,
+                    textTransform: "uppercase", letterSpacing: 0.5,
+                    marginBottom: 6, fontWeight: 600,
+                    display: "flex", alignItems: "center", gap: 6,
+                    cursor: "help",
+                  }}
+                >
+                  <span style={{ borderBottom: "1px dotted " + theme.border.default }}>
+                    Reasoning ({ev.reasoningBlocks.length} block{ev.reasoningBlocks.length === 1 ? "" : "s"})
+                  </span>
+                  <span style={{ color: theme.text.ghost, fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>
+                    LLM&apos;s pre-tool thoughts, billed in the {fmtT(ev.output)} output tok above
+                  </span>
+                </div>
+                {ev.reasoningBlocks.map(function (rb, i) {
+                  var preview = rb.text.length > 400 ? rb.text.slice(0, 400) + "\u2026" : rb.text;
+                  return (
+                    <div key={i} style={{ marginTop: i === 0 ? 0 : 8 }}>
+                      {rb.tool && (
+                        <div style={{
+                          fontFamily: theme.font.mono, fontSize: theme.fontSize.xs,
+                          color: theme.text.muted, marginBottom: 3,
+                        }}>
+                          before <span style={{ color: theme.text.primary, fontWeight: 600 }}>{rb.tool}</span>
+                        </div>
+                      )}
+                      <div style={{
+                        fontFamily: theme.font.mono, fontSize: theme.fontSize.sm,
+                        color: theme.text.secondary, fontStyle: "italic",
+                        whiteSpace: "pre-wrap", wordBreak: "break-word",
+                        lineHeight: 1.5,
+                      }}>{preview}</div>
+                    </div>
+                  );
+                })}
               </div>
             )}
             {calls.length > 0 && (
@@ -860,32 +911,29 @@ function ToolDetail(props) {
         Tool call · {ev.name}
       </h4>
 
-      {/* 1. Reasoning (model's pre-call thinking, billed as output tokens) */}
+      {/* Reasoning that the model emitted before this tool call is shown on
+          the preceding LLM call's Response section, since it's part of that
+          response and is billed there. We keep a small breadcrumb here so
+          the user knows where to find it. */}
       {ev.thinking && (
-        <div style={{ marginBottom: 12 }}>
-          <div style={sectionLabelStyle}>
-            {arrowChip(theme.text.muted, "1 · reasoning")}
-            <span
-              title={
-                "Extended thinking emitted by the model just before it requested this tool. " +
-                "Produced by the LLM (not the client) and billed as output tokens. " +
-                "For Claude, thinking is discarded after the turn and is not re-sent as input on the next call."
-              }
-              style={{ borderBottom: "1px dotted " + theme.border.default, cursor: "help" }}
-            >
-              LLM&apos;s pre-call thoughts (billed as output tokens)
-            </span>
-          </div>
-          <div style={Object.assign({}, blockStyle(theme.text.muted), { fontStyle: "italic" })}>
-            {ev.thinking.slice(0, 400)}{ev.thinking.length > 400 ? "…" : ""}
-          </div>
+        <div style={{
+          marginBottom: 12,
+          padding: "6px 10px",
+          background: theme.bg.base,
+          border: "1px dashed " + theme.border.default,
+          borderRadius: 3,
+          fontSize: theme.fontSize.xs,
+          color: theme.text.muted,
+          fontStyle: "italic",
+        }}>
+          The model emitted {ev.thinking.length.toLocaleString()} chars of reasoning before requesting this tool. It is shown under the preceding LLM call&apos;s Response section (billed there as output tokens).
         </div>
       )}
 
       {/* 2. Input */}
       <div style={{ marginBottom: 12 }}>
         <div style={sectionLabelStyle}>
-          {arrowChip(theme.cost.fresh, "2 · input →")}
+          {arrowChip(theme.cost.fresh, "1 · input →")}
           <span>Arguments sent to <code style={{ color: theme.text.primary }}>{ev.name}</code></span>
         </div>
         {ev.argsSummary
@@ -896,7 +944,7 @@ function ToolDetail(props) {
       {/* 3. Output */}
       <div>
         <div style={sectionLabelStyle}>
-          {arrowChip(theme.cost.ctxHistory, "3 · ← output")}
+          {arrowChip(theme.cost.ctxHistory, "2 · ← output")}
           <span>Result returned by <code style={{ color: theme.text.primary }}>{ev.name}</code></span>
           <span style={{
             marginLeft: "auto",

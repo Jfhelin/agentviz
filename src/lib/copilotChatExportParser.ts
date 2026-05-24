@@ -478,6 +478,14 @@ export interface CostAnalysisCall {
    * in the export. Lets us show *what the model did* instead of an empty
    * response box. */
   producedToolCalls: { name: string; argsSummary: string }[];
+  /** Reasoning blocks (extended thinking) that the model emitted as part of
+   * this LLM response, before each tool_use it produced. In the export these
+   * are attached to the `toolCall` log entries that follow this request; we
+   * lift them onto the request event because they semantically belong to the
+   * model's response and are billed as output tokens on THIS call, not on
+   * the client-side tool execution. Empty when the model didn't emit any
+   * extended thinking on this turn. */
+  reasoningBlocks: { tool: string; text: string }[];
   /** Set when the model emitted output tokens but neither a text response
    * nor a captured tool call. This is the classic "internal tool call"
    * pattern used by overhead calls like promptCategorization: the model
@@ -911,11 +919,14 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
       // critical for showing "what the model did" when its text response is
       // empty (model emitted only tool_use blocks, no message content).
       const producedToolCalls: { name: string; argsSummary: string }[] = [];
+      const reasoningBlocks: { tool: string; text: string }[] = [];
       for (let lookIdx = logIdx + 1; lookIdx < c.logs.length; lookIdx++) {
         const next = c.logs[lookIdx];
         if (next.kind === "request") break;
         if (next.kind === "toolCall") {
           producedToolCalls.push({ name: next.tool ?? "", argsSummary: shortArgs(next.args) });
+          const thinkText = next.thinking?.text ?? "";
+          if (thinkText) reasoningBlocks.push({ tool: next.tool ?? "", text: thinkText });
         }
       }
 
@@ -964,6 +975,7 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
         category: categorizeCallName(log.name),
         responsePreview: summarizeResponse(log.response),
         producedToolCalls,
+        reasoningBlocks,
         silentToolCall: (function () {
           const respText = (summarizeResponse(log.response) || "").trim();
           if (respText.length > 0) return null;
