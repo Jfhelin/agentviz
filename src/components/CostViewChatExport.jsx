@@ -970,25 +970,33 @@ function LLMDetail(props) {
             )}
           </div>
           {imgRows.map(function (r, i) {
+            var isData = /^data:/i.test(r.img.url);
+            var ext = (r.img.mediaType || "").split("/").pop() || "img";
             return (
-              <div key={i} style={{ display: "flex", gap: 10, alignItems: "baseline", fontFamily: theme.font.mono, fontSize: theme.fontSize.xs }}>
-                <span style={{ color: theme.text.primary }}>{r.img.mediaType}</span>
-                {r.img.detail && <span style={{ color: theme.text.muted }}>· detail: {r.img.detail}</span>}
-                {r.tok > 0 && (
-                  <span style={{ color: theme.text.muted }} title="Estimated from model + detail field. The export does not report image token usage; this is a documented vendor approximation.">
-                    · ~{fmtT(r.tok)} tok{r.dollars > 0 ? " (~" + fmt$(r.dollars) + ")" : ""}
-                  </span>
+              <div key={i} style={{ display: "grid", gridTemplateColumns: "28px 1fr auto", gap: 10, alignItems: "center", padding: "3px 0", fontSize: theme.fontSize.xs, borderTop: i === 0 ? "none" : "1px solid " + theme.border.subtle }}>
+                {isData ? (
+                  <img src={r.img.url} alt="" style={{ width: 28, height: 28, objectFit: "cover", borderRadius: 3, border: "1px solid " + theme.border.subtle, background: theme.bg.base }} />
+                ) : (
+                  <a href={r.img.url} target="_blank" rel="noreferrer" title={r.img.url} style={{ width: 28, height: 28, display: "block" }}>
+                    <img src={r.img.url} alt="" style={{ width: 28, height: 28, objectFit: "cover", borderRadius: 3, border: "1px solid " + theme.border.subtle, background: theme.bg.base }} />
+                  </a>
                 )}
-                <a href={r.img.url} target="_blank" rel="noreferrer" style={{ color: theme.text.muted, textDecoration: "underline", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.img.url}>
-                  {r.img.url.replace(/^https?:\/\//, "")}
-                </a>
+                <span style={{ color: theme.text.primary, fontFamily: theme.font.mono, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {ext.toUpperCase()}
+                  {r.img.detail ? <span style={{ color: theme.text.muted }}> · {r.img.detail}</span> : null}
+                </span>
+                <span style={{ color: theme.text.muted, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }} title="Estimated from model + detail field. The export does not report image token usage.">
+                  {r.tok > 0 ? "~" + fmtT(r.tok) + " tok" + (r.dollars > 0 ? " · " + fmt$(r.dollars) : "") : "—"}
+                </span>
               </div>
             );
           })}
-          <div style={{ fontStyle: "italic", color: theme.text.muted, fontSize: theme.fontSize.xs, marginTop: 6 }}>
-            {anyKnown
-              ? "Total est. ~" + fmtT(totalTok) + " tok" + (totalDollars > 0 ? " (~" + fmt$(totalDollars) + ")" : "") + " -- estimated from model + detail field; the export does not report exact image tokens."
-              : "Token cost not estimated -- no documented image cost rule for this model."}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: 6, fontSize: theme.fontSize.xs, color: theme.text.muted, fontVariantNumeric: "tabular-nums" }}
+               title={anyKnown ? "Estimated from model + detail field. The export does not report exact image tokens." : "No documented image cost rule for this model."}>
+            <span style={{ fontStyle: "italic" }}>{anyKnown ? "est." : "token cost unknown"}</span>
+            {anyKnown && (
+              <span><b style={{ color: theme.text.secondary }}>~{fmtT(totalTok)} tok</b>{totalDollars > 0 ? " · " + fmt$(totalDollars) : ""}</span>
+            )}
           </div>
         </div>
         );
