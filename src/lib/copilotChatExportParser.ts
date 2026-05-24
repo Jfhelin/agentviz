@@ -233,6 +233,21 @@ interface ImageAttachment {
   detail: string;
 }
 
+interface ChatMode {
+  /** Name from `<modeInstructions>... "Name" ...`. Empty when no mode is active. */
+  name: string;
+  /** Body of the mode instructions (between `<modeInstructions>` and `</modeInstructions>`). */
+  body: string;
+  /** Estimated tokens for the mode body (chars/4). */
+  tokensEst: number;
+}
+
+interface InstructionAttachment {
+  filePath: string;
+  /** Length of the attachment body in chars (used to estimate token weight). */
+  chars: number;
+}
+
 interface ClassifiedCall {
   components: ComponentBreakdown;
   /** Raw character counts per bucket (pre-scaling). Used by cacheAnalysis to
@@ -252,6 +267,13 @@ interface ClassifiedCall {
    * carries only a CDN URL, mediaType, and detail level -- no byte size,
    * dimensions, or token cost. */
   images: ImageAttachment[];
+  /** Custom chat mode active for this call, extracted from the system prompt's
+   * `<modeInstructions>` wrapper. Null when running the default Copilot agent. */
+  chatMode: ChatMode | null;
+  /** Workspace-level instruction files (`.github/copilot-instructions.md`,
+   * `.chatmode.md`, `.instructions.md`) attached via `<attachment filePath="...">`
+   * blocks in the system prompt. */
+  instructionAttachments: InstructionAttachment[];
 }
 
 const TOOL_GROUP_PATTERNS: { match: (name: string) => boolean; label: string }[] = [
@@ -269,6 +291,49 @@ const TOOL_GROUP_PATTERNS: { match: (name: string) => boolean; label: string }[]
 function classifyToolGroup(name: string): string {
   for (const p of TOOL_GROUP_PATTERNS) if (p.match(name)) return p.label;
   return "Built-in: other";
+}
+
+// Extract the active custom chat mode (if any) from the system prompt.
+// VS Code wraps mode-specific instructions in `<modeInstructions>...</modeInstructions>`
+// with a leading line "You are currently running in \"NAME\" mode" (or, for some
+// modes, just a `# Heading`). The full block typically runs a few KB.
+function extractChatMode(systemText: string): ChatMode | null {
+  const m = /<modeInstructions>([\s\S]*?)<\/modeInstructions>/i.exec(systemText);
+  if (!m) return null;
+  const body = m[1].trim();
+  if (!body) return null;
+  let name = "";
+  const named = /You are currently running in\s*"([^"]+)"/i.exec(body);
+  if (named) name = named[1];
+  if (!name) {
+    const heading = /^#\s+(.+?)\s*$/m.exec(body);
+    if (heading) name = heading[1].trim();
+  }
+  if (!name) name = "(unnamed mode)";
+  return { name, body, tokensEst: chars_to_tokens(body.length) };
+}
+
+// Extract workspace-level instruction files attached to the system prompt.
+// `<attachment filePath="/abs/path/file.md">body</attachment>` blocks are how
+// VS Code surfaces .github/copilot-instructions.md, .chatmode.md, and
+// .instructions.md files. We only count instruction-style files so this
+// doesn't grab arbitrary file attachments.
+function extractInstructionAttachments(systemText: string): InstructionAttachment[] {
+  const out: InstructionAttachment[] = [];
+  const re = /<attachment filePath="([^"]+)">([\s\S]*?)<\/attachment>/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(systemText)) !== null) {
+    const filePath = m[1];
+    const lower = filePath.toLowerCase();
+    const isInstruction = lower.endsWith("copilot-instructions.md")
+      || lower.endsWith(".chatmode.md")
+      || lower.endsWith(".instructions.md")
+      || lower.includes("/.github/instructions/")
+      || lower.includes("/.github/chatmodes/");
+    if (!isInstruction) continue;
+    out.push({ filePath, chars: m[2].length });
+  }
+  return out;
 }
 
 // Build a compact summary of a JSON Schema-style tool parameters object,
@@ -422,6 +487,9 @@ function classifyCall(log: RawLog): ClassifiedCall {
     }
   }
 
+  const chatMode = extractChatMode(systemText);
+  const instructionAttachments = extractInstructionAttachments(systemText);
+
   return {
     components,
     componentChars: {
@@ -440,6 +508,8 @@ function classifyCall(log: RawLog): ClassifiedCall {
     totalTools: tools.length,
     toolGroups,
     images,
+    chatMode,
+    instructionAttachments,
   };
 }
 
@@ -534,6 +604,13 @@ export interface CostAnalysisCall {
   /** Image attachments referenced by this call. The export gives URL, media
    * type, and detail level only -- no byte size, dimensions, or token cost. */
   images: ClassifiedCall["images"];
+  /** Custom chat mode active for this call (null when running the default
+   * Copilot agent). Extracted from the system prompt's `<modeInstructions>`
+   * block. */
+  chatMode: ClassifiedCall["chatMode"];
+  /** Workspace-level instruction files attached to the system prompt
+   * (`.github/copilot-instructions.md`, `.chatmode.md`, `.instructions.md`). */
+  instructionAttachments: ClassifiedCall["instructionAttachments"];
   /** Subset of `images` that were NOT present on the previous same-model call.
    * Re-sending an image with the same URL is part of the cached prefix and
    * does not contribute new content -- only first appearance (or first
@@ -1027,6 +1104,8 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
         historyMsgs: cls.historyMsgs,
         toolResultMsgs: cls.toolResultMsgs,
         images: cls.images,
+        chatMode: cls.chatMode,
+        instructionAttachments: cls.instructionAttachments,
         newImages,
         newHistoryMsgs,
         newToolResultMsgs,
