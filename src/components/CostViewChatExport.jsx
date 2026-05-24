@@ -910,58 +910,77 @@ function LLMDetail(props) {
       <h4 style={{ margin: "0 0 8px", color: theme.text.primary, fontSize: theme.fontSize.base, fontWeight: 600, letterSpacing: 0.4, textTransform: "uppercase" }}>
         What happened in this LLM call
       </h4>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10, marginBottom: 14 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 1fr", gap: 10, marginBottom: 14 }}>
         {(function () {
           var hasPx = ev.model && hasModelPricing(ev.model);
-          // Granular cost components -- estimateCost handles the per-model
-          // ratios (cache-read at ~10% of input for Anthropic / 50% for GPT,
-          // cache-write at 125% / 100%, etc.). Decomposing lets us label each
-          // KPI card with the dollars it contributed.
           var cachedCost = hasPx ? estimateCost({ inputTokens: 0, outputTokens: 0, cacheRead: ev.cached || 0, cacheWrite: 0 }, ev.model) : 0;
           var freshCost  = hasPx ? estimateCost({ inputTokens: ev.fresh || 0, outputTokens: 0, cacheRead: 0, cacheWrite: 0 }, ev.model) : 0;
           var cwriteCost = hasPx ? estimateCost({ inputTokens: 0, outputTokens: 0, cacheRead: 0, cacheWrite: ev.cacheWrite || 0 }, ev.model) : 0;
           var newBillCost = freshCost + cwriteCost;
           var inputCost = cachedCost + newBillCost;
-          var outputCost = hasPx ? estimateCost({ inputTokens: 0, outputTokens: ev.output || 0, cacheRead: 0, cacheWrite: 0 }, ev.model) : 0;
-          var pctNew = inputCost > 0 ? Math.round(100 * newBillCost / inputCost) : 0;
-          var pctCache = 100 - pctNew;
+          var outputCost = hasPx ? estimateCost({ inputTokens: ev.output || 0, outputTokens: 0, cacheRead: 0, cacheWrite: 0 }, ev.model) : 0;
+          // estimateCost above prices `output` at INPUT rate (wrong); recompute
+          // honestly using the model's output rate.
+          outputCost = hasPx ? estimateCost({ inputTokens: 0, outputTokens: ev.output || 0, cacheRead: 0, cacheWrite: 0 }, ev.model) : 0;
+          var totalCost = inputCost + outputCost;
+          var pt = ev.promptTokens || 0;
+          var cached = ev.cached || 0;
+          var billedNew = Math.max(0, pt - cached);
+          var pctCachedSize = pt > 0 ? (100 * cached / pt) : 0;
+          var pctBilledSize = pt > 0 ? (100 * billedNew / pt) : 0;
+          // Reserve a minimum visible width per non-zero slice so tiny slivers
+          // (e.g. 1% cache) are still readable.
+          var minSlice = 4;
+          var displayCached = pctCachedSize > 0 && pctCachedSize < minSlice ? minSlice : pctCachedSize;
+          var displayBilled = pctBilledSize > 0 && pctBilledSize < minSlice ? minSlice : pctBilledSize;
+          var displaySum = displayCached + displayBilled;
+          if (displaySum > 0 && displaySum !== 100) {
+            displayCached = displayCached * 100 / displaySum;
+            displayBilled = displayBilled * 100 / displaySum;
+          }
+          var pctInputOfTotal = totalCost > 0 ? Math.round(100 * inputCost / totalCost) : 0;
+          var pctOutputOfTotal = totalCost > 0 ? 100 - pctInputOfTotal : 0;
           return (
           <>
+        {/* Box 1: Prompt sent in (size + cache split bar) */}
         <div style={{ background: theme.bg.surface, border: "1px solid " + theme.cost.switchBorder, borderRadius: 5, padding: "10px 12px" }}
-             title={hasPx ? "Total input cost = cache-read + billed-as-new (fresh + cache-write). Cache reads are charged at the model's discounted cache rate." : ""}>
-          <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 5 }}>▶ Input (context window)</div>
-          <div style={{ fontSize: theme.fontSize.lg, color: theme.cost.cached, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{fmtT(ev.promptTokens)} tok</div>
-          <div style={{ fontSize: theme.fontSize.xs, color: theme.text.secondary, marginTop: 3, fontVariantNumeric: "tabular-nums" }}>
-            {hasPx
-              ? fmt$(cachedCost) + " cached + " + fmt$(newBillCost) + " new = " + fmt$(inputCost)
-              : "cache + new combined"}
+             title={hasPx ? "What was sent to the model on this call. The bar splits the prompt by what got cached (cheap) vs what was billed at full input rate." : "Total prompt size sent to the model"}>
+          <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 5 }}>▶ Prompt sent in</div>
+          <div style={{ fontSize: theme.fontSize.lg, color: theme.cost.cached, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{fmtT(pt)} tok</div>
+          {pt > 0 && (
+            <div style={{ marginTop: 8, marginBottom: 4 }}>
+              <div style={{ display: "flex", width: "100%", height: 8, borderRadius: 2, overflow: "hidden", background: theme.bg.base }}>
+                {cached > 0 && (
+                  <div style={{ width: displayCached + "%", background: theme.cost.cached }}
+                       title={fmtT(cached) + " tok served from cache" + (hasPx ? " (" + fmt$(cachedCost) + ")" : "")} />
+                )}
+                {billedNew > 0 && (
+                  <div style={{ width: displayBilled + "%", background: theme.cost.cwrite }}
+                       title={fmtT(billedNew) + " tok billed at full input rate" + (hasPx ? " (" + fmt$(newBillCost) + ")" : "")} />
+                )}
+              </div>
+            </div>
+          )}
+          <div style={{ fontSize: theme.fontSize.xs, color: theme.text.secondary, marginTop: 6, fontVariantNumeric: "tabular-nums", lineHeight: 1.5 }}>
+            {cached > 0 && (
+              <div><span style={{ color: theme.cost.cached }}>■</span> {fmtT(cached)} tok cached · {pctCachedSize.toFixed(0)}%</div>
+            )}
+            <div><span style={{ color: theme.cost.cwrite }}>■</span> {fmtT(billedNew)} tok billed new · {pctBilledSize.toFixed(0)}%</div>
+            {(ev.deltaVsPrev || 0) !== 0 && (
+              <div style={{ color: theme.text.muted, marginTop: 3 }}>
+                {ev.modelSwitched
+                  ? "first call on this model"
+                  : (ev.prevPt ? "grew " + fmtTSigned(ev.deltaVsPrev) + " vs previous call" : "first call in session")}
+              </div>
+            )}
           </div>
         </div>
-        <div style={{ background: theme.bg.surface, border: "1px solid " + theme.cost.okBorder, borderRadius: 5, padding: "10px 12px" }}
-             title="Net new = how much the context grew vs the previous call on this model (in tokens). The cost split shows what share of this call's input dollars went to cache reads vs billed-as-new content.">
-          <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 5 }}>▲ Net new vs previous call</div>
-          <div style={{ fontSize: theme.fontSize.lg, color: theme.cost.fresh, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{fmtTSigned(ev.deltaVsPrev)} tok</div>
-          <div style={{ fontSize: theme.fontSize.xs, color: theme.text.secondary, marginTop: 3, fontVariantNumeric: "tabular-nums" }}>
-            {hasPx && inputCost > 0
-              ? pctCache + "% from cache · " + pctNew + "% billed-new"
-              : (ev.modelSwitched ? "new model -- cache reset" : (ev.prevPt ? "prev call had " + fmtT(ev.prevPt) + " ctx" : "first call in session"))}
-          </div>
-        </div>
-        <div style={{ background: theme.bg.surface, border: "1px solid " + theme.cost.recommitBorder, borderRadius: 5, padding: "10px 12px" }}
-             title="Tokens the API treated as new this call: fresh content plus any cache-write tokens (re-committed at premium rate). The cost shown is a SUBSET of input cost (already counted there).">
-          <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 5 }}>$ Billed as new (full + premium)</div>
-          <div style={{ fontSize: theme.fontSize.lg, color: theme.cost.cwrite, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{fmtT(ev.newTotal)} tok</div>
-          <div style={{ fontSize: theme.fontSize.xs, color: theme.text.secondary, marginTop: 3, fontVariantNumeric: "tabular-nums" }}>
-            {hasPx
-              ? fmt$(newBillCost) + " (subset of input)" + (ev.recommit > 100 ? " · incl. " + fmtT(ev.recommit) + " recommit" : "")
-              : (ev.recommit > 100 ? "incl. " + fmtT(ev.recommit) + " cache recommit" : "minimal recommit")}
-          </div>
-        </div>
+        {/* Box 2: Model wrote (output size + visible/thinking split) */}
         <div style={{ background: theme.bg.surface, border: "1px solid " + theme.border.default, borderRadius: 5, padding: "10px 12px" }}
-             title={hasPx ? "Output is billed at the model's output rate (typically ~5x input). Breakdown attributes output tokens via char share of the model's surfaced text." : "Pricing unknown for this model"}>
-          <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 5 }}>◀ Output (model wrote)</div>
-          <div style={{ fontSize: theme.fontSize.lg, color: theme.text.primary, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{fmtT(ev.output)} tok{hasPx ? " · " + fmt$(outputCost) : ""}</div>
-          <div style={{ fontSize: theme.fontSize.xs, color: theme.text.secondary, marginTop: 3, fontVariantNumeric: "tabular-nums" }}>
+             title={hasPx ? "What the model generated. Output is billed at the model's output rate (typically ~5x input). Visible/thinking split is estimated from char share." : "Output tokens generated by the model"}>
+          <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 5 }}>◀ Model wrote</div>
+          <div style={{ fontSize: theme.fontSize.lg, color: theme.text.primary, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{fmtT(ev.output)} tok</div>
+          <div style={{ fontSize: theme.fontSize.xs, color: theme.text.secondary, marginTop: 6, fontVariantNumeric: "tabular-nums", lineHeight: 1.5 }}>
             {(function () {
               var visCh = ev.visibleResponseChars || 0;
               var thinkCh = ev.thinkingChars || 0;
@@ -972,19 +991,41 @@ function LLMDetail(props) {
                 var estThink = Math.round(thinkCh / 4);
                 var estArgs = Math.round(argsCh / 4);
                 var resid = Math.max(0, ev.output - estVis - estThink - estArgs);
-                var pieces = [];
-                if (estVis > 0) pieces.push("~" + fmtT(estVis) + " visible");
-                if (estThink > 0) pieces.push("~" + fmtT(estThink) + " thinking");
-                if (estArgs > 0) pieces.push("~" + fmtT(estArgs) + " tool-args");
-                if (resid > 0) pieces.push("~" + fmtT(resid) + " unattributed");
-                return pieces.join(" · ");
+                var rows = [];
+                if (estVis > 0) rows.push(<div key="v">~{fmtT(estVis)} visible to user</div>);
+                if (estThink > 0) rows.push(<div key="t">~{fmtT(estThink)} thinking</div>);
+                if (estArgs > 0) rows.push(<div key="a">~{fmtT(estArgs)} tool-call args</div>);
+                if (resid > 0) rows.push(<div key="r" style={{ color: theme.text.muted }}>~{fmtT(resid)} unattributed</div>);
+                return rows;
               }
               if (ev.reasoningTokens > 0) {
-                return "~" + fmtT(ev.output - ev.reasoningTokens) + " visible · ~" + fmtT(ev.reasoningTokens) + " thinking";
+                return (
+                  <>
+                    <div>~{fmtT(ev.output - ev.reasoningTokens)} visible to user</div>
+                    <div>~{fmtT(ev.reasoningTokens)} thinking</div>
+                  </>
+                );
               }
-              return hasPx ? "this call total: " + fmt$(ev.cost) : ("this call: " + fmt$(ev.cost) + " total");
+              return null;
             })()}
           </div>
+        </div>
+        {/* Box 3: Cost for this call (total + input/output split) */}
+        <div style={{ background: theme.bg.surface, border: "1px solid " + theme.cost.recommitBorder, borderRadius: 5, padding: "10px 12px" }}
+             title={hasPx ? "Total cost charged for this call. = input cost + output cost. Input is already split (cached vs billed-new) in the Prompt box." : "Pricing unknown for this model"}>
+          <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 5 }}>$ Cost for this call</div>
+          <div style={{ fontSize: theme.fontSize.lg, color: theme.cost.cwrite, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{hasPx ? fmt$(totalCost) : "—"}</div>
+          {hasPx && (
+            <div style={{ fontSize: theme.fontSize.xs, color: theme.text.secondary, marginTop: 6, fontVariantNumeric: "tabular-nums", lineHeight: 1.5 }}>
+              <div><span style={{ color: theme.text.muted }}>input</span>  {fmt$(inputCost).padStart(7)} · {pctInputOfTotal}%</div>
+              <div><span style={{ color: theme.text.muted }}>output</span> {fmt$(outputCost).padStart(7)} · {pctOutputOfTotal}%</div>
+              {ev.recommit > 100 && (
+                <div style={{ color: theme.cost.cwrite, marginTop: 3 }} title="Tokens the API treated as new because the cache for them had expired. Included in the input number above.">
+                  incl. {fmtT(ev.recommit)} tok cache recommit
+                </div>
+              )}
+            </div>
+          )}
         </div>
           </>
           );
