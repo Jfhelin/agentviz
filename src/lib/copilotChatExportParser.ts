@@ -634,6 +634,25 @@ function extractSubagent(log: RawLog): CostAnalysisToolCall["subagent"] | undefi
   };
 }
 
+// Extract the chat thread title that VS Code generates via the `title` overhead
+// LLM call on the first prompt. Returns a short string or empty if none.
+function extractGeneratedTitle(root: { prompts: RawPrompt[] }): string {
+  for (const p of root.prompts) {
+    for (const log of p.logs) {
+      if (log.kind !== "request") continue;
+      if (log.name !== "title") continue;
+      const summary = summarizeResponse(log.response);
+      if (!summary) continue;
+      const cleaned = summary
+        .replace(/^["'\s]+|["'\s]+$/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (cleaned) return cleaned.length > 120 ? cleaned.slice(0, 120) + "…" : cleaned;
+    }
+  }
+  return "";
+}
+
 function summarizeResponse(response: unknown): string {
   if (response == null) return "";
   if (typeof response === "string") {
@@ -1080,6 +1099,7 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
     },
     format: "copilot-chat-export",
     costAnalysis,
+    generatedTitle: extractGeneratedTitle(root),
   };
 
   return { events, turns, metadata };

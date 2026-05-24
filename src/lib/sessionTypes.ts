@@ -65,6 +65,7 @@ export interface SessionMetadata {
   parseIssues?: ParseIssues;
   format?: SessionFormat;
   customTitle?: string;
+  generatedTitle?: string;
   sessionMode?: string;
   totalCost?: number | null;
   [key: string]: unknown;
