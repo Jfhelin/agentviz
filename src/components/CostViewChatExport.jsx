@@ -907,8 +907,24 @@ function ToolDetail(props) {
   var shape = detectResponseShape(ev.resultPreview);
   return (
     <div style={{ gridColumn: "1 / -1", background: theme.bg.base, borderBottom: "1px solid " + theme.border.subtle, padding: "14px 22px" }}>
-      <h4 style={{ margin: "0 0 10px", color: theme.text.primary, fontSize: theme.fontSize.base, fontWeight: 600, letterSpacing: 0.4, textTransform: "uppercase" }}>
-        Tool call · {ev.name}
+      <h4 style={{ margin: "0 0 10px", color: theme.text.primary, fontSize: theme.fontSize.base, fontWeight: 600, letterSpacing: 0.4 }}>
+        <span style={{ textTransform: "uppercase", letterSpacing: 0.4 }}>Tool call · {ev.name}</span>
+        {ev.argsSummary && (
+          <span
+            title={ev.rawArgs && ev.rawArgs.length > 0 ? ev.rawArgs : ev.argsSummary}
+            style={{
+              marginLeft: 10,
+              fontFamily: theme.font.mono,
+              fontSize: theme.fontSize.sm,
+              fontWeight: 400,
+              color: theme.text.secondary,
+              letterSpacing: 0,
+              textTransform: "none",
+              borderLeft: "2px solid " + theme.border.default,
+              paddingLeft: 10,
+            }}
+          >{ev.argsSummary.length > 100 ? ev.argsSummary.slice(0, 100) + "\u2026" : ev.argsSummary}</span>
+        )}
       </h4>
 
       {/* Reasoning that the model emitted before this tool call is shown on
