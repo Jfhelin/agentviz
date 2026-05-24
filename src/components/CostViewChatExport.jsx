@@ -1318,6 +1318,11 @@ function computePromptCostByBucket(p) {
     var npb = ev.newPerBucket || {};
     var newTotal = (ev.fresh || 0) + (ev.cacheWrite || 0);
     var freshShare = newTotal > 0 ? (ev.fresh || 0) / newTotal : 1;
+    // Provisional per-bucket cost via char-share allocation. We'll rescale
+    // these to match the call's real billed cost so the sum reconciles with
+    // the headline total.
+    var perBucket = {};
+    var inputCostSum = 0;
     CTX_INPUT_KEYS.forEach(function (k) {
       var totalIn = k === "images" ? (ev.visionTokensTotal || 0) : (comp[k] || 0);
       var newB    = k === "images" ? (ev.imageTokensEst   || 0) : (npb[k]  || 0);
@@ -1327,19 +1332,37 @@ function computePromptCostByBucket(p) {
       var freshCost = estimateCost({ inputTokens: freshB }, ev.model);
       var cwCost = estimateCost({ cacheWrite: cwB }, ev.model);
       var cachedCost = estimateCost({ cacheRead: cachedB }, ev.model);
+      perBucket[k] = {
+        totalIn: totalIn, newB: newB, cachedB: cachedB,
+        freshB: freshB, cwB: cwB,
+        freshCost: freshCost, cwCost: cwCost, cachedCost: cachedCost,
+      };
+      inputCostSum += freshCost + cwCost + cachedCost;
+    });
+    // Reconcile bucket cost sum with the real input cost from the API.
+    // Vision tokens are typically already inside prompt_tokens, so an
+    // un-scaled sum would double-count them. Scaling preserves relative
+    // shares while making the sum match what was actually billed.
+    var outCost = estimateCost({ outputTokens: ev.output || 0 }, ev.model);
+    var realInputCost = Math.max(0, (ev.cost || 0) - outCost);
+    var scale = inputCostSum > 0 ? realInputCost / inputCostSum : 0;
+    CTX_INPUT_KEYS.forEach(function (k) {
+      var pb = perBucket[k];
+      var freshCost = pb.freshCost * scale;
+      var cwCost = pb.cwCost * scale;
+      var cachedCost = pb.cachedCost * scale;
       byBucket[k].cost += freshCost + cwCost + cachedCost;
       byBucket[k].freshCost += freshCost;
       byBucket[k].cwCost += cwCost;
       byBucket[k].cachedCost += cachedCost;
-      byBucket[k].cachedTok += cachedB;
-      byBucket[k].newTok    += newB;
-      byBucket[k].freshTok  += freshB;
-      byBucket[k].cwTok     += cwB;
-      // Savings = what cached_tokens would have cost at full input rate, minus
-      // what they actually cost at the cache-read rate.
-      byBucket[k].savings += cachedB * price.input * (1 - cacheReadRatio) / 1e6;
+      byBucket[k].cachedTok += pb.cachedB;
+      byBucket[k].newTok    += pb.newB;
+      byBucket[k].freshTok  += pb.freshB;
+      byBucket[k].cwTok     += pb.cwB;
+      // Savings = what cached_tokens would have cost at full input rate,
+      // minus what they actually cost at the cache-read rate.
+      byBucket[k].savings += pb.cachedB * price.input * (1 - cacheReadRatio) / 1e6;
     });
-    var outCost = estimateCost({ outputTokens: ev.output || 0 }, ev.model);
     byBucket.output.cost += outCost;
     byBucket.output.outputCost += outCost;
     byBucket.output.outputTok += ev.output || 0;
