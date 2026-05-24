@@ -27,6 +27,42 @@ var COST_LABELS = {
   cached: "Cached read",
   output: "Output",
 };
+
+// Image thumbnail with hover-popover preview. Renders a 28x28 thumb and on
+// hover floats a ~240px preview of the actual image. The export only carries
+// `data:image/...;base64,...` URLs (no original filenames), so the visual
+// itself is the best identifier we can give. Clicking opens the full image
+// in a new tab.
+function ImageThumb(props) {
+  var url = props.url;
+  var alt = props.alt || "image";
+  var size = props.size || 28;
+  var [hover, setHover] = useState(false);
+  var inner = (
+    <img src={url} alt={alt} style={{ width: size, height: size, objectFit: "cover", borderRadius: 3, border: "1px solid " + theme.border.subtle, background: theme.bg.base, display: "block" }} />
+  );
+  return (
+    <span
+      style={{ position: "relative", display: "inline-block", lineHeight: 0 }}
+      onMouseEnter={function () { setHover(true); }}
+      onMouseLeave={function () { setHover(false); }}
+    >
+      <a href={url} target="_blank" rel="noreferrer" title="Click to open full size in new tab" style={{ display: "block" }}>
+        {inner}
+      </a>
+      {hover && (
+        <span style={{
+          position: "absolute", zIndex: 50, left: size + 6, top: 0,
+          background: theme.bg.surface, border: "1px solid " + theme.border.default,
+          borderRadius: 6, padding: 4, boxShadow: "0 6px 18px rgba(0,0,0,0.25)",
+          pointerEvents: "none",
+        }}>
+          <img src={url} alt="" style={{ maxWidth: 240, maxHeight: 240, display: "block", borderRadius: 3, background: theme.bg.base }} />
+        </span>
+      )}
+    </span>
+  );
+}
 var CTX_KEYS = ["system", "tool_defs", "history", "tool_results", "current", "images", "output"];
 var CTX_INPUT_KEYS = ["system", "tool_defs", "history", "tool_results", "current", "images"];
 var CTX_COLORS = {
@@ -970,17 +1006,10 @@ function LLMDetail(props) {
             )}
           </div>
           {imgRows.map(function (r, i) {
-            var isData = /^data:/i.test(r.img.url);
             var ext = (r.img.mediaType || "").split("/").pop() || "img";
             return (
               <div key={i} style={{ display: "grid", gridTemplateColumns: "28px 1fr auto", gap: 10, alignItems: "center", padding: "3px 0", fontSize: theme.fontSize.xs, borderTop: i === 0 ? "none" : "1px solid " + theme.border.subtle }}>
-                {isData ? (
-                  <img src={r.img.url} alt="" style={{ width: 28, height: 28, objectFit: "cover", borderRadius: 3, border: "1px solid " + theme.border.subtle, background: theme.bg.base }} />
-                ) : (
-                  <a href={r.img.url} target="_blank" rel="noreferrer" title={r.img.url} style={{ width: 28, height: 28, display: "block" }}>
-                    <img src={r.img.url} alt="" style={{ width: 28, height: 28, objectFit: "cover", borderRadius: 3, border: "1px solid " + theme.border.subtle, background: theme.bg.base }} />
-                  </a>
-                )}
+                <ImageThumb url={r.img.url} alt={"image " + (i + 1)} />
                 <span style={{ color: theme.text.primary, fontFamily: theme.font.mono, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {ext.toUpperCase()}
                   {r.img.detail ? <span style={{ color: theme.text.muted }}> · {r.img.detail}</span> : null}
