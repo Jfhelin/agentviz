@@ -120,6 +120,36 @@ function ToolResultPreview(props) {
   );
 }
 
+// Smart tool-argument preview. Mirrors ToolResultPreview: shows a one-line
+// summary (using the existing summarizeToolArgs heuristics: shell commands
+// get verb-chain summaries, other tools get a key:value preview) with an
+// expandable body that pretty-prints the full JSON arguments.
+function ToolArgsPreview(props) {
+  var ev = props.ev;
+  var blockStyle = props.blockStyle;
+  if (!ev || !ev.rawArgs) {
+    return ev && ev.argsSummary
+      ? <div style={blockStyle}>{ev.argsSummary}</div>
+      : <div style={{ color: theme.text.ghost, fontStyle: "italic", fontSize: theme.fontSize.sm }}>(no arguments)</div>;
+  }
+  var smart = summarizeToolArgs(ev) || ev.argsSummary || "";
+  var pretty = ev.rawArgs;
+  try { pretty = JSON.stringify(JSON.parse(ev.rawArgs), null, 2); } catch (_e) { /* leave raw */ }
+  var lines = pretty.split("\n").length;
+  var chars = pretty.length;
+  return (
+    <details style={{ marginTop: 0 }}>
+      <summary style={{ cursor: "pointer", padding: "4px 0", color: theme.text.secondary, fontSize: theme.fontSize.sm, listStyle: "revert" }}>
+        <span style={{ color: theme.text.primary }}>{smart}</span>
+        <span style={{ color: theme.text.muted, marginLeft: 8 }}>· {lines} line{lines === 1 ? "" : "s"} · {chars.toLocaleString()} chars (click for full args)</span>
+      </summary>
+      <div style={Object.assign({}, blockStyle, { marginTop: 6, maxHeight: 400, overflow: "auto" })}>
+        {pretty}
+      </div>
+    </details>
+  );
+}
+
 var CTX_KEYS = ["system", "tool_defs", "history", "tool_results", "current", "images", "output"];
 var CTX_INPUT_KEYS = ["system", "tool_defs", "history", "tool_results", "current", "images"];
 var CTX_COLORS = {
@@ -1497,8 +1527,8 @@ function ToolDetail(props) {
           {arrowChip(theme.cost.fresh, "1 · input →")}
           <span>Arguments sent to <code style={{ color: theme.text.primary }}>{ev.name}</code></span>
         </div>
-        {ev.argsSummary
-          ? <div style={blockStyle(theme.cost.fresh)}>{ev.argsSummary}</div>
+        {ev.rawArgs || ev.argsSummary
+          ? <ToolArgsPreview ev={ev} blockStyle={blockStyle(theme.cost.fresh)} />
           : <div style={{ color: theme.text.ghost, fontStyle: "italic", fontSize: theme.fontSize.sm }}>(no arguments)</div>}
       </div>
 
