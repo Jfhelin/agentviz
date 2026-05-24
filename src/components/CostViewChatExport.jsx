@@ -216,8 +216,8 @@ function ToolGroups(props) {
       count: g.tools ? g.tools.length : (g.count || 0),
       tokens: g.tokens || g.scaled_tokens || 0,
       top: (g.tools || g.top || []).slice(0, 5).map(function (t) {
-        if (Array.isArray(t)) return { name: t[0], tokens: t[1] };
-        return { name: t.name, tokens: t.tokens };
+        if (Array.isArray(t)) return { name: t[0], tokens: t[1], description: "", paramSummary: "" };
+        return { name: t.name, tokens: t.tokens, description: t.description || "", paramSummary: t.paramSummary || "" };
       }),
       total: g.tools ? g.tools.length : (g.count || 0),
     };
@@ -259,9 +259,17 @@ function ToolGroups(props) {
               <div style={{ paddingLeft: 10, color: theme.text.muted, fontSize: theme.fontSize.xs, borderLeft: "1px solid " + theme.border.default, marginBottom: 4 }}>
                 {g.top.map(function (t, j) {
                   return (
-                    <div key={j} style={{ padding: "2px 0", display: "grid", gridTemplateColumns: "1fr auto", gap: 6, fontVariantNumeric: "tabular-nums" }}>
-                      <span style={{ color: theme.text.secondary, overflow: "hidden", textOverflow: "ellipsis" }}>{t.name}</span>
-                      <span>{fmtT(t.tokens)} tok</span>
+                    <div key={j} style={{ padding: "4px 0" }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 6, fontVariantNumeric: "tabular-nums" }}>
+                        <span style={{ color: theme.text.primary, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis" }}>{t.name}</span>
+                        <span>{fmtT(t.tokens)} tok</span>
+                      </div>
+                      {t.description && (
+                        <div style={{ color: theme.text.secondary, marginTop: 2, lineHeight: 1.45 }}>{t.description}</div>
+                      )}
+                      {t.paramSummary && (
+                        <div style={{ color: theme.text.muted, marginTop: 2, fontStyle: "italic" }}>params: {t.paramSummary}</div>
+                      )}
                     </div>
                   );
                 })}

@@ -247,7 +247,7 @@ interface ClassifiedCall {
   historyMsgs: { role: "user" | "assistant"; chars: number; tokens: number; preview: string }[];
   toolResultMsgs: { chars: number; tokens: number; preview: string; label: string }[];
   totalTools: number;
-  toolGroups: { source: string; tools: { name: string; chars: number; tokens: number }[]; chars: number; tokens: number }[];
+  toolGroups: { source: string; tools: { name: string; chars: number; tokens: number; description?: string; paramSummary?: string }[]; chars: number; tokens: number }[];
   /** Image attachments referenced by this call's request messages. The export
    * carries only a CDN URL, mediaType, and detail level -- no byte size,
    * dimensions, or token cost. */
@@ -269,6 +269,20 @@ const TOOL_GROUP_PATTERNS: { match: (name: string) => boolean; label: string }[]
 function classifyToolGroup(name: string): string {
   for (const p of TOOL_GROUP_PATTERNS) if (p.match(name)) return p.label;
   return "Built-in: other";
+}
+
+// Build a compact summary of a JSON Schema-style tool parameters object,
+// e.g. "intent, domain, scope, timeEstimate, confidence, reasoning (6 required)".
+function summarizeToolParameters(params: unknown): string {
+  if (!params || typeof params !== "object") return "";
+  const obj = params as { properties?: Record<string, unknown>; required?: unknown };
+  const props = obj.properties && typeof obj.properties === "object" ? Object.keys(obj.properties) : [];
+  if (props.length === 0) return "";
+  const required = Array.isArray(obj.required) ? obj.required.length : 0;
+  const head = props.slice(0, 6).join(", ");
+  const tail = props.length > 6 ? ", +" + (props.length - 6) + " more" : "";
+  const req = required > 0 ? " (" + required + " required)" : "";
+  return head + tail + req;
 }
 
 /** FNV-1a 32-bit hash, 8-char hex. Mirrors compareCost.ts's hashStr so that
@@ -325,16 +339,20 @@ function classifyCall(log: RawLog): ClassifiedCall {
 
   // Tool definitions
   const tools = log.metadata?.tools ?? [];
-  const toolDefBuckets = new Map<string, { tools: { name: string; chars: number; tokens: number }[]; chars: number }>();
+  const toolDefBuckets = new Map<string, { tools: { name: string; chars: number; tokens: number; description?: string; paramSummary?: string }[]; chars: number }>();
   let toolDefChars = 0;
   for (const tool of tools) {
     const json = JSON.stringify(tool);
     const len = json.length;
     toolDefChars += len;
-    const group = classifyToolGroup(tool?.name ?? "");
+    const fn = (tool as { function?: { name?: string; description?: string; parameters?: unknown } }).function;
+    const name = (tool as { name?: string }).name ?? fn?.name ?? "(unnamed)";
+    const description = fn?.description ?? (tool as { description?: string }).description ?? "";
+    const paramSummary = summarizeToolParameters(fn?.parameters ?? (tool as { parameters?: unknown }).parameters);
+    const group = classifyToolGroup(name);
     if (!toolDefBuckets.has(group)) toolDefBuckets.set(group, { tools: [], chars: 0 });
     const b = toolDefBuckets.get(group)!;
-    b.tools.push({ name: tool.name, chars: len, tokens: 0 });
+    b.tools.push({ name, chars: len, tokens: 0, description, paramSummary });
     b.chars += len;
   }
 
