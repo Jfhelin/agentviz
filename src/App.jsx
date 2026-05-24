@@ -36,13 +36,9 @@ import useQA from "./hooks/useQA.js";
 import { buildAutonomyMetrics, buildAutonomySummary } from "./lib/autonomyMetrics.js";
 import {
   loadStoredSessionContent,
-  loadStoredSessionContentAsync,
   persistSessionSnapshot,
-  persistSessionSnapshotAsync,
   pruneDeadEntries,
   reconcileSessionLibrary,
-  reconcileSessionLibraryAsync,
-  migrateContentToIDB,
 } from "./lib/sessionLibrary.js";
 import { PlaybackProvider, usePlaybackContext } from "./contexts/PlaybackContext.jsx";
 
@@ -139,21 +135,6 @@ function renderActiveView(activeView, props) {
 
 export default function App() {
   useEffect(function () { clearChunkReloadFlag(); }, []);
-
-  // One-time migration of legacy localStorage content into IndexedDB, then
-  // async reconcile of the library so hasContent reflects IDB.
-  useEffect(function () {
-    var cancelled = false;
-    migrateContentToIDB().then(function () {
-      return reconcileSessionLibraryAsync();
-    }).then(function (entries) {
-      if (cancelled) return;
-      if (Array.isArray(entries)) setLibraryEntries(entries);
-    }).catch(function (error) {
-      console.warn("[session] async reconcile failed:", error);
-    });
-    return function () { cancelled = true; };
-  }, []);
   var [view, setView] = usePersistentState("agentviz:view", "replay");
   var [themeModePreference, setThemeModePreference] = usePersistentState("agentviz:theme-mode", readStoredThemePreference);
   var [libraryEntries, setLibraryEntries] = useState(function () {
@@ -244,14 +225,8 @@ export default function App() {
   }, [libraryEntries, discovered.sessions]);
 
   var handleSessionParsed = useCallback(function (result, name, rawText) {
-    persistSessionSnapshotAsync(name, result, rawText).then(function (persisted) {
-      setLibraryEntries(persisted.entries);
-    }).catch(function (error) {
-      console.error("[session] persist failed:", error);
-      // Fall back to sync path so the UI still updates.
-      var persisted = persistSessionSnapshot(name, result, rawText);
-      setLibraryEntries(persisted.entries);
-    });
+    var persisted = persistSessionSnapshot(name, result, rawText);
+    setLibraryEntries(persisted.entries);
   }, []);
 
   var session = useSessionLoader({ onSessionParsed: handleSessionParsed });
@@ -384,23 +359,18 @@ export default function App() {
 
     var rawText = loadStoredSessionContent(entry.id);
     if (rawText) { afterLoad(rawText); return; }
+    if (sessionPath) {
+      discovered.fetchSessionContent(sessionPath).then(afterLoad).catch(onFetchError);
+      return;
+    }
 
-    // Not in localStorage (likely moved to IDB). Try the async store.
-    loadStoredSessionContentAsync(entry.id).then(function (text) {
-      if (text) { afterLoad(text); return; }
-      if (sessionPath) {
-        discovered.fetchSessionContent(sessionPath).then(afterLoad).catch(onFetchError);
-        return;
-      }
-      // Content was evicted and there's no server path to re-fetch from.
-      // Mark the entry stale so the button disables immediately.
-      setLibraryEntries(function (prev) {
-        return prev.map(function (e) {
-          return e.id === entry.id ? Object.assign({}, e, { hasContent: false }) : e;
-        });
+    // Content was evicted and there's no server path to re-fetch from.
+    // Mark the entry stale so the button disables immediately.
+    setLibraryEntries(function (prev) {
+      return prev.map(function (e) {
+        return e.id === entry.id ? Object.assign({}, e, { hasContent: false }) : e;
       });
-    }).catch(onFetchError);
-    return;
+    });
   }, [handleFile, setView, setLibraryEntries, discovered.fetchSessionContent]);
 
   var loadSample = useCallback(function (mode) {
