@@ -210,6 +210,10 @@ function ToolGroups(props) {
     var kind = lower.indexOf("mcp") >= 0 ? "mcp"
       : (lower.indexOf("ext") >= 0 || lower.indexOf("extension") >= 0) ? "extension"
       : "builtin";
+    var allTools = (g.tools || []).map(function (t) {
+      if (Array.isArray(t)) return { name: t[0], tokens: t[1] };
+      return { name: t.name, tokens: t.tokens };
+    });
     return {
       label: name,
       kind: kind,
@@ -219,6 +223,7 @@ function ToolGroups(props) {
         if (Array.isArray(t)) return { name: t[0], tokens: t[1], description: "", paramSummary: "" };
         return { name: t.name, tokens: t.tokens, description: t.description || "", paramSummary: t.paramSummary || "" };
       }),
+      rest: allTools.slice(5),
       total: g.tools ? g.tools.length : (g.count || 0),
     };
   });
@@ -273,9 +278,17 @@ function ToolGroups(props) {
                     </div>
                   );
                 })}
-                {g.count > g.top.length && (
-                  <div style={{ padding: "2px 0", opacity: 0.6 }}>+{g.count - g.top.length} more</div>
-                )}
+                {g.count > g.top.length && (function () {
+                  var more = g.rest || [];
+                  var tip = more.map(function (t) {
+                    return t.name + (t.tokens != null ? "  " + fmtT(t.tokens) + " tok" : "");
+                  }).join("\n");
+                  return (
+                    <div title={tip || undefined} style={{ padding: "2px 0", opacity: 0.75, cursor: tip ? "help" : "default" }}>
+                      +{g.count - g.top.length} more{tip && <span style={{ marginLeft: 6, opacity: 0.8 }}>ⓘ</span>}
+                    </div>
+                  );
+                })()}
               </div>
             )}
           </div>
