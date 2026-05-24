@@ -865,11 +865,32 @@ function LLMDetail(props) {
           </div>
         </div>
         <div style={{ background: theme.bg.surface, border: "1px solid " + theme.border.default, borderRadius: 5, padding: "10px 12px" }}
-             title={hasPx ? "Output is billed at the model's output rate (typically ~5x input). Input + Output = the row total." : "Pricing unknown for this model"}>
+             title={hasPx ? "Output is billed at the model's output rate (typically ~5x input). Breakdown attributes output tokens via char share of the model's surfaced text." : "Pricing unknown for this model"}>
           <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 5 }}>◀ Output (model wrote)</div>
-          <div style={{ fontSize: theme.fontSize.lg, color: theme.text.primary, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{fmtT(ev.output)} tok</div>
+          <div style={{ fontSize: theme.fontSize.lg, color: theme.text.primary, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{fmtT(ev.output)} tok{hasPx ? " · " + fmt$(outputCost) : ""}</div>
           <div style={{ fontSize: theme.fontSize.xs, color: theme.text.secondary, marginTop: 3, fontVariantNumeric: "tabular-nums" }}>
-            {hasPx ? fmt$(outputCost) + " · input + output = " + fmt$(inputCost + outputCost) : "this call: " + fmt$(ev.cost) + " total"}
+            {(function () {
+              var visCh = ev.visibleResponseChars || 0;
+              var thinkCh = ev.thinkingChars || 0;
+              var argsCh = ev.toolArgsChars || 0;
+              var sumCh = visCh + thinkCh + argsCh;
+              if (sumCh > 0 && ev.output > 0) {
+                var estVis = Math.round(visCh / 4);
+                var estThink = Math.round(thinkCh / 4);
+                var estArgs = Math.round(argsCh / 4);
+                var resid = Math.max(0, ev.output - estVis - estThink - estArgs);
+                var pieces = [];
+                if (estVis > 0) pieces.push("~" + fmtT(estVis) + " visible");
+                if (estThink > 0) pieces.push("~" + fmtT(estThink) + " thinking");
+                if (estArgs > 0) pieces.push("~" + fmtT(estArgs) + " tool-args");
+                if (resid > 0) pieces.push("~" + fmtT(resid) + " unattributed");
+                return pieces.join(" · ");
+              }
+              if (ev.reasoningTokens > 0) {
+                return "~" + fmtT(ev.output - ev.reasoningTokens) + " visible · ~" + fmtT(ev.reasoningTokens) + " thinking";
+              }
+              return hasPx ? "this call total: " + fmt$(ev.cost) : ("this call: " + fmt$(ev.cost) + " total");
+            })()}
           </div>
         </div>
           </>
