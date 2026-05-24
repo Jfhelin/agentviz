@@ -1,110 +1,73 @@
 {
-  "exportedAt": "2026-04-29T14:41:16.000Z",
+  "exportedAt": "2026-04-29T14:41:16Z",
   "totalPrompts": 2,
-  "totalLogEntries": 4,
+  "totalLogEntries": 3,
   "prompts": [
     {
-      "prompt": "First user prompt: hello",
-      "promptId": "prompt-0001",
-      "logCount": 2,
+      "prompt": "How are you doing?",
+      "promptId": "prompt-0",
+      "logCount": 1,
       "logs": [
         {
-          "id": "log-0001",
+          "id": "req-0",
           "kind": "request",
-          "type": "ChatMLSuccess",
-          "name": "title",
-          "metadata": {
-            "model": "gpt-4o-mini-2024-07-18",
-            "requestType": "chatRequest",
-            "duration": 234,
-            "usage": {
-              "prompt_tokens": 120,
-              "completion_tokens": 8,
-              "prompt_tokens_details": { "cached_tokens": 0 }
-            }
-          },
-          "requestMessages": {
-            "messages": [
-              { "role": 0, "content": [{ "type": 1, "text": "You generate short titles." }] },
-              { "role": 1, "content": [{ "type": 1, "text": "Title this conversation." }] }
-            ]
-          },
-          "response": { "type": "success", "message": ["Hello"] }
-        },
-        {
-          "id": "log-0002",
-          "kind": "request",
-          "type": "ChatMLSuccess",
           "name": "panel/editAgent",
           "metadata": {
             "model": "claude-sonnet-4.6",
-            "requestType": "chatRequest",
-            "duration": 4321,
+            "duration": 1500,
             "usage": {
-              "prompt_tokens": 5000,
-              "completion_tokens": 450,
-              "prompt_tokens_details": {
-                "cached_tokens": 0,
-                "cache_creation_input_tokens": 4800
-              }
-            }
+              "prompt_tokens": 1500,
+              "completion_tokens": 20,
+              "cache_creation_input_tokens": 1498,
+              "prompt_tokens_details": { "cached_tokens": 0 }
+            },
+            "tools": [
+              { "name": "read_file", "description": "Read a file", "input_schema": { "type": "object" } },
+              { "name": "tool_search", "description": "Search tools", "input_schema": { "type": "object" }, "cache_control": { "type": "ephemeral" } }
+            ]
           },
           "requestMessages": {
             "messages": [
-              { "role": 0, "content": [{ "type": 1, "text": "You are a helpful coding assistant." }] },
-              { "role": 1, "content": [{ "type": 1, "text": "Please help with my task." }, { "type": 3, "cacheType": "ephemeral" }] },
-              { "role": 2, "content": [{ "type": 1, "text": "Sure, here is a plan." }] }
+              { "role": 0, "content": "You are a helpful assistant." },
+              { "role": 1, "content": "How are you doing?" }
             ]
-          },
-          "response": { "type": "success", "message": ["First detailed reply"] }
+          }
         }
       ]
     },
     {
-      "prompt": "Second user prompt: read this file",
-      "promptId": "prompt-0002",
+      "prompt": "Read README",
+      "promptId": "prompt-1",
       "logCount": 2,
       "logs": [
         {
-          "id": "log-0003",
-          "kind": "toolCall",
-          "type": "ChatMLSuccess",
-          "name": "panel/editAgent",
-          "metadata": {}
-        },
-        {
-          "id": "log-0004",
+          "id": "req-1",
           "kind": "request",
-          "type": "ChatMLSuccess",
           "name": "panel/editAgent",
           "metadata": {
             "model": "claude-sonnet-4.6",
-            "requestType": "chatRequest",
-            "duration": 5678,
+            "duration": 2000,
             "usage": {
-              "prompt_tokens": 6200,
-              "completion_tokens": 320,
-              "prompt_tokens_details": {
-                "cached_tokens": 4500,
-                "cache_creation_input_tokens": 1500
-              }
-            }
+              "prompt_tokens": 1520,
+              "completion_tokens": 30,
+              "cache_creation_input_tokens": 1518,
+              "prompt_tokens_details": { "cached_tokens": 0 }
+            },
+            "tools": [
+              { "name": "read_file", "description": "Read a file", "input_schema": { "type": "object" } },
+              { "name": "tool_search", "description": "Search tools updated", "input_schema": { "type": "object" } }
+            ]
           },
           "requestMessages": {
             "messages": [
-              { "role": 0, "content": [{ "type": 1, "text": "You are a helpful coding assistant." }] },
-              { "role": 1, "content": [{ "type": 1, "text": "Please help with my task." }] },
-              { "role": 2, "content": [{ "type": 1, "text": "Sure, here is a plan." }] },
-              { "role": 1, "content": [{ "type": 1, "text": "Read src/index.ts" }, { "type": 3, "cacheType": "ephemeral" }] },
-              { "role": 3, "content": [{ "type": 1, "text": "(file contents...)" }] }
+              { "role": 0, "content": "You are a helpful assistant." },
+              { "role": 1, "content": "How are you doing?" },
+              { "role": 2, "content": "I'm doing well!" },
+              { "role": 1, "content": "Read README" }
             ]
-          },
-          "response": { "type": "success", "message": ["Second detailed reply"] }
+          }
         }
       ]
     }
-  ],
-  "mcpServers": [
-    { "type": "stdio", "label": "fs", "uri": "stdio://fs", "version": "0.1.0" }
   ]
 }
