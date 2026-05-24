@@ -425,12 +425,16 @@ function extractSkills(systemText: string): Skill[] {
 // them explicitly so we can both detect them and call them out as "fixed
 // scaffolding" in the UI. Tags not in this list are still summed into the
 // "other" bucket so nothing is silently dropped.
+// Known stable Copilot-injected scaffolding blocks. We only list **leaf**
+// sections here -- not wrappers like `<instructions>`, which themselves
+// contain `<skills>` and `<attachment>` blocks. Counting the wrapper would
+// double-count its inner content and inflate the anatomy beyond 100%.
 const SCAFFOLDING_TAGS = [
   "securityRequirements", "operationalSafety", "implementationDiscipline",
   "parallelizationStrategy", "toolUseInstructions", "toolSearchInstructions",
   "communicationStyle", "communicationExamples", "notebookInstructions",
   "outputFormatting", "fileLinkification", "memoryInstructions",
-  "memoryScopes", "memoryGuidelines", "instructions",
+  "memoryScopes", "memoryGuidelines",
 ];
 
 function extractScaffolding(systemText: string): ScaffoldingSection[] {
