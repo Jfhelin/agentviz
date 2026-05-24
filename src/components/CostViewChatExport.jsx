@@ -748,21 +748,38 @@ function LLMDetail(props) {
               </div>
             )}
             {!hasText && calls.length > 0 && (
-              <div style={{ ...textBlockStyle(), color: theme.text.secondary, fontStyle: "italic", marginBottom: 6 }}>
-                No text content -- the model spent its {fmtT(ev.output)} output tokens emitting {calls.length} tool call{calls.length === 1 ? "" : "s"}:
+              <div style={{ color: theme.text.secondary, fontSize: theme.fontSize.sm, fontStyle: "italic", marginBottom: 6 }}>
+                No text reply this turn. The model used its {fmtT(ev.output)} output tokens to request {calls.length} tool execution{calls.length === 1 ? "" : "s"} from the client.
               </div>
             )}
             {calls.length > 0 && (
               <div style={{
-                background: theme.bg.base, border: "1px dashed " + theme.border.default,
-                borderRadius: 3, padding: "6px 10px", marginTop: hasText ? 6 : 0,
+                background: theme.cost.chipBgBuiltin || theme.bg.base,
+                border: "1px solid " + theme.border.default,
+                borderLeft: "3px solid " + theme.cost.kindBuiltin,
+                borderRadius: 3, padding: "8px 10px", marginTop: hasText ? 6 : 0,
               }}>
+                <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
+                  <span>Tool calls requested by the model</span>
+                  <span style={{ color: theme.text.ghost, fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>
+                    LLM → client. Results are fed back on the next call.
+                  </span>
+                </div>
                 {calls.map(function (tc, i) {
                   return (
-                    <div key={i} style={{ display: "flex", gap: 8, alignItems: "baseline", fontFamily: theme.font.mono, fontSize: theme.fontSize.xs, lineHeight: 1.7 }}>
-                      <span style={{ color: theme.text.muted }}>→</span>
-                      <span style={{ color: theme.text.primary, fontWeight: 600 }}>{tc.name || "(unnamed tool)"}</span>
-                      {tc.argsSummary && <span style={{ color: theme.text.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{tc.argsSummary}</span>}
+                    <div key={i} style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: 8, alignItems: "baseline", padding: "3px 0" }}>
+                      <span style={{
+                        fontFamily: theme.font.mono, fontSize: theme.fontSize.xs, fontWeight: 600,
+                        color: theme.cost.kindBuiltin,
+                        background: theme.bg.base, padding: "1px 6px", borderRadius: 3,
+                        border: "1px solid " + theme.border.subtle, whiteSpace: "nowrap",
+                      }}>{tc.name || "(unnamed tool)"}</span>
+                      {tc.argsSummary && (
+                        <span style={{
+                          fontFamily: theme.font.mono, fontSize: theme.fontSize.xs,
+                          color: theme.text.secondary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                        }}>{tc.argsSummary}</span>
+                      )}
                     </div>
                   );
                 })}

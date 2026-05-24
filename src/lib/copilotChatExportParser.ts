@@ -685,6 +685,10 @@ function summarizeResponse(response: unknown): string {
         .join("\n")
         .trim();
       if (joined) return joined.length > 800 ? joined.slice(0, 800) + "…" : joined;
+      // Empty message array (or array of empty strings) means the model produced
+      // no text content this turn (typically because it spent its output budget
+      // on a tool call). Don't surface the raw envelope JSON.
+      return "";
     }
     try {
       const json = JSON.stringify(obj);
