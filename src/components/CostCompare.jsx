@@ -10,12 +10,12 @@ const COLOR_A = theme.accent.primary;
 const COLOR_B = theme.agent.system;
 
 const BUCKET_COLOR = {
-  system: theme.cost.ctxSystem,
-  tool_defs: theme.cost.ctxToolDefs,
-  history: theme.cost.ctxHistory,
-  tool_results: theme.cost.ctxToolResults,
-  current: theme.cost.ctxCurrent,
-  output: theme.cost.ctxOutput,
+  get system() { return theme.cost.ctxSystem; },
+  get tool_defs() { return theme.cost.ctxToolDefs; },
+  get history() { return theme.cost.ctxHistory; },
+  get tool_results() { return theme.cost.ctxToolResults; },
+  get current() { return theme.cost.ctxCurrent; },
+  get output() { return theme.cost.ctxOutput; },
 };
 const BUCKET_LABEL = {
   system: "System",

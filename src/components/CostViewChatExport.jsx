@@ -16,10 +16,10 @@ function isCredits() { return _costUnit === "credits"; }
 // Cost view uses theme.cost.* tokens (defined in src/lib/theme.js).
 // These are categorical color roles that change with light/dark mode.
 var COST_COLORS = {
-  fresh:  theme.cost.fresh,
-  cwrite: theme.cost.cwrite,
-  cached: theme.cost.cached,
-  output: theme.cost.output,
+  get fresh()  { return theme.cost.fresh; },
+  get cwrite() { return theme.cost.cwrite; },
+  get cached() { return theme.cost.cached; },
+  get output() { return theme.cost.output; },
 };
 var COST_LABELS = {
   fresh: "Fresh input",
@@ -30,12 +30,12 @@ var COST_LABELS = {
 var CTX_KEYS = ["system", "tool_defs", "history", "tool_results", "current", "output"];
 var CTX_INPUT_KEYS = ["system", "tool_defs", "history", "tool_results", "current"];
 var CTX_COLORS = {
-  system:       theme.cost.ctxSystem,
-  tool_defs:    theme.cost.ctxToolDefs,
-  history:      theme.cost.ctxHistory,
-  tool_results: theme.cost.ctxToolResults,
-  current:      theme.cost.ctxCurrent,
-  output:       theme.cost.ctxOutput,
+  get system()       { return theme.cost.ctxSystem; },
+  get tool_defs()    { return theme.cost.ctxToolDefs; },
+  get history()      { return theme.cost.ctxHistory; },
+  get tool_results() { return theme.cost.ctxToolResults; },
+  get current()      { return theme.cost.ctxCurrent; },
+  get output()       { return theme.cost.ctxOutput; },
 };
 var CTX_LABELS = {
   system: "System",
@@ -46,9 +46,9 @@ var CTX_LABELS = {
   output: "Response",
 };
 var KIND_COLORS = {
-  mcp:       theme.cost.kindMcp,
-  extension: theme.cost.kindExtension,
-  builtin:   theme.cost.kindBuiltin,
+  get mcp()       { return theme.cost.kindMcp; },
+  get extension() { return theme.cost.kindExtension; },
+  get builtin()   { return theme.cost.kindBuiltin; },
 };
 
 // Map VS Code Copilot Chat's internal call names to friendly labels.
@@ -590,7 +590,7 @@ function LLMDetail(props) {
           );
         }
         var bodyForBucket = function (k) {
-          if (k === "system") return <div style={textBlockStyle}>{ev.systemPreview}{ev.systemPreview && ev.systemPreview.length >= 300 ? "…" : ""}</div>;
+          if (k === "system") return <div style={textBlockStyle()}>{ev.systemPreview}{ev.systemPreview && ev.systemPreview.length >= 300 ? "…" : ""}</div>;
           if (k === "tool_defs") return (
             <>
               <div style={{ color: theme.text.secondary, fontSize: theme.fontSize.sm, marginBottom: 5 }}>{ev.totalTools} tools available, grouped by source</div>
@@ -615,7 +615,7 @@ function LLMDetail(props) {
           );
           if (k === "current") return (
             <>
-              <div style={textBlockStyle}>{ev.currentText || "(empty)"}{ev.currentText && ev.currentText.length >= 400 ? "…" : ""}</div>
+              <div style={textBlockStyle()}>{ev.currentText || "(empty)"}{ev.currentText && ev.currentText.length >= 400 ? "…" : ""}</div>
               {ev.imageTokensEst > 0 && (
                 <div style={{ marginTop: 6, fontSize: theme.fontSize.xs, color: theme.text.muted, fontStyle: "italic" }}>
                   Includes ~{fmtT(ev.imageTokensEst)} estimated image tokens (see 📎 attachment block above for per-image breakdown).
@@ -652,7 +652,7 @@ function LLMDetail(props) {
             <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 5, fontWeight: 600 }}>
               Response ({fmtT(ev.output)} output tok)
             </div>
-            {hasText && <div style={textBlockStyle}>{ev.responsePreview}</div>}
+            {hasText && <div style={textBlockStyle()}>{ev.responsePreview}</div>}
             {!hasText && calls.length === 0 && silent && (
               <div style={{
                 background: theme.bg.base, border: "1px dashed " + theme.border.default,
@@ -678,7 +678,7 @@ function LLMDetail(props) {
               </div>
             )}
             {!hasText && calls.length > 0 && (
-              <div style={{ ...textBlockStyle, color: theme.text.secondary, fontStyle: "italic", marginBottom: 6 }}>
+              <div style={{ ...textBlockStyle(), color: theme.text.secondary, fontStyle: "italic", marginBottom: 6 }}>
                 No text content -- the model spent its {fmtT(ev.output)} output tokens emitting {calls.length} tool call{calls.length === 1 ? "" : "s"}:
               </div>
             )}
@@ -705,19 +705,21 @@ function LLMDetail(props) {
   );
 }
 
-var textBlockStyle = {
-  background: theme.bg.base,
-  border: "1px dashed " + theme.border.default,
-  borderRadius: 3,
-  padding: "8px 10px",
-  marginTop: 6,
-  color: theme.text.primary,
-  fontSize: theme.fontSize.sm,
-  lineHeight: 1.55,
-  maxHeight: 120,
-  overflow: "auto",
-  whiteSpace: "pre-wrap",
-};
+function textBlockStyle() {
+  return {
+    background: theme.bg.base,
+    border: "1px dashed " + theme.border.default,
+    borderRadius: 3,
+    padding: "8px 10px",
+    marginTop: 6,
+    color: theme.text.primary,
+    fontSize: theme.fontSize.sm,
+    lineHeight: 1.55,
+    maxHeight: 120,
+    overflow: "auto",
+    whiteSpace: "pre-wrap",
+  };
+}
 
 function detectResponseShape(preview) {
   if (!preview) return "empty";
@@ -755,7 +757,7 @@ function ToolDetail(props) {
     );
   };
   var blockStyle = function (accentColor) {
-    return Object.assign({}, textBlockStyle, {
+    return Object.assign({}, textBlockStyle(), {
       borderLeft: "3px solid " + accentColor,
       borderTop: "1px solid " + theme.border.subtle,
       borderRight: "1px solid " + theme.border.subtle,
@@ -1331,9 +1333,9 @@ export default function CostView(props) {
         gridTemplateColumns: "minmax(420px,1fr) 360px 360px",
         border: "1px solid " + theme.border.default, borderRadius: 6, overflow: "hidden", background: theme.bg.surface,
       }}>
-        <div style={colHeadStyle}>Prompt &amp; steps</div>
-        <div style={Object.assign({}, colHeadStyle, { borderLeft: "1px solid " + theme.border.default })}>Cumulative cost so far → max {fmt$(maxCost)}</div>
-        <div style={Object.assign({}, colHeadStyle, { borderLeft: "1px solid " + theme.border.default })}>Context window for this call → max {fmtT(maxCtx)} tok</div>
+        <div style={colHeadStyle()}>Prompt &amp; steps</div>
+        <div style={Object.assign({}, colHeadStyle(), { borderLeft: "1px solid " + theme.border.default })}>Cumulative cost so far → max {fmt$(maxCost)}</div>
+        <div style={Object.assign({}, colHeadStyle(), { borderLeft: "1px solid " + theme.border.default })}>Context window for this call → max {fmtT(maxCtx)} tok</div>
 
         {(function () {
           var visiblePromptOrdinal = 0;
@@ -1527,13 +1529,15 @@ export default function CostView(props) {
   );
 }
 
-var colHeadStyle = {
-  background: theme.bg.base,
-  padding: "11px 14px",
-  fontSize: theme.fontSize.xs,
-  color: theme.text.muted,
-  textTransform: "uppercase",
-  letterSpacing: 0.6,
-  borderBottom: "1px solid " + theme.border.default,
-  fontWeight: 600,
-};
+function colHeadStyle() {
+  return {
+    background: theme.bg.raised,
+    padding: "11px 14px",
+    fontSize: theme.fontSize.xs,
+    color: theme.text.muted,
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+    borderBottom: "1px solid " + theme.border.default,
+    fontWeight: 600,
+  };
+}
