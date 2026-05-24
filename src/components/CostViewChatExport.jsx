@@ -860,12 +860,21 @@ function ToolDetail(props) {
         Tool call · {ev.name}
       </h4>
 
-      {/* 1. Thinking */}
+      {/* 1. Reasoning (model's pre-call thinking, billed as output tokens) */}
       {ev.thinking && (
         <div style={{ marginBottom: 12 }}>
           <div style={sectionLabelStyle}>
-            {arrowChip(theme.text.muted, "1 · think")}
-            <span>Assistant thinking before the call</span>
+            {arrowChip(theme.text.muted, "1 · reasoning")}
+            <span
+              title={
+                "Extended thinking emitted by the model just before it requested this tool. " +
+                "Produced by the LLM (not the client) and billed as output tokens. " +
+                "For Claude, thinking is discarded after the turn and is not re-sent as input on the next call."
+              }
+              style={{ borderBottom: "1px dotted " + theme.border.default, cursor: "help" }}
+            >
+              LLM&apos;s pre-call thoughts (billed as output tokens)
+            </span>
           </div>
           <div style={Object.assign({}, blockStyle(theme.text.muted), { fontStyle: "italic" })}>
             {ev.thinking.slice(0, 400)}{ev.thinking.length > 400 ? "…" : ""}
