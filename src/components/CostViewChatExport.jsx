@@ -727,6 +727,114 @@ function LLMDetail(props) {
         </div>
         );
       })()}
+      {(function () {
+        var skills = ev.skills || [];
+        var scaff = ev.scaffoldingSections || [];
+        var fileAtts = ev.fileAttachments || [];
+        var instAtts = ev.instructionAttachments || [];
+        if (skills.length === 0 && scaff.length === 0 && fileAtts.length === 0 && !ev.chatMode && instAtts.length === 0) return null;
+        var sysTok = (ev.components && ev.components.system) || 0;
+        var sysChars = ev.systemChars || 0;
+        var charsToScaledTok = function (chars) {
+          return sysChars > 0 && sysTok > 0 ? Math.round(chars / sysChars * sysTok) : Math.round(chars / 4);
+        };
+        var skillsChars = skills.reduce(function (a, s) { return a + s.chars; }, 0);
+        var scaffChars = scaff.reduce(function (a, s) { return a + s.chars; }, 0);
+        var modeChars = (ev.chatMode && ev.chatMode.body) ? ev.chatMode.body.length : 0;
+        var instAttsChars = instAtts.reduce(function (a, x) { return a + x.chars; }, 0);
+        var fileAttsChars = fileAtts.reduce(function (a, x) { return a + x.chars; }, 0);
+        var classifiedChars = skillsChars + scaffChars + modeChars + instAttsChars + fileAttsChars;
+        var otherChars = Math.max(0, sysChars - classifiedChars);
+        var pctOf = function (chars) {
+          return sysChars > 0 ? (100 * chars / sysChars).toFixed(1) + "%" : "—";
+        };
+        var rows = [
+          { key: "scaff",   label: "Copilot built-in scaffolding (" + scaff.length + " section" + (scaff.length === 1 ? "" : "s") + ")", chars: scaffChars, color: theme.cost.ctxToolDefs },
+          { key: "skills",  label: "Skills (" + skills.length + ")", chars: skillsChars, color: theme.cost.kindMcp },
+          { key: "mode",    label: "Custom chat mode" + (ev.chatMode ? ": " + ev.chatMode.name : ""), chars: modeChars, color: theme.accent.primary },
+          { key: "inst",    label: "Workspace instruction files (" + instAtts.length + ")", chars: instAttsChars, color: theme.cost.ctxHistory },
+          { key: "files",   label: "Other file attachments (" + fileAtts.length + ")", chars: fileAttsChars, color: theme.cost.ctxToolResults },
+          { key: "other",   label: "Other / unclassified system text", chars: otherChars, color: theme.cost.ctxSystem },
+        ].filter(function (r) { return r.chars > 0; });
+        return (
+        <div style={{
+          background: theme.bg.surface, border: "1px solid " + theme.border.default,
+          borderRadius: 5, padding: "10px 12px", marginBottom: 12,
+          fontSize: theme.fontSize.sm, color: theme.text.secondary, lineHeight: 1.5,
+        }}>
+          <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6, fontWeight: 600 }}>
+            System prompt anatomy ({fmtT(sysTok)} tok · {sysChars.toLocaleString()} chars)
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "auto 1fr auto auto", gap: "4px 12px", alignItems: "baseline", fontFamily: theme.font.mono, fontSize: theme.fontSize.xs }}>
+            {rows.map(function (r) {
+              return (
+                <React.Fragment key={r.key}>
+                  <span style={{ display: "inline-block", width: 10, height: 10, background: r.color, borderRadius: 2 }} />
+                  <span style={{ color: theme.text.primary }}>{r.label}</span>
+                  <span style={{ color: theme.text.muted, textAlign: "right" }}>~{fmtT(charsToScaledTok(r.chars))} tok</span>
+                  <span style={{ color: theme.text.muted, textAlign: "right" }}>{pctOf(r.chars)}</span>
+                </React.Fragment>
+              );
+            })}
+          </div>
+          {skills.length > 0 && (
+            <details style={{ marginTop: 8 }}>
+              <summary style={{ cursor: "pointer", color: theme.text.muted, fontSize: theme.fontSize.xs, userSelect: "none" }}>
+                Skills ({skills.length}) — name, file, description
+              </summary>
+              <div style={{ marginTop: 6, maxHeight: 280, overflow: "auto" }}>
+                {skills.map(function (s, i) {
+                  return (
+                    <div key={i} style={{ padding: "4px 0", borderBottom: i === skills.length - 1 ? "none" : "1px solid " + theme.border.subtle, fontSize: theme.fontSize.xs, fontFamily: theme.font.mono }}>
+                      <div style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
+                        <span style={{ color: theme.cost.kindMcp, fontWeight: 600 }}>{s.name}</span>
+                        <span style={{ color: theme.text.muted, marginLeft: "auto" }}>~{fmtT(charsToScaledTok(s.chars))} tok</span>
+                      </div>
+                      {s.file && <div style={{ color: theme.text.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.file}>{s.file}</div>}
+                      {s.description && <div style={{ color: theme.text.secondary, marginTop: 2, fontFamily: theme.font.sans, lineHeight: 1.4 }}>{s.description.length > 240 ? s.description.slice(0, 240) + "…" : s.description}</div>}
+                    </div>
+                  );
+                })}
+              </div>
+            </details>
+          )}
+          {scaff.length > 0 && (
+            <details style={{ marginTop: 6 }}>
+              <summary style={{ cursor: "pointer", color: theme.text.muted, fontSize: theme.fontSize.xs, userSelect: "none" }}>
+                Scaffolding sections ({scaff.length}) — stable Copilot boilerplate
+              </summary>
+              <div style={{ marginTop: 6, fontFamily: theme.font.mono, fontSize: theme.fontSize.xs }}>
+                {scaff.map(function (s, i) {
+                  return (
+                    <div key={i} style={{ display: "flex", gap: 8, padding: "2px 0" }}>
+                      <span style={{ color: theme.text.primary }}>&lt;{s.tag}&gt;</span>
+                      <span style={{ color: theme.text.muted, marginLeft: "auto" }}>~{fmtT(charsToScaledTok(s.chars))} tok</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </details>
+          )}
+          {fileAtts.length > 0 && (
+            <details style={{ marginTop: 6 }}>
+              <summary style={{ cursor: "pointer", color: theme.text.muted, fontSize: theme.fontSize.xs, userSelect: "none" }}>
+                File attachments ({fileAtts.length})
+              </summary>
+              <div style={{ marginTop: 6, fontFamily: theme.font.mono, fontSize: theme.fontSize.xs }}>
+                {fileAtts.map(function (a, i) {
+                  return (
+                    <div key={i} style={{ display: "flex", gap: 8, padding: "2px 0" }}>
+                      <span style={{ color: theme.text.primary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={a.filePath}>{a.filePath}</span>
+                      <span style={{ color: theme.text.muted, marginLeft: "auto" }}>~{fmtT(charsToScaledTok(a.chars))} tok</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </details>
+          )}
+        </div>
+        );
+      })()}
       {ev.images && ev.images.length > 0 && (() => {
         var vis = ev.visionTokensTotal || 0;
         var pt = ev.promptTokens || 0;
@@ -1865,6 +1973,25 @@ export default function CostView(props) {
                                     </span>
                                   )}
                                 </>
+                              );
+                            })()}
+                            {isLLM && ev.environment && (() => {
+                              var env = ev.environment;
+                              var wsName = env.workspaceFolders[0] ? env.workspaceFolders[0].split("/").filter(Boolean).pop() : "";
+                              var label = "🖥 " + (env.os || "?") + (wsName ? " · " + wsName : "");
+                              var tip = (env.os ? "OS: " + env.os + "\n" : "")
+                                + (env.workspaceFolders.length > 0
+                                  ? "Workspace folder" + (env.workspaceFolders.length === 1 ? ":\n" : "s:\n")
+                                    + env.workspaceFolders.map(function (f) { return "  " + f; }).join("\n")
+                                  : "");
+                              return (
+                                <span title={tip} style={{
+                                  fontSize: theme.fontSize.xs, fontWeight: 500,
+                                  padding: "1px 6px", borderRadius: 3,
+                                  background: theme.bg.raised, color: theme.text.secondary,
+                                  border: "1px solid " + theme.border.subtle,
+                                  fontFamily: theme.font.mono,
+                                }}>{label}</span>
                               );
                             })()}
                             {isLLM && ev.chatMode && (() => {

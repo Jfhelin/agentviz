@@ -233,6 +233,31 @@ interface ImageAttachment {
   detail: string;
 }
 
+interface Skill {
+  name: string;
+  description: string;
+  file: string;
+  /** Length of the entire `<skill>...</skill>` block in chars (description dominates). */
+  chars: number;
+}
+
+interface ScaffoldingSection {
+  /** The XML-ish tag name (e.g. `securityRequirements`, `toolUseInstructions`). */
+  tag: string;
+  /** Length of the section's inner text in chars. */
+  chars: number;
+}
+
+interface FileAttachment {
+  filePath: string;
+  chars: number;
+}
+
+interface EnvironmentInfo {
+  os: string;
+  workspaceFolders: string[];
+}
+
 interface ChatMode {
   /** Name from `<modeInstructions>... "Name" ...`. Empty when no mode is active. */
   name: string;
@@ -274,6 +299,23 @@ interface ClassifiedCall {
    * `.chatmode.md`, `.instructions.md`) attached via `<attachment filePath="...">`
    * blocks in the system prompt. */
   instructionAttachments: InstructionAttachment[];
+  /** Skills declared in the `<skills>` block of the system prompt. Each is a
+   * named capability with a description and a file path the model can read
+   * on demand for full instructions. */
+  skills: Skill[];
+  /** Stable VS Code Copilot scaffolding sections (security, tool-use, comms,
+   * memory, etc.) that are part of every system prompt regardless of mode.
+   * Surfacing them lets the user see how much of the system bucket is fixed
+   * Copilot boilerplate vs their custom configuration. */
+  scaffoldingSections: ScaffoldingSection[];
+  /** Non-instruction `<attachment filePath="...">` blocks from the system
+   * prompt (e.g. user `#file:foo.ts` references). Instruction files are
+   * tracked separately in `instructionAttachments`. */
+  fileAttachments: FileAttachment[];
+  /** Environment + workspace context extracted from the user-role
+   * `<environment_info>` / `<workspace_info>` blocks. Null when neither tag
+   * is present. */
+  environment: EnvironmentInfo | null;
 }
 
 const TOOL_GROUP_PATTERNS: { match: (name: string) => boolean; label: string }[] = [
@@ -323,17 +365,106 @@ function extractInstructionAttachments(systemText: string): InstructionAttachmen
   const re = /<attachment filePath="([^"]+)">([\s\S]*?)<\/attachment>/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(systemText)) !== null) {
-    const filePath = m[1];
-    const lower = filePath.toLowerCase();
-    const isInstruction = lower.endsWith("copilot-instructions.md")
-      || lower.endsWith(".chatmode.md")
-      || lower.endsWith(".instructions.md")
-      || lower.includes("/.github/instructions/")
-      || lower.includes("/.github/chatmodes/");
-    if (!isInstruction) continue;
-    out.push({ filePath, chars: m[2].length });
+    if (!isInstructionFile(m[1])) continue;
+    out.push({ filePath: m[1], chars: m[2].length });
   }
   return out;
+}
+
+function isInstructionFile(filePath: string): boolean {
+  const lower = filePath.toLowerCase();
+  return lower.endsWith("copilot-instructions.md")
+    || lower.endsWith(".chatmode.md")
+    || lower.endsWith(".instructions.md")
+    || lower.includes("/.github/instructions/")
+    || lower.includes("/.github/chatmodes/");
+}
+
+// Extract NON-instruction `<attachment filePath="...">` blocks: file references
+// that the user added via `#file:` or that VS Code attached automatically
+// (current file, selection, etc.). Workspace instruction files are handled
+// separately by `extractInstructionAttachments`.
+function extractFileAttachments(systemText: string): FileAttachment[] {
+  const out: FileAttachment[] = [];
+  const re = /<attachment filePath="([^"]+)">([\s\S]*?)<\/attachment>/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(systemText)) !== null) {
+    if (isInstructionFile(m[1])) continue;
+    out.push({ filePath: m[1], chars: m[2].length });
+  }
+  return out;
+}
+
+// Extract user-installed skills declared in the `<skills>...<skill>...</skill>...</skills>`
+// block. Each skill has a name, description, and file path the model can read
+// on demand for the full instructions.
+function extractSkills(systemText: string): Skill[] {
+  const skillsBlock = /<skills>([\s\S]*?)<\/skills>/i.exec(systemText);
+  if (!skillsBlock) return [];
+  const inner = skillsBlock[1];
+  const out: Skill[] = [];
+  const re = /<skill>([\s\S]*?)<\/skill>/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(inner)) !== null) {
+    const body = m[1];
+    const name = (/<name>([\s\S]*?)<\/name>/i.exec(body)?.[1] ?? "").trim();
+    const description = (/<description>([\s\S]*?)<\/description>/i.exec(body)?.[1] ?? "").trim();
+    const file = (/<file>([\s\S]*?)<\/file>/i.exec(body)?.[1] ?? "").trim();
+    out.push({ name, description, file, chars: m[0].length });
+  }
+  return out;
+}
+
+// Stable Copilot scaffolding sections present in every system prompt. We list
+// them explicitly so we can both detect them and call them out as "fixed
+// scaffolding" in the UI. Tags not in this list are still summed into the
+// "other" bucket so nothing is silently dropped.
+const SCAFFOLDING_TAGS = [
+  "securityRequirements", "operationalSafety", "implementationDiscipline",
+  "parallelizationStrategy", "toolUseInstructions", "toolSearchInstructions",
+  "communicationStyle", "communicationExamples", "notebookInstructions",
+  "outputFormatting", "fileLinkification", "memoryInstructions",
+  "memoryScopes", "memoryGuidelines", "instructions",
+];
+
+function extractScaffolding(systemText: string): ScaffoldingSection[] {
+  const out: ScaffoldingSection[] = [];
+  for (const tag of SCAFFOLDING_TAGS) {
+    const re = new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`, "gi");
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(systemText)) !== null) {
+      out.push({ tag, chars: m[1].length });
+    }
+  }
+  return out;
+}
+
+// Extract environment + workspace context from the user-role messages. VS Code
+// injects `<environment_info>` and `<workspace_info>` as the first user
+// message in the request. We scan all user messages so a model switch that
+// reorders messages still finds them.
+function extractEnvironment(messages: RawMessage[]): EnvironmentInfo | null {
+  let os = "";
+  const folders: string[] = [];
+  for (const msg of messages) {
+    if (msg.role !== 1) continue;
+    const text = messageText(msg);
+    const envM = /<environment_info>([\s\S]*?)<\/environment_info>/i.exec(text);
+    if (envM) {
+      const osM = /current OS is:\s*([^\n<]+)/i.exec(envM[1]);
+      if (osM && !os) os = osM[1].trim();
+    }
+    const wsM = /<workspace_info>([\s\S]*?)<\/workspace_info>/i.exec(text);
+    if (wsM) {
+      const lines = wsM[1].split("\n");
+      for (const line of lines) {
+        const fm = /^\s*[-*]\s+(\S.*?)\s*$/.exec(line);
+        if (fm && !folders.includes(fm[1])) folders.push(fm[1]);
+      }
+    }
+  }
+  if (!os && folders.length === 0) return null;
+  return { os, workspaceFolders: folders };
 }
 
 // Build a compact summary of a JSON Schema-style tool parameters object,
@@ -489,6 +620,10 @@ function classifyCall(log: RawLog): ClassifiedCall {
 
   const chatMode = extractChatMode(systemText);
   const instructionAttachments = extractInstructionAttachments(systemText);
+  const skills = extractSkills(systemText);
+  const scaffoldingSections = extractScaffolding(systemText);
+  const fileAttachments = extractFileAttachments(systemText);
+  const environment = extractEnvironment(messages);
 
   return {
     components,
@@ -510,6 +645,10 @@ function classifyCall(log: RawLog): ClassifiedCall {
     images,
     chatMode,
     instructionAttachments,
+    skills,
+    scaffoldingSections,
+    fileAttachments,
+    environment,
   };
 }
 
@@ -611,6 +750,15 @@ export interface CostAnalysisCall {
   /** Workspace-level instruction files attached to the system prompt
    * (`.github/copilot-instructions.md`, `.chatmode.md`, `.instructions.md`). */
   instructionAttachments: ClassifiedCall["instructionAttachments"];
+  /** Skills declared in the `<skills>` block of the system prompt. */
+  skills: ClassifiedCall["skills"];
+  /** Stable Copilot scaffolding sections present in every system prompt. */
+  scaffoldingSections: ClassifiedCall["scaffoldingSections"];
+  /** Non-instruction file attachments referenced in the system prompt
+   * (e.g. user `#file:foo.ts` references). */
+  fileAttachments: ClassifiedCall["fileAttachments"];
+  /** Environment + workspace context from `<environment_info>` / `<workspace_info>`. */
+  environment: ClassifiedCall["environment"];
   /** Subset of `images` that were NOT present on the previous same-model call.
    * Re-sending an image with the same URL is part of the cached prefix and
    * does not contribute new content -- only first appearance (or first
@@ -1106,6 +1254,10 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
         images: cls.images,
         chatMode: cls.chatMode,
         instructionAttachments: cls.instructionAttachments,
+        skills: cls.skills,
+        scaffoldingSections: cls.scaffoldingSections,
+        fileAttachments: cls.fileAttachments,
+        environment: cls.environment,
         newImages,
         newHistoryMsgs,
         newToolResultMsgs,
