@@ -925,18 +925,27 @@ function LLMDetail(props) {
           var totalCost = inputCost + outputCost;
           var pt = ev.promptTokens || 0;
           var cached = ev.cached || 0;
-          var billedNew = Math.max(0, pt - cached);
+          var cwriteTok = ev.cacheWrite || 0;
+          var fresh = Math.max(0, pt - cached - cwriteTok);
+          var billedNew = fresh + cwriteTok;
           var pctCachedSize = pt > 0 ? (100 * cached / pt) : 0;
-          var pctBilledSize = pt > 0 ? (100 * billedNew / pt) : 0;
+          var pctFreshSize  = pt > 0 ? (100 * fresh / pt) : 0;
+          var pctCwriteSize = pt > 0 ? (100 * cwriteTok / pt) : 0;
           // Reserve a minimum visible width per non-zero slice so tiny slivers
           // (e.g. 1% cache) are still readable.
           var minSlice = 4;
-          var displayCached = pctCachedSize > 0 && pctCachedSize < minSlice ? minSlice : pctCachedSize;
-          var displayBilled = pctBilledSize > 0 && pctBilledSize < minSlice ? minSlice : pctBilledSize;
-          var displaySum = displayCached + displayBilled;
+          var slices = [
+            { pct: pctCachedSize, color: theme.cost.cached },
+            { pct: pctFreshSize,  color: theme.cost.cwrite },
+            { pct: pctCwriteSize, color: theme.cost.recommitBorder || theme.cost.fresh },
+          ];
+          var displaySum = 0;
+          slices.forEach(function (s) {
+            s.display = s.pct > 0 && s.pct < minSlice ? minSlice : s.pct;
+            displaySum += s.display;
+          });
           if (displaySum > 0 && displaySum !== 100) {
-            displayCached = displayCached * 100 / displaySum;
-            displayBilled = displayBilled * 100 / displaySum;
+            slices.forEach(function (s) { s.display = s.display * 100 / displaySum; });
           }
           var pctInputOfTotal = totalCost > 0 ? Math.round(100 * inputCost / totalCost) : 0;
           var pctOutputOfTotal = totalCost > 0 ? 100 - pctInputOfTotal : 0;
@@ -951,21 +960,30 @@ function LLMDetail(props) {
             <div style={{ marginTop: 8, marginBottom: 4 }}>
               <div style={{ display: "flex", width: "100%", height: 8, borderRadius: 2, overflow: "hidden", background: theme.bg.base }}>
                 {cached > 0 && (
-                  <div style={{ width: displayCached + "%", background: theme.cost.cached }}
+                  <div style={{ width: slices[0].display + "%", background: slices[0].color }}
                        title={fmtT(cached) + " tok served from cache" + (hasPx ? " (" + fmt$(cachedCost) + ")" : "")} />
                 )}
-                {billedNew > 0 && (
-                  <div style={{ width: displayBilled + "%", background: theme.cost.cwrite }}
-                       title={fmtT(billedNew) + " tok billed at full input rate" + (hasPx ? " (" + fmt$(newBillCost) + ")" : "")} />
+                {fresh > 0 && (
+                  <div style={{ width: slices[1].display + "%", background: slices[1].color }}
+                       title={fmtT(fresh) + " tok fresh, billed at full input rate" + (hasPx ? " (" + fmt$(freshCost) + ")" : "")} />
+                )}
+                {cwriteTok > 0 && (
+                  <div style={{ width: slices[2].display + "%", background: slices[2].color }}
+                       title={fmtT(cwriteTok) + " tok cache-write, billed at premium (~1.25x input)" + (hasPx ? " (" + fmt$(cwriteCost) + ")" : "")} />
                 )}
               </div>
             </div>
           )}
           <div style={{ fontSize: theme.fontSize.xs, color: theme.text.secondary, marginTop: 6, fontVariantNumeric: "tabular-nums", lineHeight: 1.5 }}>
             {cached > 0 && (
-              <div><span style={{ color: theme.cost.cached }}>■</span> {fmtT(cached)} tok cached · {pctCachedSize.toFixed(0)}%</div>
+              <div><span style={{ color: slices[0].color }}>■</span> {fmtT(cached)} tok cached · {pctCachedSize.toFixed(0)}%</div>
             )}
-            <div><span style={{ color: theme.cost.cwrite }}>■</span> {fmtT(billedNew)} tok billed new · {pctBilledSize.toFixed(0)}%</div>
+            {fresh > 0 && (
+              <div><span style={{ color: slices[1].color }}>■</span> {fmtT(fresh)} tok fresh · {pctFreshSize.toFixed(0)}%</div>
+            )}
+            {cwriteTok > 0 && (
+              <div><span style={{ color: slices[2].color }}>■</span> {fmtT(cwriteTok)} tok cache-write · {pctCwriteSize.toFixed(0)}% <span style={{ color: theme.text.muted }}>(premium 1.25x)</span></div>
+            )}
             {(ev.deltaVsPrev || 0) !== 0 && (
               <div style={{ color: theme.text.muted, marginTop: 3 }}>
                 {ev.modelSwitched
@@ -1018,6 +1036,11 @@ function LLMDetail(props) {
           {hasPx && (
             <div style={{ fontSize: theme.fontSize.xs, color: theme.text.secondary, marginTop: 6, fontVariantNumeric: "tabular-nums", lineHeight: 1.5 }}>
               <div><span style={{ color: theme.text.muted }}>input</span>  {fmt$(inputCost).padStart(7)} · {pctInputOfTotal}%</div>
+              {cwriteCost > 0 && (
+                <div style={{ color: theme.text.muted, paddingLeft: 12, fontSize: theme.fontSize.xs }} title="Anthropic charges cache writes at 1.25x the input rate. Already counted in `input` above.">
+                  ├ cached read {fmt$(cachedCost)} · fresh {fmt$(freshCost)} · cache write {fmt$(cwriteCost)} <span style={{ color: theme.cost.cwrite }}>(1.25x)</span>
+                </div>
+              )}
               <div><span style={{ color: theme.text.muted }}>output</span> {fmt$(outputCost).padStart(7)} · {pctOutputOfTotal}%</div>
               {ev.recommit > 100 && (
                 <div style={{ color: theme.cost.cwrite, marginTop: 3 }} title="Tokens the API treated as new because the cache for them had expired. Included in the input number above.">
