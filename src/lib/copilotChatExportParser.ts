@@ -784,7 +784,7 @@ export interface CostAnalysisCall {
    * tool names + short arg summary that immediately followed this LLM call
    * in the export. Lets us show *what the model did* instead of an empty
    * response box. */
-  producedToolCalls: { name: string; argsSummary: string }[];
+  producedToolCalls: { name: string; argsSummary: string; rawArgs: string }[];
   /** Reasoning blocks (extended thinking) that the model emitted as part of
    * this LLM response, before each tool_use it produced. In the export these
    * are attached to the `toolCall` log entries that follow this request; we
@@ -1307,7 +1307,7 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
       // toolCall logs in between are what this LLM call produced. This is
       // critical for showing "what the model did" when its text response is
       // empty (model emitted only tool_use blocks, no message content).
-      const producedToolCalls: { name: string; argsSummary: string }[] = [];
+      const producedToolCalls: { name: string; argsSummary: string; rawArgs: string }[] = [];
       const reasoningBlocks: { tool: string; text: string }[] = [];
       let toolArgsChars = 0;
       let thinkingChars = 0;
@@ -1315,7 +1315,11 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
         const next = c.logs[lookIdx];
         if (next.kind === "request") break;
         if (next.kind === "toolCall") {
-          producedToolCalls.push({ name: next.tool ?? "", argsSummary: shortArgs(next.args) });
+          producedToolCalls.push({
+            name: next.tool ?? "",
+            argsSummary: shortArgs(next.args),
+            rawArgs: next.args == null ? "" : (typeof next.args === "string" ? next.args : JSON.stringify(next.args)),
+          });
           const thinkText = next.thinking?.text ?? "";
           if (thinkText) {
             reasoningBlocks.push({ tool: next.tool ?? "", text: thinkText });

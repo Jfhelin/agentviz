@@ -1399,12 +1399,16 @@ function LLMDetail(props) {
                         background: theme.bg.base, padding: "1px 6px", borderRadius: 3,
                         border: "1px solid " + theme.border.subtle, whiteSpace: "nowrap",
                       }}>{tc.name || "(unnamed tool)"}</span>
-                      {tc.argsSummary && (
-                        <span style={{
-                          fontFamily: theme.font.mono, fontSize: theme.fontSize.xs,
-                          color: theme.text.secondary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                        }}>{tc.argsSummary}</span>
-                      )}
+                      {(function () {
+                        var smart = summarizeToolArgs(tc) || tc.argsSummary;
+                        if (!smart) return null;
+                        return (
+                          <span style={{
+                            fontFamily: theme.font.mono, fontSize: theme.fontSize.xs,
+                            color: theme.text.secondary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                          }} title={tc.rawArgs || tc.argsSummary}>{smart}</span>
+                        );
+                      })()}
                     </div>
                   );
                 })}
@@ -2512,7 +2516,12 @@ export default function CostView(props) {
                             )}
                             {ev.subagent
                               ? (ev.subagent.description && <span style={{ color: theme.text.secondary, fontWeight: 400, marginLeft: 4 }}>· {ev.subagent.description}</span>)
-                              : (ev.argsSummary && <span style={{ color: theme.text.muted, fontWeight: 400 }}>{ev.argsSummary}</span>)}
+                              : (function () {
+                                  var smart = summarizeToolArgs(ev) || ev.argsSummary;
+                                  return smart
+                                    ? <span style={{ color: theme.text.muted, fontWeight: 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "60%" }} title={ev.rawArgs || smart}>{smart}</span>
+                                    : null;
+                                })()}
                           </div>
                           {meta}
                         </div>
