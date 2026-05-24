@@ -1367,6 +1367,7 @@ function computePromptCostByBucket(p) {
     byBucket.output.outputCost += outCost;
     byBucket.output.outputTok += ev.output || 0;
     byBucket.output.newTok += ev.output || 0;
+    byBucket.output.reasoningTok = (byBucket.output.reasoningTok || 0) + (ev.reasoningTokens || 0);
     totalOutputTok += ev.output || 0;
   });
 
@@ -1440,7 +1441,21 @@ function computePromptCostByBucket(p) {
     : "";
 
   // Output: model's response totals.
-  byBucket.output.sample = totalOutputTok > 0 ? "model wrote " + fmtT(totalOutputTok) + " tok across " + llmEvents.length + " call" + (llmEvents.length === 1 ? "" : "s") : "";
+  // Output: model's response totals. Split visible vs reasoning when the
+  // model reported reasoning_tokens (OpenAI o-series, Claude extended
+  // thinking). Reasoning tokens are billed at the output rate.
+  var totalReasoning = byBucket.output.reasoningTok || 0;
+  var visibleOut = totalOutputTok - totalReasoning;
+  if (totalOutputTok > 0) {
+    var nLlm = llmEvents.length;
+    if (totalReasoning > 0) {
+      byBucket.output.sample = "model wrote " + fmtT(visibleOut) + " visible + "
+        + fmtT(totalReasoning) + " thinking tok across " + nLlm + " call" + (nLlm === 1 ? "" : "s");
+    } else {
+      byBucket.output.sample = "model wrote " + fmtT(totalOutputTok) + " tok across "
+        + nLlm + " call" + (nLlm === 1 ? "" : "s");
+    }
+  }
 
   return byBucket;
 }
@@ -1505,7 +1520,16 @@ function PromptCostBreakdown(props) {
           // Build receipt segments for the expandable detail.
           var seg = [];
           if (k === "output") {
-            if (b.outputTok > 0) seg.push({ label: "output", tok: b.outputTok, cost: b.outputCost, color: theme.cost.fresh });
+            if (b.outputTok > 0) {
+              var rTok = b.reasoningTok || 0;
+              var visTok = b.outputTok - rTok;
+              // Reasoning tokens are billed at the same output rate, so we
+              // split the cost proportionally for display.
+              var rCost = b.outputTok > 0 ? b.outputCost * rTok / b.outputTok : 0;
+              var visCost = b.outputCost - rCost;
+              if (visTok > 0) seg.push({ label: "visible output", tok: visTok, cost: visCost, color: theme.cost.fresh });
+              if (rTok > 0) seg.push({ label: "thinking", tok: rTok, cost: rCost, color: theme.cost.output });
+            }
           } else {
             if (b.freshTok > 0) seg.push({ label: "new", tok: b.freshTok, cost: b.freshCost, color: theme.cost.fresh });
             if (b.cwTok > 0) seg.push({ label: "cache-write", tok: b.cwTok, cost: b.cwCost, color: theme.cost.cwrite });

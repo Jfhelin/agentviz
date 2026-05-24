@@ -91,6 +91,11 @@ interface RawLog {
         cached_tokens?: number;
         cache_creation_input_tokens?: number;
       };
+      completion_tokens_details?: {
+        reasoning_tokens?: number;
+        accepted_prediction_tokens?: number;
+        rejected_prediction_tokens?: number;
+      };
     };
     tools?: ToolDef[];
   };
@@ -728,6 +733,11 @@ export interface CostAnalysisCall {
   cacheWrite: number;
   fresh: number;
   output: number;
+  /** Subset of `output` that the model spent on internal reasoning / extended
+   * thinking (OpenAI o-series, Claude extended thinking). 0 when the model
+   * either doesn't expose reasoning or wasn't asked to think extendedly.
+   * Visible output = output - reasoningTokens. */
+  reasoningTokens: number;
   cost: number;
   prevPt: number;
   /** prompt_tokens of the previous call ON THE SAME MODEL, even when
@@ -847,6 +857,9 @@ export interface CostAnalysis {
   totals: {
     promptTokens: number;
     output: number;
+    /** Sum of reasoning_tokens across all primary LLM calls (extended
+     * thinking / o-series reasoning). Subset of `output`. */
+    reasoning: number;
     cached: number;
     cacheWrite: number;
     fresh: number;
@@ -956,14 +969,16 @@ function summarizeResponse(response: unknown): string {
   return "";
 }
 
-function callUsage(log: RawLog): { prompt_tokens: number; cached_tokens: number; cache_write: number; completion_tokens: number } {
+function callUsage(log: RawLog): { prompt_tokens: number; cached_tokens: number; cache_write: number; completion_tokens: number; reasoning_tokens: number } {
   const u = log.metadata?.usage ?? {};
   const ptd = u.prompt_tokens_details ?? {};
+  const ctd = u.completion_tokens_details ?? {};
   return {
     prompt_tokens: u.prompt_tokens ?? 0,
     completion_tokens: u.completion_tokens ?? 0,
     cached_tokens: ptd.cached_tokens ?? 0,
     cache_write: u.cache_creation_input_tokens ?? ptd.cache_creation_input_tokens ?? 0,
+    reasoning_tokens: ctd.reasoning_tokens ?? 0,
   };
 }
 
@@ -1021,7 +1036,7 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
   const events: NormalizedEvent[] = [];
   const turns: SessionTurn[] = [];
   let cumCost = 0;
-  let cumPt = 0, cumOut = 0, cumCached = 0, cumCwrite = 0, cumFresh = 0;
+  let cumPt = 0, cumOut = 0, cumCached = 0, cumCwrite = 0, cumFresh = 0, cumReasoning = 0;
   let totalLlm = 0, totalTool = 0;
   let totalUnexpectedMissCount = 0, totalUnexpectedMissCost = 0;
   let timeCursor = 0;
@@ -1144,7 +1159,7 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
         cacheWrite: usage.cache_write,
       }, model);
       cumCost += cost;
-      cumPt += usage.prompt_tokens; cumOut += out_t;
+      cumPt += usage.prompt_tokens; cumOut += out_t; cumReasoning += usage.reasoning_tokens;
       cumCached += usage.cached_tokens; cumCwrite += usage.cache_write; cumFresh += fresh;
       pPt += usage.prompt_tokens; pOut += out_t;
       pCached += usage.cached_tokens; pCwrite += usage.cache_write; pFresh += fresh;
@@ -1251,6 +1266,7 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
         cacheWrite: usage.cache_write,
         fresh,
         output: out_t,
+        reasoningTokens: usage.reasoning_tokens,
         cost,
         prevPt: ca.prevPt,
         priorSameModelPt: ca.priorSameModelPt,
@@ -1358,6 +1374,7 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
     totals: {
       promptTokens: cumPt,
       output: cumOut,
+      reasoning: cumReasoning,
       cached: cumCached,
       cacheWrite: cumCwrite,
       fresh: cumFresh,
