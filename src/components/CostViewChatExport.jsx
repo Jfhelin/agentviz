@@ -430,19 +430,32 @@ function ToolGroups(props) {
 
 function HistoryList(props) {
   var msgs = props.msgs || [];
+  var newCount = typeof props.newCount === "number" ? props.newCount : msgs.length;
   if (!msgs.length) return <div style={{ color: theme.text.ghost, fontSize: theme.fontSize.xs, fontStyle: "italic" }}>no prior conversation</div>;
+  var cachedCount = msgs.length - newCount;
   return (
     <div>
       {msgs.map(function (m, i) {
+        var isCached = i < cachedCount;
+        // Compact single-line summary: first non-empty line of the preview,
+        // hard-capped so the row never wraps. Full text available on hover.
+        var raw = (m.preview || "").replace(/\s+/g, " ").trim();
+        var summary = raw.length > 90 ? raw.slice(0, 90) + "…" : raw;
+        var tip = (m.role || "?") + " · " + (m.chars || 0).toLocaleString() + " chars · ~" + fmtT(m.tokens || 0) + " tok"
+          + (isCached ? " · cached from prior call" : " · new this call")
+          + (m.preview ? "\n\n" + m.preview : "");
+        var rowOpacity = isCached ? 0.55 : 1;
         return (
-          <div key={i} style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 8, fontSize: theme.fontSize.sm, padding: "3px 0", alignItems: "baseline", borderTop: i === 0 ? "none" : "1px solid " + theme.border.subtle }}>
+          <div key={i}
+            title={tip}
+            style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 8, fontSize: theme.fontSize.sm, padding: "3px 0", alignItems: "baseline", borderTop: i === 0 ? "none" : "1px solid " + theme.border.subtle, opacity: rowOpacity, cursor: m.preview ? "help" : "default" }}>
             <span style={{
               fontSize: theme.fontSize.xs, padding: "1px 5px", borderRadius: 9, fontWeight: 600, letterSpacing: 0.4,
               background: m.role === "user" ? theme.cost.chipBgExtension : theme.cost.chipBgAssistant,
               color: m.role === "user" ? theme.cost.cwrite : theme.cost.fresh,
             }}>{m.role}</span>
-            <span style={{ color: theme.text.secondary, fontStyle: "italic", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.preview}</span>
-            <span style={{ color: theme.text.primary, fontVariantNumeric: "tabular-nums", textAlign: "right" }}>{fmtT(m.tokens || 0)}</span>
+            <span style={{ color: isCached ? theme.text.muted : theme.text.secondary, fontStyle: "italic", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{summary}</span>
+            <span style={{ color: isCached ? theme.text.muted : theme.text.primary, fontVariantNumeric: "tabular-nums", textAlign: "right" }}>{fmtT(m.tokens || 0)}</span>
           </div>
         );
       })}
@@ -452,19 +465,29 @@ function HistoryList(props) {
 
 function ToolResultList(props) {
   var msgs = props.msgs || [];
+  var newCount = typeof props.newCount === "number" ? props.newCount : msgs.length;
   if (!msgs.length) return <div style={{ color: theme.text.ghost, fontSize: theme.fontSize.xs, fontStyle: "italic" }}>none in this call</div>;
+  var cachedCount = msgs.length - newCount;
   return (
     <div>
       {msgs.map(function (m, i) {
         var label = m.label || ("result " + (i + 1));
+        var isCached = i < cachedCount;
+        var raw = (m.preview || "").replace(/\s+/g, " ").trim();
+        var summary = raw.length > 90 ? raw.slice(0, 90) + "…" : raw;
+        var tip = label + " · " + (m.chars || 0).toLocaleString() + " chars · ~" + fmtT(m.tokens || 0) + " tok"
+          + (isCached ? " · cached from prior call" : " · new this call")
+          + (m.preview ? "\n\n" + m.preview : "");
+        var rowOpacity = isCached ? 0.55 : 1;
         return (
-          <div key={i} style={{ display: "grid", gridTemplateColumns: "minmax(0, auto) 1fr auto", gap: 8, fontSize: theme.fontSize.sm, padding: "3px 0", alignItems: "baseline", borderTop: i === 0 ? "none" : "1px solid " + theme.border.subtle }}>
+          <div key={i}
+            title={tip}
+            style={{ display: "grid", gridTemplateColumns: "minmax(0, auto) 1fr auto", gap: 8, fontSize: theme.fontSize.sm, padding: "3px 0", alignItems: "baseline", borderTop: i === 0 ? "none" : "1px solid " + theme.border.subtle, opacity: rowOpacity, cursor: m.preview ? "help" : "default" }}>
             <span
-              title={label}
               style={{ fontSize: theme.fontSize.xs, padding: "1px 6px", borderRadius: 9, fontWeight: 600, letterSpacing: 0.2, background: theme.cost.chipBgResult, color: theme.cost.ctxToolResults, maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
             >{label}</span>
-            <span style={{ color: theme.text.secondary, fontStyle: "italic", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.preview}</span>
-            <span style={{ color: theme.text.primary, fontVariantNumeric: "tabular-nums", textAlign: "right" }}>{fmtT(m.tokens || 0)}</span>
+            <span style={{ color: isCached ? theme.text.muted : theme.text.secondary, fontStyle: "italic", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{summary}</span>
+            <span style={{ color: isCached ? theme.text.muted : theme.text.primary, fontVariantNumeric: "tabular-nums", textAlign: "right" }}>{fmtT(m.tokens || 0)}</span>
           </div>
         );
       })}
@@ -973,17 +996,17 @@ function LLMDetail(props) {
           if (k === "history") return (
             <>
               <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, marginBottom: 4 }}>
-                {ev.newHistoryMsgs.length} new message{ev.newHistoryMsgs.length === 1 ? "" : "s"} appended (of {ev.historyMsgs.length} total in history)
+                {ev.newHistoryMsgs.length} new of {ev.historyMsgs.length} total (older entries dimmed; hover any row for full text)
               </div>
-              <HistoryList msgs={ev.newHistoryMsgs} />
+              <HistoryList msgs={ev.historyMsgs} newCount={ev.newHistoryMsgs.length} />
             </>
           );
           if (k === "tool_results") return (
             <>
               <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, marginBottom: 4 }}>
-                {ev.newToolResultMsgs.length} new tool result{ev.newToolResultMsgs.length === 1 ? "" : "s"} appended (of {ev.toolResultMsgs.length} total)
+                {ev.newToolResultMsgs.length} new of {ev.toolResultMsgs.length} total (older entries dimmed; hover any row for full text)
               </div>
-              <ToolResultList msgs={ev.newToolResultMsgs} />
+              <ToolResultList msgs={ev.toolResultMsgs} newCount={ev.newToolResultMsgs.length} />
             </>
           );
           if (k === "current") {
