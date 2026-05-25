@@ -388,6 +388,7 @@ export function handle(pathname, req, res, ctx) {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({
       filename: ctx.sessionFile ? path.basename(ctx.sessionFile) : null,
+      path: ctx.sessionFile || null,
       live: Boolean(ctx.sessionFile),
     }));
     return true;

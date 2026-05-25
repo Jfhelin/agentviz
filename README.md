@@ -310,7 +310,7 @@ AI-powered session coaching available directly from any session. Improve combine
 | **HTML Export** | One-click export of any session or comparison to a self-contained shareable `.html` file. |
 | **Inbox Auto-discovery** | Automatically finds recent Claude Code, Copilot CLI, and VS Code Copilot Chat sessions and ranks them by review priority. |
 | **Inbox Refresh** | Rescan session directories with a one-click refresh button. Reconciles evicted content and prunes dead entries. |
-| **File Path Tooltips** | Hover over inbox session rows to see the full file path or reconstructed session location. |
+| **File Path Tooltips** | Hover over inbox or Find session rows to see the full file path or reconstructed session location. Opened sessions loaded from discovery or CLI expose a header path control for copying the source path. |
 | **Static Manifest Mode** | Deploy as a pure static site with `?manifest=URL` pointing to a JSON manifest of sessions. Tag-based filtering, no backend required. |
 | **AI Coach** | Agentic analysis powered by Copilot SDK. Recommends prompts, skills, and MCP config with one-click apply. |
 | **Session Q&A** | Slide-over drawer (`Cmd+Shift+K` in Classic UI, Improve in the default UI) with instant answers for common queries and Copilot SDK model fallback for open-ended questions. |

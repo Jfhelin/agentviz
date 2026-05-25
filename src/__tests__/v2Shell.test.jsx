@@ -120,6 +120,10 @@ beforeEach(function () {
     removeItem: function (key) { delete storage[key]; },
     clear: function () { storage = {}; },
   };
+  Object.defineProperty(window.navigator, "clipboard", {
+    configurable: true,
+    value: { writeText: vi.fn(function () { return Promise.resolve(); }) },
+  });
   window.history.replaceState(null, "", "#/");
 });
 
@@ -302,6 +306,7 @@ describe("V2 shell routing", function () {
     var onSetThemeMode = vi.fn();
     var session = {
       file: "demo-session.jsonl",
+      sourcePath: "C:\\Users\\jayp\\sessions\\demo-session.jsonl",
       events: [{ t: 0 }],
       metadata: { totalEvents: 1 },
       isLive: false,
@@ -317,6 +322,7 @@ describe("V2 shell routing", function () {
     );
 
     expect(findExactText(app.container, "demo-session.jsonl")).toBeTruthy();
+    expect(app.container.querySelector('button[aria-label="Copy session source path"]').title).toBe("C:\\Users\\jayp\\sessions\\demo-session.jsonl");
     expect(findExactText(app.container, "Ready")).toBeTruthy();
     expect(findExactText(app.container, "Review · 1 events")).toBeTruthy();
 
@@ -324,6 +330,11 @@ describe("V2 shell routing", function () {
       findExactButton(app.container, "Cmd+K").click();
     });
     expect(onOpenCommandPalette).toHaveBeenCalledTimes(1);
+
+    await act(async function () {
+      app.container.querySelector('button[aria-label="Copy session source path"]').click();
+    });
+    expect(window.navigator.clipboard.writeText).toHaveBeenCalledWith("C:\\Users\\jayp\\sessions\\demo-session.jsonl");
 
     await act(async function () {
       app.container.querySelector('button[aria-label="Theme selector"]').click();

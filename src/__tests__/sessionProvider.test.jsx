@@ -62,6 +62,7 @@ function Probe({ onContext }) {
   return (
     <div>
       <div id="file">{ctx.session.file || "none"}</div>
+      <div id="source-path">{ctx.session.sourcePath || "none"}</div>
       <div id="file-b">{ctx.sessionB.file || "none"}</div>
       <div id="event-count">{ctx.session.events ? ctx.session.events.length : 0}</div>
       <div id="summary-label">
@@ -195,6 +196,7 @@ describe("SessionProvider", function () {
     }, "expected sample session to load");
 
     expect(Number(app.container.querySelector("#event-count").textContent)).toBeGreaterThan(0);
+    expect(app.container.querySelector("#source-path").textContent).toBe("none");
     expect(app.container.querySelector("#summary-label").textContent).toBe("Productive runtime");
     expect(onBeforeSessionChange).toHaveBeenCalledTimes(1);
 
@@ -230,6 +232,30 @@ describe("SessionProvider", function () {
 
     expect(Number(app.container.querySelector("#event-count").textContent)).toBeGreaterThan(0);
     expect(onStoredSessionOpen).toHaveBeenCalledTimes(1);
+
+    await app.unmount();
+  });
+
+  it("preserves discovered source path when opening a session", async function () {
+    var parsed = parseSessionText(FIXTURE_TEXT);
+    var persisted = persistSessionSnapshot("fixture.jsonl", parsed.result, FIXTURE_TEXT, global.localStorage);
+    var sourcePath = "C:\\Users\\jayp\\.copilot\\session-state\\fixture\\events.jsonl";
+    global.localStorage.setItem("agentviz:session-library:v1", JSON.stringify(persisted.entries.map(function (entry) {
+      return Object.assign({}, entry, { discoveredPath: sourcePath });
+    })));
+    var app = await renderProvider();
+
+    await waitFor(function () {
+      return app.container.querySelector("#session-count").textContent === "1";
+    }, "expected stored session to appear");
+
+    await act(async function () {
+      app.container.querySelectorAll("button")[2].click();
+    });
+
+    await waitFor(function () {
+      return app.container.querySelector("#source-path").textContent === sourcePath;
+    }, "expected source path to survive load");
 
     await app.unmount();
   });

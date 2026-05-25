@@ -124,6 +124,7 @@ function PortfolioCard({ entry, layout, selected, onToggleSelected, onOpen }) {
   var title = getLandingEntryDisplayTitle(entry);
   var secondary = getLandingEntrySecondaryText(entry, title);
   var isDiscovered = Boolean(entry.isDiscovered);
+  var sourcePath = entry.discoveredPath || null;
   var timestamp = getEntryTimestamp(entry);
   var autonomy = entry.autonomyMetrics || {};
   var canOpen = canOpenEntry(entry);
@@ -149,7 +150,9 @@ function PortfolioCard({ entry, layout, selected, onToggleSelected, onOpen }) {
       gap: theme.space.lg,
       alignItems: layout === "grid" ? "stretch" : "center",
       overflow: "hidden",
-    }}>
+    }}
+    title={sourcePath || title}
+    >
       <span
         aria-hidden="true"
         style={{

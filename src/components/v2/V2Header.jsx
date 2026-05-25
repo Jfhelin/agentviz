@@ -14,11 +14,17 @@ function formatZoneLabel(zone) {
   return String(zone || "find").charAt(0).toUpperCase() + String(zone || "find").slice(1);
 }
 
+function copyText(value) {
+  if (!value || typeof navigator === "undefined" || !navigator.clipboard || typeof navigator.clipboard.writeText !== "function") return;
+  navigator.clipboard.writeText(value).catch(function () {});
+}
+
 export default function V2Header({ session, activeZone, currentThemeMode, onSetThemeMode, onOpenCommandPalette, onExitV2, compact }) {
   var [showThemeMenu, setShowThemeMenu] = useState(false);
   var themeMenuRef = useRef(null);
   var status = getStatus(session);
   var sessionName = session && session.file ? session.file : "Open or discover a session";
+  var sourcePath = session && session.sourcePath ? session.sourcePath : null;
   var eventCount = session && session.metadata && session.metadata.totalEvents
     ? session.metadata.totalEvents + " events"
     : "No events";
@@ -83,6 +89,28 @@ export default function V2Header({ session, activeZone, currentThemeMode, onSetT
           }}>
             {sessionName}
           </span>
+          {sourcePath && (
+            <button
+              type="button"
+              className="av-btn"
+              title={sourcePath}
+              aria-label="Copy session source path"
+              onClick={function () { copyText(sourcePath); }}
+              style={{
+                border: "1px solid " + theme.border.default,
+                borderRadius: theme.radius.full,
+                background: theme.bg.surface,
+                color: theme.text.dim,
+                fontFamily: theme.font.mono,
+                fontSize: theme.fontSize.xs,
+                padding: "1px 7px",
+                cursor: "pointer",
+                flexShrink: 0,
+              }}
+            >
+              path
+            </button>
+          )}
           <span aria-label={"Session status: " + status.label} style={{
             color: status.color,
             fontSize: theme.fontSize.xs,

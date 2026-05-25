@@ -129,10 +129,10 @@ export function SessionProvider({ children, onBeforeSessionChange, onStoredSessi
     return { summary: buildAutonomySummary(autonomyMetrics) };
   }, [autonomyMetrics]);
 
-  var handleFile = useCallback(function (text, name) {
+  var handleFile = useCallback(function (text, name, sourcePath) {
     sessionLoadCount.current += 1;
     beforeSessionChange();
-    session.handleFile(text, name);
+    session.handleFile(text, name, sourcePath);
   }, [beforeSessionChange, session.handleFile]);
 
   var loadSample = useCallback(function (mode) {
@@ -149,7 +149,7 @@ export function SessionProvider({ children, onBeforeSessionChange, onStoredSessi
     function afterLoad(rawText) {
       setLoadError(null);
       if (typeof onStoredSessionOpen === "function") onStoredSessionOpen();
-      handleFile(rawText, sessionName);
+      handleFile(rawText, sessionName, sessionPath);
 
       var entryTags = entry.tags && entry.tags.length > 0 ? entry.tags : null;
       if (sessionPath || entryTags) {
@@ -219,8 +219,8 @@ export function SessionProvider({ children, onBeforeSessionChange, onStoredSessi
       .then(function (texts) {
         if (!texts[0] || !texts[1]) return false;
         sessionLoadCount.current += 1;
-        session.handleFile(texts[0], pair[0].file || pair[0].summary || pair[0].filename || "session-a.jsonl");
-        sessionB.handleFile(texts[1], pair[1].file || pair[1].summary || pair[1].filename || "session-b.jsonl");
+        session.handleFile(texts[0], pair[0].file || pair[0].summary || pair[0].filename || "session-a.jsonl", pair[0].discoveredPath || null);
+        sessionB.handleFile(texts[1], pair[1].file || pair[1].summary || pair[1].filename || "session-b.jsonl", pair[1].discoveredPath || null);
         setCompareLanding(true);
         return true;
       })
@@ -236,14 +236,15 @@ export function SessionProvider({ children, onBeforeSessionChange, onStoredSessi
     var currentRaw = session.getRawText();
     if (!currentRaw) return Promise.resolve(false);
     var currentName = session.file || "current-session.jsonl";
+    var currentSourcePath = session.sourcePath || null;
     beforeSessionChange();
 
     return loadEntryText(entry)
       .then(function (text) {
         if (!text) return false;
         sessionLoadCount.current += 1;
-        session.handleFile(currentRaw, currentName);
-        sessionB.handleFile(text, entry.file || entry.summary || entry.filename || "session-b.jsonl");
+        session.handleFile(currentRaw, currentName, currentSourcePath);
+        sessionB.handleFile(text, entry.file || entry.summary || entry.filename || "session-b.jsonl", entry.discoveredPath || null);
         setCompareLanding(true);
         return true;
       })
@@ -252,7 +253,7 @@ export function SessionProvider({ children, onBeforeSessionChange, onStoredSessi
         setLoadError("Failed to load session for comparison");
         return false;
       });
-  }, [beforeSessionChange, loadEntryText, session.getRawText, session.file, session.handleFile, sessionB.handleFile]);
+  }, [beforeSessionChange, loadEntryText, session.getRawText, session.file, session.sourcePath, session.handleFile, sessionB.handleFile]);
 
   var reset = useCallback(function () {
     beforeSessionChange();
