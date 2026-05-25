@@ -356,4 +356,64 @@ describe("buildLlmAnalysisPrompt", () => {
     }
     expect(facts.control_surface_analysis.external_or_not_controllable.some((e: { surface: string }) => e.surface === "model_selection")).toBe(true);
   });
+
+  it("includes tool_definition_shape_analysis in the structured facts with direct counts for the minimal fixture", () => {
+    const out = buildLlmAnalysisPrompt(analysis);
+    const match = out.match(/## Structured facts \(JSON\)[\s\S]*?```json\n([\s\S]*?)\n```/);
+    const facts = JSON.parse(match![1]);
+    expect(facts.tool_definition_shape_analysis).toBeDefined();
+    expect(facts.tool_definition_shape_analysis.available).toBe(true);
+    expect(facts.tool_definition_shape_analysis.model_visible_tool_definitions_count).toBeGreaterThanOrEqual(2);
+    expect(facts.tool_definition_shape_analysis.direct_tool_count).toBeGreaterThanOrEqual(2);
+    expect(facts.tool_definition_shape_analysis.router_or_grouped_tool_count).toBe(0);
+    expect(facts.tool_definition_shape_analysis.ide_selected_tools_count).toBeNull();
+    expect(facts.tool_definition_shape_analysis.interpretation).toMatch(/model-visible/i);
+  });
+
+  it("renders a Tool definition shape markdown section and reworded model-visible vs used section", () => {
+    const out = buildLlmAnalysisPrompt(analysis);
+    expect(out).toContain("### Tool definition shape");
+    expect(out).toContain("Model-visible tool definitions sent to main chat calls:");
+    expect(out).toContain("### Model-visible tool definitions vs used");
+    expect(out).not.toContain("### Tools offered vs used");
+  });
+});
+
+describe("buildToolDefinitionShapeFacts + renderToolDefinitionShapeMarkdown", () => {
+  it("emits router_or_grouped_tools entries with usage stats", async () => {
+    const { buildToolDefinitionShapeFacts, renderToolDefinitionShapeMarkdown } = await import("../lib/llmAnalysisExport");
+    const shape = {
+      available: true,
+      modelVisibleToolDefinitionsCount: 3,
+      directToolCount: 2,
+      routerOrGroupedToolCount: 1,
+      possibleRouterToolCount: 0,
+      unknownToolCount: 0,
+      directTools: [
+        { name: "read_file", kind: "direct_tool" as const, confidence: "high" as const, signals: [], hasLearnParameter: false, hasCommandParameter: false, hasGenericParametersObject: false, hasRouterLanguage: false, hasSubcommandLanguage: false, hasMcpNamePrefix: false },
+        { name: "grep_search", kind: "direct_tool" as const, confidence: "high" as const, signals: [], hasLearnParameter: false, hasCommandParameter: false, hasGenericParametersObject: false, hasRouterLanguage: false, hasSubcommandLanguage: false, hasMcpNamePrefix: false },
+      ],
+      routerOrGroupedTools: [
+        { name: "mcp_azure_mcp_ser_search", kind: "router_or_grouped_tool" as const, confidence: "high" as const, signals: ["has `learn` boolean parameter", "description contains router/discovery language"], hasLearnParameter: true, hasCommandParameter: true, hasGenericParametersObject: true, hasRouterLanguage: true, hasSubcommandLanguage: true, hasMcpNamePrefix: true },
+      ],
+      possibleRouterTools: [],
+      routerUsage: [
+        { name: "mcp_azure_mcp_ser_search", used: true, callCount: 2, learnTrueCalled: true, commandsCalled: ["storage list"] },
+      ],
+      note: "n",
+    };
+    const facts = buildToolDefinitionShapeFacts(shape);
+    expect(facts.router_or_grouped_tool_count).toBe(1);
+    const routers = facts.router_or_grouped_tools as Array<Record<string, unknown>>;
+    expect(routers[0].used).toBe(true);
+    expect(routers[0].call_count).toBe(2);
+    expect(routers[0].learn_true_called).toBe(true);
+    expect(routers[0].commands_called).toEqual(["storage list"]);
+
+    const md = renderToolDefinitionShapeMarkdown(shape, ["read_file", "mcp_azure_mcp_ser_search"]).join("\n");
+    expect(md).toContain("### Tool definition shape");
+    expect(md).toContain("Router/grouped tools: 1");
+    expect(md).toContain("Tools actually invoked: 2");
+    expect(md).toContain("| `mcp_azure_mcp_ser_search` | yes (2, learn=true)");
+  });
 });

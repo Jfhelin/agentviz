@@ -19,6 +19,7 @@
  */
 
 import type { CostAnalysis, CostAnalysisCall, CostAnalysisToolCall, CostAnalysisPrompt } from "./copilotChatExportParser";
+import type { ToolDefinitionShapeAnalysis, ToolDefinitionClassification } from "./toolDefinitionShape";
 
 const USER_MSG_CHAR_CAP = 2000;
 const ASSISTANT_PREVIEW_CHAR_CAP = 350;
@@ -430,6 +431,92 @@ export interface BuildOptions {
    * developer-focused report. `detailed_audit` keeps the heavier
    * 12-section schema-shaped report for in-depth audits. */
   reportMode?: "developer_action_report" | "detailed_audit";
+}
+
+/** Build the `tool_definition_shape_analysis` JSON block that ships inside
+ *  the structured facts. `ide_selected_tools_count` is null because the
+ *  Copilot Chat export does not carry the IDE-side selection count -- only
+ *  the model-visible tool definitions actually sent in the request. */
+export function buildToolDefinitionShapeFacts(shape: ToolDefinitionShapeAnalysis): Record<string, unknown> {
+  if (!shape || !shape.available) {
+    return {
+      available: false,
+      note: "No model-visible tool definitions were found in any chat request for this session.",
+    };
+  }
+  const toRouterRecord = (c: ToolDefinitionClassification) => {
+    const usage = shape.routerUsage.find((u) => u.name === c.name);
+    return {
+      name: c.name,
+      kind: c.kind,
+      confidence: c.confidence,
+      signals: c.signals,
+      used: !!usage?.used,
+      call_count: usage?.callCount ?? 0,
+      learn_true_called: !!usage?.learnTrueCalled,
+      commands_called: usage?.commandsCalled ?? [],
+    };
+  };
+  return {
+    available: true,
+    ide_selected_tools_count: null,
+    model_visible_tool_definitions_count: shape.modelVisibleToolDefinitionsCount,
+    direct_tool_count: shape.directToolCount,
+    router_or_grouped_tool_count: shape.routerOrGroupedToolCount,
+    possible_router_tool_count: shape.possibleRouterToolCount,
+    unknown_tool_count: shape.unknownToolCount,
+    router_or_grouped_tools: shape.routerOrGroupedTools.map(toRouterRecord),
+    possible_router_tools: shape.possibleRouterTools.map((c) => ({
+      name: c.name, kind: c.kind, confidence: c.confidence, signals: c.signals,
+    })),
+    direct_tools: shape.directTools.map((c) => c.name),
+    interpretation: "Only model-visible tool definitions are known from the request payload. IDE-selected tools may be larger. Router/grouped tools represent deferred or hidden subcommands behind one schema; unless invoked with discovery arguments such as `learn=true`, this export does not prove those subcommands were expanded during the run.",
+  };
+}
+
+/** Render the human-readable "Tool definition shape" markdown section. Used
+ *  in the legacy human-readable view appended after the structured facts. */
+export function renderToolDefinitionShapeMarkdown(shape: ToolDefinitionShapeAnalysis, usedToolNames: string[]): string[] {
+  const out: string[] = [];
+  out.push("### Tool definition shape");
+  out.push("");
+  if (!shape || !shape.available) {
+    out.push("_No model-visible tool definitions were found in any chat request for this session._");
+    return out;
+  }
+  out.push("- Selected/enabled tools in IDE: _unknown (not carried in the Copilot Chat export)_");
+  out.push("- Model-visible tool definitions sent to main chat calls: **" + shape.modelVisibleToolDefinitionsCount + "**");
+  out.push("- Direct tools: " + shape.directToolCount);
+  out.push("- Router/grouped tools: " + shape.routerOrGroupedToolCount);
+  out.push("- Possible router tools: " + shape.possibleRouterToolCount);
+  out.push("- Unknown tool definitions: " + shape.unknownToolCount);
+  out.push("- Tools actually invoked: " + new Set(usedToolNames).size);
+  out.push("");
+  out.push("> " + shape.note);
+  out.push("");
+  if (shape.routerOrGroupedTools.length > 0) {
+    out.push("**Router/grouped tools**");
+    out.push("");
+    out.push("| Tool | Used? | Confidence | Signals |");
+    out.push("|---|---:|---:|---|");
+    for (const c of shape.routerOrGroupedTools) {
+      const usage = shape.routerUsage.find((u) => u.name === c.name);
+      const used = usage?.used
+        ? "yes (" + usage.callCount + (usage.learnTrueCalled ? ", learn=true" : "") + ")"
+        : "no";
+      out.push("| `" + c.name + "` | " + used + " | " + c.confidence + " | " + c.signals.join("; ") + " |");
+    }
+    out.push("");
+  }
+  if (shape.possibleRouterTools.length > 0) {
+    out.push("**Possible router tools (lower-confidence routing shape)**");
+    out.push("");
+    for (const c of shape.possibleRouterTools) {
+      out.push("- `" + c.name + "` (" + c.confidence + "): " + c.signals.join("; "));
+    }
+    out.push("");
+  }
+  return out;
 }
 
 export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOptions = {}): string {
@@ -2090,6 +2177,7 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
     recommended_changes: recommendedChanges,
     custom_mode_or_agent_analysis: customModeOrAgentAnalysis,
     ide_tool_configuration_analysis: ideToolConfigurationAnalysis,
+    tool_definition_shape_analysis: buildToolDefinitionShapeFacts(analysis.toolDefinitionShape),
     skills_profile_analysis: skillsProfileAnalysis,
     automation_boundary_recommendation: automationBoundary
       ? { ...(automationBoundary as Record<string, unknown>), ...automationBoundaryExtensions }
@@ -2396,17 +2484,25 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
   }
   lines.push("- **Attached instructions:** " + instructions.length + (instructions.length > 0 ? " (" + instructions.slice(0, 4).join(", ") + (instructions.length > 4 ? ", …" : "") + ")" : ""));
   lines.push("");
-  lines.push("### Tools offered vs used");
+  lines.push("### Model-visible tool definitions vs used");
   lines.push("");
-  lines.push("- **Tools offered to model:** " + unused.offeredAll.size);
+  lines.push("- **Model-visible tool definitions sent to model:** " + unused.offeredAll.size + " _(IDE-selected tool count is not carried in the export)_");
   lines.push("- **Tools actually used:** " + unused.used.size + " — `" + Array.from(unused.used).sort().join("`, `") + "`");
   if (unused.unused.length > 0) {
-    // Show all unused names but inline (one line) to save space.
-    lines.push("- **Unused (" + unused.unused.length + "):** `" + unused.unused.join("`, `") + "`");
+    lines.push("- **Unused model-visible tool definitions (" + unused.unused.length + "):** `" + unused.unused.join("`, `") + "`");
   } else {
-    lines.push("- **Unused:** (none)");
+    lines.push("- **Unused model-visible tool definitions:** (none)");
   }
   lines.push("");
+  // Tool definition shape (direct vs router/grouped vs possible-router).
+  // Surfaces the distinction between IDE-selected tools, model-visible tool
+  // definitions, and router/grouped tools that wrap many hidden subcommands
+  // behind one schema. Without this section the report can imply that all
+  // selected/enabled tools were sent on the wire, which is not true.
+  const usedToolNames = Array.from(unused.used);
+  for (const ln of renderToolDefinitionShapeMarkdown(analysis.toolDefinitionShape, usedToolNames)) {
+    lines.push(ln);
+  }
   lines.push("### Complexity drift signals (for auto-mode judgement)");
   lines.push("");
   lines.push("```json");
