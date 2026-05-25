@@ -941,6 +941,10 @@ export interface CostAnalysisPrompt {
   index: number;
   promptId: string;
   label: string;
+  /** Full user message text for this prompt (untruncated). `label` is a
+   * short preview of the same string. Used by exports that need to ship
+   * the prompt verbatim. */
+  userMessage: string;
   events: CostAnalysisEvent[];
   promptTokens: number;
   output: number;
@@ -1491,6 +1495,7 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
       index: pi,
       promptId,
       label: promptText.slice(0, 200),
+      userMessage: promptText,
       events: costEvents,
       promptTokens: pPt,
       output: pOut,

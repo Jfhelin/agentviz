@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from "react";
 import { theme } from "../lib/theme.js";
 import { estimateCost, hasModelPricing, getModelPrice } from "../lib/pricing.js";
 import { estimateImageTokens, imageDollarCost } from "../lib/imageTokenEstimate.js";
+import { buildLlmAnalysisPrompt } from "../lib/llmAnalysisExport";
 import usePersistentState from "../hooks/usePersistentState.js";
 
 // Display unit for $ amounts. Module-level so the dozens of fmt$ call sites
@@ -2032,7 +2033,58 @@ function Kpis(props) {
   );
 }
 
-// Per-model summary strip. Aggregates LLM calls by model and splits into
+// "Copy LLM analysis prompt" button. Builds a markdown+JSON payload (see
+// `buildLlmAnalysisPrompt` in lib/llmAnalysisExport.ts) and drops it on the
+// clipboard. The user pastes the result into ChatGPT / Claude / etc. and
+// gets a structured session report back.
+function ExportPromptButton(props) {
+  var analysis = props.analysis;
+  var sessionLabel = props.sessionLabel;
+  var [status, setStatus] = useState("idle"); // idle | copied | error
+  var [hover, setHover] = useState(false);
+  function onClick() {
+    try {
+      var text = buildLlmAnalysisPrompt(analysis, { sessionLabel: sessionLabel });
+      navigator.clipboard.writeText(text).then(
+        function () { setStatus("copied"); setTimeout(function () { setStatus("idle"); }, 2400); },
+        function () { setStatus("error"); setTimeout(function () { setStatus("idle"); }, 3000); }
+      );
+    } catch (e) {
+      setStatus("error");
+      setTimeout(function () { setStatus("idle"); }, 3000); // eslint-disable-line
+    }
+  }
+  var label = status === "copied" ? "Copied to clipboard"
+    : status === "error" ? "Copy failed"
+    : "Copy LLM analysis prompt";
+  var bg = status === "copied" ? theme.cost.fresh
+    : status === "error" ? theme.cost.cwrite
+    : (hover ? theme.bg.surface : theme.bg.base);
+  var fg = status === "copied" || status === "error" ? theme.bg.base : theme.text.primary;
+  return (
+    <div style={{ display: "flex", justifyContent: "flex-end", margin: "0 0 16px" }}>
+      <button
+        type="button"
+        onClick={onClick}
+        onMouseEnter={function () { setHover(true); }}
+        onMouseLeave={function () { setHover(false); }}
+        title="Copy a structured markdown + JSON prompt describing this session. Paste into an LLM chat (ChatGPT, Claude, etc.) to get a written analysis: efficiency review, model-fit suggestions, what the user could have done differently."
+        style={{
+          padding: "8px 14px",
+          background: bg, color: fg,
+          border: "1px solid " + theme.border.default,
+          borderRadius: 5, cursor: "pointer",
+          fontFamily: theme.font.mono, fontSize: theme.fontSize.sm, fontWeight: 500,
+          transition: "background 120ms ease, color 120ms ease",
+        }}
+      >
+        {status === "idle" ? "📋 " : status === "copied" ? "✓ " : "⚠ "}{label}
+      </button>
+    </div>
+  );
+}
+
+
 // two groups: user-facing calls vs 'overhead' calls (title generation,
 // prompt categorization, etc.). Overhead is rendered dimmer and tagged so
 // it stays accountable but visually deprioritised.
@@ -2283,6 +2335,8 @@ export default function CostView(props) {
       <div style={{ color: theme.text.muted, fontSize: theme.fontSize.base, marginBottom: 24 }}>
         Three different lenses on "input": context size, growth, and billing.
       </div>
+
+      <ExportPromptButton analysis={analysis} sessionLabel={props.sessionLabel || null} />
 
       <Kpis totals={analysis.totals} subagentEst={subagentEst} />
       <ModelBreakdown prompts={analysis.prompts} />
