@@ -202,19 +202,37 @@ function buildPerCallTable(prompts: CostAnalysisPrompt[], compact: boolean): unk
     p.events.forEach(e => {
       if (e.kind !== "llm") return;
       turn += 1;
-      const reasoning = e.reasoningTokens || 0;
       const toolCalls = (e.producedToolCalls || []).length;
+      const comp = e.components || { system: 0, tool_defs: 0, history: 0, tool_results: 0, current: 0 };
       const base: Record<string, unknown> = {
         turn,
         model: shortModelName(e.model),
         category: e.category,
         ctx_in: e.promptTokens,
+        // Per-component breakdown of the input context (estimated token
+        // attribution from char counts of each section in the prompt).
+        // Sum approximates ctx_in. Use this to pinpoint which section
+        // grew (history vs tool_results vs tool_defs) instead of guessing.
+        ctx_components: {
+          system: comp.system || 0,
+          tool_defs: comp.tool_defs || 0,
+          history: comp.history || 0,
+          tool_results: comp.tool_results || 0,
+          current: comp.current || 0,
+        },
         cached: e.cached,
         cache_write: e.cacheWrite,
         out: e.output,
+        // Char counts of the three output components. Use to attribute a
+        // large `out` number: visible prose vs extended thinking vs JSON
+        // tool-call args. ~4 chars per token rough conversion.
+        out_breakdown_chars: {
+          visible_reply: e.visibleResponseChars || 0,
+          thinking: e.thinkingChars || 0,
+          tool_args: e.toolArgsChars || 0,
+        },
         cost_usd: Number((e.cost || 0).toFixed(4)),
         tool_calls_produced: toolCalls,
-        reasoning_tokens: reasoning,
         unexpected_cache_miss: e.unexpectedMiss || false,
       };
       if (!compact) {
@@ -304,14 +322,12 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
 
   // Complexity drift signals.
   const ctxGrowth: number[] = [];
-  const reasoningPerCall: number[] = [];
   const toolsPerCall: number[] = [];
   let modelSwitched = false;
   let lastModel: string | undefined;
   prompts.forEach(p => p.events.forEach(e => {
     if (e.kind !== "llm" || e.category === "overhead") return;
     ctxGrowth.push(e.promptTokens || 0);
-    reasoningPerCall.push(e.reasoningTokens || 0);
     toolsPerCall.push((e.producedToolCalls || []).length);
     if (lastModel && e.model && e.model !== lastModel) modelSwitched = true;
     if (e.model) lastModel = e.model;
@@ -341,21 +357,25 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
   }
   lines.push("## Instructions for the analyst LLM");
   lines.push("");
-  lines.push("You are an expert evaluator of AI coding agent sessions. Below is a structured summary of one VS Code Copilot Chat session. Produce a report with these sections, in this order:");
+  lines.push("You are an expert evaluator of AI coding agent sessions. Below is a structured summary of one VS Code Copilot Chat session. Produce a report following the format below.");
   lines.push("");
-  lines.push("1. **Session title** — one short line, ≤8 words, describing the actual work done.");
+  lines.push("**Output format:** Start your reply with `# <session title>` as the very first line — the title IS the heading, do not write 'Session title' as a separate label. Then write sections 2 through 8 using `##` subheadings.");
+  lines.push("");
+  lines.push("1. **Session title** (the H1): one short line, ≤8 words, describing the actual work done.");
   lines.push("2. **The user's goal** — one paragraph in the user's own framing. Reconstruct from the user messages, not the assistant's interpretation.");
   lines.push("3. **How the agent got there** — 3-5 bullet narrative of the trajectory. Note any backtracking, re-reading, or dead ends.");
-  lines.push("4. **Efficiency analysis** — Was anything redundant? Did the model thrash or converge? Cite specific turn numbers.");
-  lines.push("5. **What the user could have done differently** — Up to 4 actionable suggestions. For each: rationale, and a *qualitative* savings estimate (large / moderate / small) tied to a specific signal from the facts (e.g. \"would have skipped 3 file reads in turns 2-4, saving the ~1500 tok of `tool_results` they produced\"). Do not invent dollar figures.");
+  lines.push("4. **Efficiency analysis** — Was anything redundant? Did the model thrash or converge? Cite specific turn numbers. When context jumps or output sizes spike, attribute the cause using `ctx_components` and `out_breakdown_chars` from the per-call JSON — name the specific component (history, tool_results, visible_reply, tool_args, thinking) that grew, do NOT guess.");
+  lines.push("5. **What the user could have done differently** — Up to 4 actionable suggestions. For each: rationale, and a *qualitative* savings estimate (large / moderate / small) tied to a specific signal from the facts. Do not invent dollar figures.");
   lines.push("6. **Model fit** — Was the chosen model (" + (chosenModelName ? shortModelName(chosenModelName) : "n/a") + ", category: " + (chosenTier || "unknown") + ") justified? Review the alt-model projections table and judge whether a Lightweight or Versatile model would have produced acceptable results for this task. Use the conversation difficulty as your evidence.");
   lines.push("7. **Auto-mode suitability** — VS Code's Auto mode picks one model based on the first prompt and sticks with it for the session. Score 1-5 (5 = would have worked perfectly, 1 = would have failed) based on whether complexity stayed steady or drifted. Cite the complexity drift signals.");
-  lines.push("8. **Unused capacity** — Tools and skills attached but never used. The unused-tools list is pre-computed below; explain the impact and whether the user could realistically have known to disable them.");
+  lines.push("8. **Unused capacity** — Tools and skills attached but never used. The unused-tools list is pre-computed below. The user CAN selectively disable tools via VS Code's tool picker (the 'Configure Tools' UI in chat), and CAN remove unused skills/instructions from their workspace config. Treat this as actionable. Identify which specific unused tools / skill groups the user could safely turn off for similar future sessions, and what the rough constant overhead cost is.");
   lines.push("");
   lines.push("**Important constraints:**");
   lines.push("- Use ONLY the facts below. Do not invent token counts, dollar figures, or technical details that are not present in the data.");
   lines.push("- When you cite a number, quote it exactly from the facts.");
+  lines.push("- When attributing context growth or large outputs, name the specific JSON field (e.g. `ctx_components.tool_results grew from 12,000 to 28,000`) instead of speculating.");
   lines.push("- When something is not determinable from the facts, say so explicitly. Do not guess.");
+  lines.push("- Note: reasoning-token counts are NOT included in this data — do not comment on reasoning effort.");
   lines.push("- Keep the report under 1500 words.");
   lines.push("");
   lines.push("---");
@@ -370,7 +390,7 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
   lines.push("| tool executions | " + totals.toolCalls + " |");
   lines.push("| total cost | " + fmtUsd(totals.cost) + " |");
   lines.push("| billed input tokens | " + totals.promptTokens.toLocaleString() + " (" + pct(totals.cached, totals.promptTokens) + " cached) |");
-  lines.push("| output tokens | " + totals.output.toLocaleString() + " (reasoning: " + totals.reasoning.toLocaleString() + ")" + " |");
+  lines.push("| output tokens | " + totals.output.toLocaleString() + " |");
   if (totals.unexpectedMissCount > 0) {
     lines.push("| unexpected cache misses | " + totals.unexpectedMissCount + " (wasted ~" + fmtUsd(totals.unexpectedMissCost) + ") |");
   }
@@ -425,7 +445,7 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
   } else {
     unused.unused.forEach(t => lines.push("  - `" + t + "`"));
     lines.push("");
-    lines.push("Rough estimate: ~120 tokens per tool definition × " + unused.unused.length + " unused × " + llmCount + " calls = ~" + Math.round(unused.unused.length * 120 * llmCount / 1000) + "k tokens of definition shipped but never invoked. Priced at the chosen model's input rate, that is a small constant overhead per session.");
+    lines.push("Rough estimate: ~120 tokens per tool definition × " + unused.unused.length + " unused × " + llmCount + " calls = ~" + Math.round(unused.unused.length * 120 * llmCount / 1000) + "k tokens of definition shipped but never invoked. The user can selectively disable these via VS Code's 'Configure Tools' chat UI, which removes them from every future call's prompt.");
   }
   lines.push("");
   lines.push("### Tools actually called (with frequency)");
@@ -445,7 +465,6 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
     chat_call_count: ctxGrowth.length,
     model_switched_mid_session: modelSwitched,
     context_growth_tokens_per_call: ctxGrowth,
-    reasoning_tokens_per_call: reasoningPerCall,
     tool_calls_per_turn: toolsPerCall,
   }, null, 2));
   lines.push("```");
