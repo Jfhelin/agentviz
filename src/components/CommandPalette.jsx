@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { theme, TRACK_TYPES, alpha } from "../lib/theme.js";
 import { buildCommandPaletteIndex, searchCommandPalette } from "../lib/commandPalette.js";
+import useFocusTrap from "../hooks/useFocusTrap.js";
+import useReducedMotion from "../hooks/useReducedMotion.js";
 import Icon from "./Icon.jsx";
 import KeyboardHint from "./ui/KeyboardHint.jsx";
 
@@ -8,18 +10,19 @@ import KeyboardHint from "./ui/KeyboardHint.jsx";
  * CommandPalette - Cmd+K fuzzy search overlay
  * Search events, jump to turns, filter by tool, switch views.
  */
-export default function CommandPalette({ events, turns, onSeek, onSetView, onAction, onClose }) {
+export default function CommandPalette({ events, turns, extraItems, indexOptions, placeholder, onSeek, onSetView, onNavigateZone, onAction, onClose }) {
   var [query, setQuery] = useState("");
   var [selectedIdx, setSelectedIdx] = useState(0);
   var inputRef = useRef(null);
+  var panelRef = useRef(null);
+  var prefersReducedMotion = useReducedMotion();
 
-  useEffect(function () {
-    if (inputRef.current) inputRef.current.focus();
-  }, []);
+  useFocusTrap(panelRef, { active: true, initialFocusRef: inputRef, onEscape: onClose });
 
   var searchIndex = useMemo(function () {
-    return buildCommandPaletteIndex(events, turns);
-  }, [events, turns]);
+    var options = Object.assign({}, indexOptions || {}, { extraItems: extraItems || [] });
+    return buildCommandPaletteIndex(events, turns, options);
+  }, [events, turns, extraItems, indexOptions]);
 
   var results = useMemo(function () {
     return searchCommandPalette(searchIndex, query);
@@ -30,8 +33,9 @@ export default function CommandPalette({ events, turns, onSeek, onSetView, onAct
   function runItemAction(item) {
     if (!item) return;
     if (item.type === "action" && item.actionId && onAction) onAction(item.actionId);
-    if (item.type === "view" && item.viewId) onSetView(item.viewId);
-    if ((item.type === "turn" || item.type === "event") && item.seekTime !== undefined) onSeek(item.seekTime);
+    if (item.type === "zone" && item.zoneId && onNavigateZone) onNavigateZone(item.zoneId);
+    if (item.type === "view" && item.viewId && onSetView) onSetView(item.viewId);
+    if ((item.type === "turn" || item.type === "event") && item.seekTime !== undefined && onSeek) onSeek(item.seekTime);
     onClose();
   }
 
@@ -48,21 +52,45 @@ export default function CommandPalette({ events, turns, onSeek, onSetView, onAct
       runItemAction(results[selectedIdx]);
     }
     if (e.key === "Escape") {
+      e.preventDefault();
       onClose();
     }
   }
 
   return (
-    <div onClick={onClose} style={{
+    <div
+      role="presentation"
+      onMouseDown={function (event) {
+        if (event.target === event.currentTarget) onClose();
+      }}
+      style={{
       position: "fixed", inset: 0, background: alpha(theme.bg.base, 0.6),
       display: "flex", alignItems: "flex-start", justifyContent: "center",
       paddingTop: 120, zIndex: theme.z.modal, backdropFilter: "blur(4px)",
     }}>
-      <div onClick={function (e) { e.stopPropagation(); }} style={{
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="command-palette-title"
+        style={{
         width: 560, background: theme.bg.surface, border: "1px solid " + theme.border.strong,
         borderRadius: theme.radius.xxl, boxShadow: theme.shadow.md,
         overflow: "hidden",
       }}>
+        <h2 id="command-palette-title" style={{
+          position: "absolute",
+          width: 1,
+          height: 1,
+          padding: 0,
+          margin: -1,
+          overflow: "hidden",
+          clip: "rect(0 0 0 0)",
+          whiteSpace: "nowrap",
+          border: 0,
+        }}>
+          Command palette
+        </h2>
         {/* Input */}
         <div style={{
           display: "flex", alignItems: "center", gap: 10,
@@ -74,7 +102,8 @@ export default function CommandPalette({ events, turns, onSeek, onSetView, onAct
             value={query}
             onChange={function (e) { setQuery(e.target.value); }}
             onKeyDown={handleKeyDown}
-            placeholder="Search events, turns, tools..."
+            placeholder={placeholder || "Search events, turns, tools..."}
+            aria-label="Search command palette"
             style={{
               flex: 1, background: "transparent", border: "none", outline: "none",
               color: theme.text.primary, fontSize: theme.fontSize.md, fontFamily: theme.font.mono,
@@ -84,7 +113,7 @@ export default function CommandPalette({ events, turns, onSeek, onSetView, onAct
         </div>
 
         {/* Results */}
-        <div style={{ maxHeight: 360, overflowY: "auto", padding: "6px 0" }}>
+        <div tabIndex={0} aria-label="Command results" style={{ maxHeight: 360, overflowY: "auto", padding: "6px 0" }}>
           {results.length === 0 && (
             <div style={{
               padding: "20px 18px", textAlign: "center",
@@ -114,7 +143,7 @@ export default function CommandPalette({ events, turns, onSeek, onSetView, onAct
                   display: "flex", alignItems: "center", gap: 10,
                   padding: "8px 18px", cursor: "pointer",
                   background: isSelected ? theme.bg.raised : "transparent",
-                  transition: "background " + theme.transition.fast,
+                  transition: prefersReducedMotion ? "none" : "background " + theme.transition.fast,
                   border: "none", width: "100%", fontFamily: theme.font.mono,
                   textAlign: "left",
                 }}

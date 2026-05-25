@@ -43,6 +43,7 @@ import {
   Square,
   RefreshCw,
   Tag,
+  Copy,
 } from "lucide-react";
 
 var ICON_MAP = {
@@ -90,6 +91,7 @@ var ICON_MAP = {
   square: Square,
   "refresh-cw": RefreshCw,
   tag: Tag,
+  copy: Copy,
 };
 
 export default function Icon({ name, size, strokeWidth, style, className }) {

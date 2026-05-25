@@ -1,0 +1,365 @@
+import React, { createContext, useContext, useMemo, useCallback, useEffect, useRef, useState } from "react";
+import { exportSingleSession, exportComparison } from "../lib/exportHtml.js";
+import useSessionLoader from "../hooks/useSessionLoader.js";
+import useLiveStream from "../hooks/useLiveStream.js";
+import useAsyncStatus from "../hooks/useAsyncStatus.js";
+import useDiscoveredSessions from "../hooks/useDiscoveredSessions.js";
+import useHashRouter from "../hooks/useHashRouter.js";
+import { buildAutonomyMetrics, buildAutonomySummary } from "../lib/autonomyMetrics.js";
+import {
+  loadStoredSessionContent,
+  persistSessionSnapshot,
+  pruneDeadEntries,
+  reconcileSessionLibrary,
+} from "../lib/sessionLibrary.js";
+
+var SessionContext = createContext(null);
+
+function buildVisibleLibraryEntries(libraryEntries) {
+  return libraryEntries.filter(function (entry) {
+    var primaryPrompt = String(entry && entry.primaryPrompt || "").trim();
+    if (
+      entry
+      && entry.format === "copilot-cli"
+      && primaryPrompt.startsWith("Summarize the following conversation for context continuity.")
+    ) {
+      return false;
+    }
+
+    return true;
+  });
+}
+
+function mergeSessionSources(libraryEntries, discoveredSessions) {
+  var visibleLibraryEntries = buildVisibleLibraryEntries(libraryEntries);
+
+  var discoveredBySessionId = {};
+  discoveredSessions.forEach(function (s) {
+    if (s.source !== "manifest" && s.size < 5000) return;
+    if (s.sessionId) discoveredBySessionId[s.sessionId] = s;
+  });
+
+  var enrichedLibrary = visibleLibraryEntries.map(function (e) {
+    if (e.discoveredPath) return e;
+    var match = e.sessionId && discoveredBySessionId[e.sessionId];
+    if (match) return Object.assign({}, e, { discoveredPath: match.path });
+    return e;
+  });
+
+  var discoveredOnly = discoveredSessions.filter(function (s) {
+    if (s.source !== "manifest" && s.size < 5000) return false;
+    return !enrichedLibrary.some(function (e) {
+      return e.discoveredPath === s.path || (e.sessionId && e.sessionId === s.sessionId);
+    });
+  }).map(function (s) {
+    return {
+      id: s.id || s.path,
+      file: s.file || s.summary || s.filename,
+      filename: s.filename || s.file,
+      format: s.format,
+      isInsiders: s.isInsiders || false,
+      project: s.project || null,
+      repository: s.repository || null,
+      branch: s.branch || null,
+      discoveredPath: s.path,
+      sessionId: s.sessionId || null,
+      importedAt: s.mtime,
+      updatedAt: s.mtime,
+      size: s.size,
+      tags: s.tags || [],
+      isDiscovered: true,
+      source: s.source || "discovered",
+    };
+  });
+
+  return enrichedLibrary.concat(discoveredOnly);
+}
+
+export function SessionProvider({ children, onBeforeSessionChange, onStoredSessionOpen, enableHashRouter }) {
+  var [libraryEntries, setLibraryEntries] = useState(function () {
+    return reconcileSessionLibrary();
+  });
+  var [compareLanding, setCompareLanding] = useState(false);
+  var [loadError, setLoadError] = useState(null);
+  var sessionLoadCount = useRef(0);
+  var discovered = useDiscoveredSessions();
+  var sessionExport = useAsyncStatus();
+  var compareExport = useAsyncStatus();
+
+  var handleSessionParsed = useCallback(function (result, name, rawText) {
+    var persisted = persistSessionSnapshot(name, result, rawText);
+    setLibraryEntries(persisted.entries);
+  }, []);
+
+  var session = useSessionLoader({ onSessionParsed: handleSessionParsed });
+  var sessionB = useSessionLoader({ autoBootstrap: false, onSessionParsed: handleSessionParsed });
+
+  var beforeSessionChange = useCallback(function () {
+    if (typeof onBeforeSessionChange === "function") onBeforeSessionChange();
+  }, [onBeforeSessionChange]);
+
+  var allSessions = useMemo(function () {
+    try {
+      return mergeSessionSources(libraryEntries, discovered.sessions);
+    } catch (e) {
+      console.error("[allSessions] merge error:", e);
+      return buildVisibleLibraryEntries(libraryEntries);
+    }
+  }, [libraryEntries, discovered.sessions]);
+
+  useEffect(function () {
+    var compareData = window.__AGENTVIZ_COMPARE__;
+    if (!compareData || !compareData.a || !compareData.b) return;
+    delete window.__AGENTVIZ_COMPARE__;
+    setCompareLanding(true);
+    session.handleFile(compareData.a.text, compareData.a.name);
+    sessionB.handleFile(compareData.b.text, compareData.b.name);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useLiveStream({
+    enabled: session.isLive,
+    onLines: session.appendLines,
+  });
+
+  var autonomyMetrics = useMemo(function () {
+    return buildAutonomyMetrics(session.events, session.turns, session.metadata);
+  }, [session.events, session.turns, session.metadata]);
+
+  var debrief = useMemo(function () {
+    return { summary: buildAutonomySummary(autonomyMetrics) };
+  }, [autonomyMetrics]);
+
+  var handleFile = useCallback(function (text, name, sourcePath) {
+    sessionLoadCount.current += 1;
+    beforeSessionChange();
+    session.handleFile(text, name, sourcePath);
+  }, [beforeSessionChange, session.handleFile]);
+
+  var loadSample = useCallback(function (mode) {
+    sessionLoadCount.current += 1;
+    beforeSessionChange();
+    session.loadSample(mode);
+  }, [beforeSessionChange, session.loadSample]);
+
+  var openStoredSession = useCallback(function (entry) {
+    if (!entry) return;
+    var sessionPath = entry.discoveredPath || null;
+    var sessionName = entry.file || entry.summary || entry.filename || "events.jsonl";
+
+    function afterLoad(rawText) {
+      setLoadError(null);
+      if (typeof onStoredSessionOpen === "function") onStoredSessionOpen();
+      handleFile(rawText, sessionName, sessionPath);
+
+      var entryTags = entry.tags && entry.tags.length > 0 ? entry.tags : null;
+      if (sessionPath || entryTags) {
+        setLibraryEntries(function (prev) {
+          return prev.map(function (e) {
+            if (e.id !== entry.id) return e;
+            var updates = {};
+            if (!e.discoveredPath && sessionPath) updates.discoveredPath = sessionPath;
+            if (entryTags && (!e.tags || e.tags.length === 0)) updates.tags = entryTags;
+            if (Object.keys(updates).length === 0) return e;
+            return Object.assign({}, e, updates);
+          });
+        });
+      }
+    }
+
+    function onFetchError(err) {
+      console.error("[session] failed to load:", sessionName, err);
+      setLoadError("Failed to load session: " + sessionName);
+    }
+
+    if ((entry.source === "manifest" || entry.isDiscovered) && sessionPath) {
+      var fetchArg = entry.source === "manifest"
+        ? { source: "manifest", path: sessionPath }
+        : sessionPath;
+      discovered.fetchSessionContent(fetchArg).then(afterLoad).catch(onFetchError);
+      return;
+    }
+
+    var rawText = loadStoredSessionContent(entry.id);
+    if (rawText) { afterLoad(rawText); return; }
+    if (sessionPath) {
+      discovered.fetchSessionContent(sessionPath).then(afterLoad).catch(onFetchError);
+      return;
+    }
+
+    setLibraryEntries(function (prev) {
+      return prev.map(function (e) {
+        return e.id === entry.id ? Object.assign({}, e, { hasContent: false }) : e;
+      });
+    });
+  }, [discovered.fetchSessionContent, handleFile, onStoredSessionOpen]);
+
+  var loadEntryText = useCallback(function (entry) {
+    if (!entry) return Promise.resolve(null);
+
+    var sessionPath = entry.discoveredPath || null;
+    if ((entry.source === "manifest" || entry.isDiscovered) && sessionPath) {
+      var fetchArg = entry.source === "manifest"
+        ? { source: "manifest", path: sessionPath }
+        : sessionPath;
+      return discovered.fetchSessionContent(fetchArg);
+    }
+
+    var rawText = loadStoredSessionContent(entry.id);
+    if (rawText) return Promise.resolve(rawText);
+    if (sessionPath) return discovered.fetchSessionContent(sessionPath);
+    return Promise.resolve(null);
+  }, [discovered.fetchSessionContent]);
+
+  var openCompareEntries = useCallback(function (entries) {
+    var pair = entries || [];
+    if (pair.length < 2) return Promise.resolve(false);
+    beforeSessionChange();
+
+    return Promise.all([loadEntryText(pair[0]), loadEntryText(pair[1])])
+      .then(function (texts) {
+        if (!texts[0] || !texts[1]) return false;
+        sessionLoadCount.current += 1;
+        session.handleFile(texts[0], pair[0].file || pair[0].summary || pair[0].filename || "session-a.jsonl", pair[0].discoveredPath || null);
+        sessionB.handleFile(texts[1], pair[1].file || pair[1].summary || pair[1].filename || "session-b.jsonl", pair[1].discoveredPath || null);
+        setCompareLanding(true);
+        return true;
+      })
+      .catch(function (err) {
+        console.error("[compare] failed to load selected sessions:", err);
+        setLoadError("Failed to load selected sessions for comparison");
+        return false;
+      });
+  }, [beforeSessionChange, loadEntryText, session.handleFile, sessionB.handleFile]);
+
+  var openCompareCurrentWithEntry = useCallback(function (entry) {
+    if (!entry) return Promise.resolve(false);
+    var currentRaw = session.getRawText();
+    if (!currentRaw) return Promise.resolve(false);
+    var currentName = session.file || "current-session.jsonl";
+    var currentSourcePath = session.sourcePath || null;
+    beforeSessionChange();
+
+    return loadEntryText(entry)
+      .then(function (text) {
+        if (!text) return false;
+        sessionLoadCount.current += 1;
+        session.handleFile(currentRaw, currentName, currentSourcePath);
+        sessionB.handleFile(text, entry.file || entry.summary || entry.filename || "session-b.jsonl", entry.discoveredPath || null);
+        setCompareLanding(true);
+        return true;
+      })
+      .catch(function (err) {
+        console.error("[compare] failed to load comparison session:", err);
+        setLoadError("Failed to load session for comparison");
+        return false;
+      });
+  }, [beforeSessionChange, loadEntryText, session.getRawText, session.file, session.sourcePath, session.handleFile, sessionB.handleFile]);
+
+  var reset = useCallback(function () {
+    beforeSessionChange();
+    session.resetSession();
+    sessionB.resetSession();
+    setCompareLanding(false);
+  }, [beforeSessionChange, session.resetSession, sessionB.resetSession]);
+
+  useEffect(function () {
+    var params = new URLSearchParams(window.location.search);
+    if (params.get("demo") === "multiagent") {
+      loadSample("multiagent");
+    }
+  }, [loadSample]);
+
+  useHashRouter({
+    hasSession: Boolean(session.events),
+    onNavigateToLanding: reset,
+    enabled: enableHashRouter !== false,
+  });
+
+  var exitCompare = useCallback(function () {
+    sessionB.resetSession();
+    setCompareLanding(false);
+  }, [sessionB.resetSession]);
+
+  var openCompareSessionInCoach = useCallback(function (loader) {
+    var rawText = loader.getRawText();
+    if (!rawText) return false;
+    session.handleFile(rawText, loader.file);
+    sessionB.resetSession();
+    setCompareLanding(false);
+    return true;
+  }, [session.handleFile, sessionB.resetSession]);
+
+  var handleExportSession = useCallback(function () {
+    var rawText = session.getRawText();
+    if (!rawText) return;
+    sessionExport.run(function () {
+      return exportSingleSession(rawText, session.file);
+    });
+  }, [session.getRawText, session.file, sessionExport]);
+
+  var handleExportComparison = useCallback(function () {
+    var rawA = session.getRawText();
+    var rawB = sessionB.getRawText();
+    if (!rawA || !rawB) return;
+    compareExport.run(function () {
+      return exportComparison(rawA, session.file, rawB, sessionB.file);
+    });
+  }, [compareExport, session.getRawText, session.file, sessionB.getRawText, sessionB.file]);
+
+  var refreshSessions = useCallback(function () {
+    var pruned = pruneDeadEntries();
+    setLibraryEntries(pruned);
+    return discovered.refresh();
+  }, [discovered.refresh]);
+
+  var compareReady = compareLanding && Boolean(session.events) && Boolean(sessionB.events);
+
+  var value = useMemo(function () {
+    return {
+      session: session,
+      sessionB: sessionB,
+      sessionLoadKey: sessionLoadCount.current,
+      allSessions: allSessions,
+      discovered: discovered,
+      loadError: loadError,
+      compareLanding: compareLanding,
+      setCompareLanding: setCompareLanding,
+      compareReady: compareReady,
+      sessionExport: sessionExport,
+      compareExport: compareExport,
+      autonomyMetrics: autonomyMetrics,
+      debrief: debrief,
+      handleFile: handleFile,
+      loadSample: loadSample,
+      openStoredSession: openStoredSession,
+      openCompareEntries: openCompareEntries,
+      openCompareCurrentWithEntry: openCompareCurrentWithEntry,
+      reset: reset,
+      exitCompare: exitCompare,
+      openCompareSessionInCoach: openCompareSessionInCoach,
+      handleExportSession: handleExportSession,
+      handleExportComparison: handleExportComparison,
+      refreshSessions: refreshSessions,
+    };
+  }, [
+    session, sessionB, allSessions, discovered, loadError, compareLanding,
+    compareReady, sessionExport, compareExport, autonomyMetrics, debrief,
+    handleFile, loadSample, openStoredSession, openCompareEntries, openCompareCurrentWithEntry, reset, exitCompare,
+    openCompareSessionInCoach, handleExportSession, handleExportComparison,
+    refreshSessions,
+  ]);
+
+  return (
+    <SessionContext.Provider value={value}>
+      {children}
+    </SessionContext.Provider>
+  );
+}
+
+export function useSessionContext() {
+  var ctx = useContext(SessionContext);
+  if (!ctx) throw new Error("useSessionContext must be used within SessionProvider");
+  return ctx;
+}
+
+export { mergeSessionSources };

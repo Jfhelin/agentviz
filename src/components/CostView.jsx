@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { theme, alpha } from "../lib/theme.js";
 import { buildCostAnalysis, formatTokens } from "../lib/costAnalysis.js";
-import { formatCost } from "../lib/pricing.js";
+import { formatCost, formatCostValue, isPremiumRequestUnit } from "../lib/pricing.js";
 
 var SUMMARY_GRID_5_COLUMNS = "1.15fr repeat(4, minmax(150px, 0.6fr))";
 var MAIN_GRID_3_COLUMNS = "minmax(310px, 0.9fr) minmax(360px, 1fr) minmax(360px, 1fr)";
@@ -80,6 +80,13 @@ function Legend({ items }) {
 }
 
 function CallRow({ call, miss }) {
+  var tokenParts = [
+    formatTokens(call.freshInputTokens) + " fresh",
+    formatTokens(call.cachedInputTokens) + " cached",
+  ];
+  if ((call.cacheWriteTokens || 0) > 0) tokenParts.push(formatTokens(call.cacheWriteTokens) + " write");
+  tokenParts.push(formatTokens(call.outputTokens) + " out");
+
   return (
     <div style={{
       border: "1px solid " + (miss ? alpha(theme.semantic.warning, 0.55) : theme.border.default),
@@ -98,10 +105,11 @@ function CallRow({ call, miss }) {
           <Chip>{call.model}</Chip>
           <Chip>{formatTokens(call.contextBreakdown.total || call.tokenUsage.inputTokens)} ctx</Chip>
           {miss && <Chip warning>cache miss</Chip>}
-          <Chip>{formatCost(call.cost)}</Chip>
+          <Chip>{formatCostValue(call.cost, call.costUnit)}</Chip>
+          {isPremiumRequestUnit(call.costUnit) && call.estimatedUsdCost > 0 && <Chip>est {formatCost(call.estimatedUsdCost)}</Chip>}
         </div>
         <div style={{ color: theme.text.muted, fontSize: theme.fontSize.sm, marginTop: theme.space.md, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {formatTokens(call.freshInputTokens)} fresh · {formatTokens(call.cachedInputTokens)} cached · {formatTokens(call.outputTokens)} out
+          {tokenParts.join(" · ")}
         </div>
       </div>
     </div>
@@ -116,8 +124,9 @@ function Chip({ children, warning }) {
 function CostBars({ calls, cacheMisses }) {
   var max = maxCallValue(calls, function (call) { return call.freshInputTokens + call.cachedInputTokens + call.cacheWriteTokens; });
   var missByIndex = new Map(cacheMisses.map(function (miss) { return [miss.callIndex, miss]; }));
+  var costUnit = calls[0] && calls[0].costUnit;
   return (
-    <Panel label="Cumulative cost" title="Billed input/output by call" aside={<span style={{ color: theme.text.primary, fontSize: theme.fontSize.xs, fontFamily: theme.font.mono, border: "1px solid " + alpha(theme.accent.primary, 0.5), background: alpha(theme.accent.primary, 0.12), borderRadius: theme.radius.md, padding: theme.space.sm + "px " + theme.space.md + "px" }}>$ BILLED</span>}>
+    <Panel label={isPremiumRequestUnit(costUnit) ? "Cumulative PRU" : "Cumulative cost"} title={isPremiumRequestUnit(costUnit) ? "Reported premium request usage" : "Billed input/output by call"} aside={<span style={{ color: theme.text.primary, fontSize: theme.fontSize.xs, fontFamily: theme.font.mono, border: "1px solid " + alpha(theme.accent.primary, 0.5), background: alpha(theme.accent.primary, 0.12), borderRadius: theme.radius.md, padding: theme.space.sm + "px " + theme.space.md + "px" }}>{isPremiumRequestUnit(costUnit) ? "PRU" : "$ BILLED"}</span>}>
       <Legend items={[{ label: "fresh", color: theme.accent.primary }, { label: "cached", color: theme.semantic.success }, { label: "cache write", color: theme.track.context }]} />
       <div style={{ padding: theme.space.lg, overflow: "auto" }}>
         {calls.map(function (call) {
@@ -126,7 +135,7 @@ function CostBars({ calls, cacheMisses }) {
               <div style={{ display: "grid", gridTemplateColumns: "56px 1fr 72px", gap: theme.space.md, alignItems: "center", height: theme.space.giant }}>
                 <div style={{ color: theme.text.secondary, fontFamily: theme.font.mono, fontSize: theme.fontSize.sm }}>#{String(call.index + 1).padStart(2, "0")}</div>
                 <BarSegments max={max} segments={[{ key: "fresh", label: "Fresh input", value: call.freshInputTokens, color: theme.accent.primary }, { key: "cached", label: "Cached input", value: call.cachedInputTokens, color: theme.semantic.success }, { key: "write", label: "Cache write", value: call.cacheWriteTokens, color: theme.track.context }]} />
-                <div style={{ textAlign: "right", color: theme.text.primary, fontFamily: theme.font.mono, fontSize: theme.fontSize.sm }}>{formatCost(call.cumulativeCost)}</div>
+                <div style={{ textAlign: "right", color: theme.text.primary, fontFamily: theme.font.mono, fontSize: theme.fontSize.sm }}>{formatCostValue(call.cumulativeCost, call.costUnit)}</div>
               </div>
               {missByIndex.has(call.index) && <CacheMissAnnotation miss={missByIndex.get(call.index)} />}
             </div>
@@ -198,14 +207,27 @@ export default function CostView({ events, metadata }) {
   var calls = analysis.calls;
   var totals = analysis.totals;
   var cachePercent = totals.cacheHitRate ? Math.round(totals.cacheHitRate * 100) : 0;
+  var usesPrus = isPremiumRequestUnit(totals.costUnit);
   var missByIndex = new Set(analysis.cacheMisses.map(function (miss) { return miss.callIndex; }));
 
   return (
     <div style={{ padding: theme.space.xl, display: "flex", flexDirection: "column", gap: theme.space.lg, minHeight: 0, height: "100%", overflow: "hidden", fontFamily: theme.font.mono, fontSize: theme.fontSize.base }}>
       <div style={{ display: "grid", gridTemplateColumns: SUMMARY_GRID_5_COLUMNS, gap: theme.space.lg }}>
         <SummaryCard label="Cost view" value="Token spend & context buildup" valueSize={theme.fontSize.lg} sub="Full context, net-new tokens, and billed API usage." />
-        <SummaryCard label="Total spend" value={formatCost(totals.cost)} sub={cachePercent + "% cached input"} />
-        <SummaryCard label="Input tokens" value={formatTokens(totals.inputTokens)} sub={formatTokens(totals.freshInputTokens) + " fresh · " + formatTokens(totals.cacheRead) + " cached"} />
+        <SummaryCard
+          label={usesPrus ? "Reported PRU" : "Total spend"}
+          value={formatCostValue(totals.cost, totals.costUnit)}
+          sub={[
+            cachePercent + "% cached input",
+            usesPrus && totals.premiumRequests != null ? totals.premiumRequests + " premium requests" : null,
+            usesPrus && totals.estimatedUsdCost > 0 ? "token estimate " + formatCost(totals.estimatedUsdCost) : null,
+          ].filter(Boolean).join(" · ")}
+        />
+        <SummaryCard label="Input tokens" value={formatTokens(totals.inputTokens)} sub={[
+          formatTokens(totals.freshInputTokens) + " fresh",
+          formatTokens(totals.cacheRead) + " cached",
+          totals.cacheWrite > 0 ? formatTokens(totals.cacheWrite) + " write" : null,
+        ].filter(Boolean).join(" · ")} />
         <SummaryCard label="Peak context" value={formatTokens(totals.peakContext)} sub="tools + history dominate context" />
         <SummaryCard label="Cache misses" value={analysis.cacheMisses.length} sub="unexpected fresh-token spikes" color={analysis.cacheMisses.length ? theme.semantic.warning : theme.text.primary} />
       </div>

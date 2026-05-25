@@ -38,6 +38,7 @@ export default function AppHeader({
   recentSessions,
   onOpenRecentSession,
   currentFile,
+  onTryV2,
 }) {
   var [showRecent, setShowRecent] = useState(false);
   var [showThemeMenu, setShowThemeMenu] = useState(false);
@@ -173,6 +174,17 @@ export default function AppHeader({
         <ToolbarButton onClick={onShowPalette} title="Command Palette (Cmd+K)" aria-label="Command palette" style={{ padding: "2px 6px", color: theme.text.dim, fontSize: theme.fontSize.xs }}>
           <Icon name="command" size={11} />
         </ToolbarButton>
+
+        {onTryV2 && (
+          <ToolbarButton
+            onClick={onTryV2}
+            title="Switch to default UI"
+            aria-label="Switch to default UI"
+            style={{ padding: "2px 8px", color: theme.accent.primary, borderColor: theme.accent.primary }}
+          >
+            Default UI
+          </ToolbarButton>
+        )}
 
         {showErrorNav && errorEntries.length > 0 && (
           <div style={{ display: "flex", alignItems: "center", gap: 2 }}>

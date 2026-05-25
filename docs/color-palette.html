@@ -22,7 +22,6 @@
   .swatch { width: 28px; height: 18px; border-radius: 4px; flex-shrink: 0; border: 1px solid rgba(128,128,128,0.2); }
   .token { width: 200px; flex-shrink: 0; }
   .hex { width: 80px; flex-shrink: 0; opacity: 0.7; }
-  .changed { font-size: 9px; color: #10d97a; margin-left: 4px; }
   .mode.dark .token { color: #a1a1a8; }
   .mode.dark .hex { color: #585860; }
   .mode.light .token { color: #4f5669; }
@@ -44,15 +43,11 @@
 <body>
 
 <h1>AGENTVIZ Color Palette Review v2</h1>
-<p class="subtitle">Proposed changes: remove all warm/brown/orange tones</p>
+  <p class="subtitle">Mode-aware token reference synced with src/lib/theme.js</p>
 
 <div class="banner">
-  <strong>Changes from v1:</strong>
-  semantic.warning &rarr; clean yellow (was muddy red/brown) &bull;
-  semantic.error &rarr; cool rose (was warm red) &bull;
-  agentType.code-review &rarr; cyan (was amber) &bull;
-  track.agent &rarr; cyan (was amber) &bull;
-  agentType.default &rarr; cyan (was amber)
+  <strong>Palette authority:</strong>
+  every swatch below maps to the active dark/light values in <code>src/lib/theme.js</code>.
 </div>
 
 <!-- BG + BORDER + TEXT -->
@@ -90,11 +85,11 @@
     <div class="section">
       <div class="section-label">Semantic</div>
       <div class="row"><div class="swatch" style="background:#10d97a"></div><div class="token">semantic.success</div><div class="hex">#10d97a</div></div>
-      <div class="row"><div class="swatch" style="background:#eab308"></div><div class="token">semantic.warning</div><div class="hex">#eab308</div><span class="changed">CHANGED (was #d14d4d)</span></div>
-      <div class="row"><div class="swatch" style="background:#f43f5e"></div><div class="token">semantic.error</div><div class="hex">#f43f5e</div><span class="changed">CHANGED (was #ef4444)</span></div>
-      <div class="row"><div class="swatch" style="background:#f43f5e15"></div><div class="token">semantic.errorBg</div><div class="hex">#f43f5e15</div><span class="changed">CHANGED</span></div>
-      <div class="row"><div class="swatch" style="background:#f43f5e30"></div><div class="token">semantic.errorBorder</div><div class="hex">#f43f5e30</div><span class="changed">CHANGED</span></div>
-      <div class="row"><div class="swatch" style="background:#fb7185"></div><div class="token">semantic.errorText</div><div class="hex">#fb7185</div><span class="changed">CHANGED (was #f87171)</span></div>
+      <div class="row"><div class="swatch" style="background:#eab308"></div><div class="token">semantic.warning</div><div class="hex">#eab308</div></div>
+      <div class="row"><div class="swatch" style="background:#f43f5e"></div><div class="token">semantic.error</div><div class="hex">#f43f5e</div></div>
+      <div class="row"><div class="swatch" style="background:#f43f5e15"></div><div class="token">semantic.errorBg</div><div class="hex">#f43f5e15</div></div>
+      <div class="row"><div class="swatch" style="background:#f43f5e30"></div><div class="token">semantic.errorBorder</div><div class="hex">#f43f5e30</div></div>
+      <div class="row"><div class="swatch" style="background:#fb7185"></div><div class="token">semantic.errorText</div><div class="hex">#fb7185</div></div>
     </div>
   </div>
 
@@ -131,11 +126,11 @@
     <div class="section">
       <div class="section-label">Semantic</div>
       <div class="row"><div class="swatch" style="background:#0ea86b"></div><div class="token">semantic.success</div><div class="hex">#0ea86b</div></div>
-      <div class="row"><div class="swatch" style="background:#ca8a04"></div><div class="token">semantic.warning</div><div class="hex">#ca8a04</div><span class="changed">CHANGED (was #b45309)</span></div>
-      <div class="row"><div class="swatch" style="background:#e11d48"></div><div class="token">semantic.error</div><div class="hex">#e11d48</div><span class="changed">CHANGED (was #d32f2f)</span></div>
-      <div class="row"><div class="swatch" style="background:#e11d4814"></div><div class="token">semantic.errorBg</div><div class="hex">#e11d4814</div><span class="changed">CHANGED</span></div>
-      <div class="row"><div class="swatch" style="background:#e11d482a"></div><div class="token">semantic.errorBorder</div><div class="hex">#e11d482a</div><span class="changed">CHANGED</span></div>
-      <div class="row"><div class="swatch" style="background:#be123c"></div><div class="token">semantic.errorText</div><div class="hex">#be123c</div><span class="changed">CHANGED (was #c53030)</span></div>
+      <div class="row"><div class="swatch" style="background:#ca8a04"></div><div class="token">semantic.warning</div><div class="hex">#ca8a04</div></div>
+      <div class="row"><div class="swatch" style="background:#e11d48"></div><div class="token">semantic.error</div><div class="hex">#e11d48</div></div>
+      <div class="row"><div class="swatch" style="background:#e11d4814"></div><div class="token">semantic.errorBg</div><div class="hex">#e11d4814</div></div>
+      <div class="row"><div class="swatch" style="background:#e11d482a"></div><div class="token">semantic.errorBorder</div><div class="hex">#e11d482a</div></div>
+      <div class="row"><div class="swatch" style="background:#be123c"></div><div class="token">semantic.errorText</div><div class="hex">#be123c</div></div>
     </div>
   </div>
 </div>
@@ -145,13 +140,19 @@
   <div class="mode dark">
     <h2>Agent &amp; Track Colors</h2>
     <div class="section">
+      <div class="section-label">Agent Colors</div>
+      <div class="row"><div class="swatch" style="background:#8b8b99"></div><div class="token">agent.user</div><div class="hex">#8b8b99</div></div>
+      <div class="row"><div class="swatch" style="background:#6475e8"></div><div class="token">agent.assistant</div><div class="hex">#6475e8</div></div>
+      <div class="row"><div class="swatch" style="background:#a78bfa"></div><div class="token">agent.system</div><div class="hex">#a78bfa</div></div>
+    </div>
+    <div class="section">
       <div class="section-label">Agent Type Colors (multi-agent branches)</div>
       <div class="row"><div class="swatch" style="background:#3b9eff"></div><div class="token">agentType.explore</div><div class="hex">#3b9eff</div><span style="font-size:9px;color:#585860;margin-left:4px">blue</span></div>
       <div class="row"><div class="swatch" style="background:#10d97a"></div><div class="token">agentType.task</div><div class="hex">#10d97a</div><span style="font-size:9px;color:#585860;margin-left:4px">green</span></div>
       <div class="row"><div class="swatch" style="background:#a78bfa"></div><div class="token">agentType.general-purpose</div><div class="hex">#a78bfa</div><span style="font-size:9px;color:#585860;margin-left:4px">purple</span></div>
-      <div class="row"><div class="swatch" style="background:#06b6d4"></div><div class="token">agentType.code-review</div><div class="hex">#06b6d4</div><span class="changed">CHANGED (was #f59e0b amber &rarr; cyan)</span></div>
+      <div class="row"><div class="swatch" style="background:#06b6d4"></div><div class="token">agentType.code-review</div><div class="hex">#06b6d4</div></div>
       <div class="row"><div class="swatch" style="background:#ec4899"></div><div class="token">agentType.configure-copilot</div><div class="hex">#ec4899</div><span style="font-size:9px;color:#585860;margin-left:4px">pink</span></div>
-      <div class="row"><div class="swatch" style="background:#06b6d4"></div><div class="token">agentType.default</div><div class="hex">#06b6d4</div><span class="changed">CHANGED (was #f59e0b)</span></div>
+      <div class="row"><div class="swatch" style="background:#06b6d4"></div><div class="token">agentType.default</div><div class="hex">#06b6d4</div></div>
     </div>
     <div class="section">
       <div class="section-label">Track Colors</div>
@@ -159,20 +160,26 @@
       <div class="row"><div class="swatch" style="background:#3b9eff"></div><div class="token">track.tool_call</div><div class="hex">#3b9eff</div><span style="font-size:9px;color:#585860;margin-left:4px">blue</span></div>
       <div class="row"><div class="swatch" style="background:#a78bfa"></div><div class="token">track.context</div><div class="hex">#a78bfa</div><span style="font-size:9px;color:#585860;margin-left:4px">purple</span></div>
       <div class="row"><div class="swatch" style="background:#10d97a"></div><div class="token">track.output</div><div class="hex">#10d97a</div><span style="font-size:9px;color:#585860;margin-left:4px">green</span></div>
-      <div class="row"><div class="swatch" style="background:#06b6d4"></div><div class="token">track.agent</div><div class="hex">#06b6d4</div><span class="changed">CHANGED (was #f59e0b amber &rarr; cyan)</span></div>
+      <div class="row"><div class="swatch" style="background:#06b6d4"></div><div class="token">track.agent</div><div class="hex">#06b6d4</div></div>
     </div>
   </div>
 
   <div class="mode light">
     <h2>Agent &amp; Track Colors</h2>
     <div class="section">
+      <div class="section-label">Agent Colors</div>
+      <div class="row"><div class="swatch" style="background:#70788d"></div><div class="token">agent.user</div><div class="hex">#70788d</div></div>
+      <div class="row"><div class="swatch" style="background:#6475e8"></div><div class="token">agent.assistant</div><div class="hex">#6475e8</div></div>
+      <div class="row"><div class="swatch" style="background:#8b5cf6"></div><div class="token">agent.system</div><div class="hex">#8b5cf6</div></div>
+    </div>
+    <div class="section">
       <div class="section-label">Agent Type Colors (multi-agent branches)</div>
       <div class="row"><div class="swatch" style="background:#2563eb"></div><div class="token">agentType.explore</div><div class="hex">#2563eb</div><span style="font-size:9px;color:#8a90a2;margin-left:4px">blue</span></div>
       <div class="row"><div class="swatch" style="background:#0ea86b"></div><div class="token">agentType.task</div><div class="hex">#0ea86b</div><span style="font-size:9px;color:#8a90a2;margin-left:4px">green</span></div>
       <div class="row"><div class="swatch" style="background:#8b5cf6"></div><div class="token">agentType.general-purpose</div><div class="hex">#8b5cf6</div><span style="font-size:9px;color:#8a90a2;margin-left:4px">purple</span></div>
-      <div class="row"><div class="swatch" style="background:#0891b2"></div><div class="token">agentType.code-review</div><div class="hex">#0891b2</div><span class="changed">CHANGED (was #d97706 amber &rarr; cyan)</span></div>
+      <div class="row"><div class="swatch" style="background:#0891b2"></div><div class="token">agentType.code-review</div><div class="hex">#0891b2</div></div>
       <div class="row"><div class="swatch" style="background:#db2777"></div><div class="token">agentType.configure-copilot</div><div class="hex">#db2777</div><span style="font-size:9px;color:#8a90a2;margin-left:4px">pink</span></div>
-      <div class="row"><div class="swatch" style="background:#0891b2"></div><div class="token">agentType.default</div><div class="hex">#0891b2</div><span class="changed">CHANGED (was #d97706)</span></div>
+      <div class="row"><div class="swatch" style="background:#0891b2"></div><div class="token">agentType.default</div><div class="hex">#0891b2</div></div>
     </div>
     <div class="section">
       <div class="section-label">Track Colors</div>
@@ -180,7 +187,7 @@
       <div class="row"><div class="swatch" style="background:#2563eb"></div><div class="token">track.tool_call</div><div class="hex">#2563eb</div><span style="font-size:9px;color:#8a90a2;margin-left:4px">blue</span></div>
       <div class="row"><div class="swatch" style="background:#8b5cf6"></div><div class="token">track.context</div><div class="hex">#8b5cf6</div><span style="font-size:9px;color:#8a90a2;margin-left:4px">purple</span></div>
       <div class="row"><div class="swatch" style="background:#0ea86b"></div><div class="token">track.output</div><div class="hex">#0ea86b</div><span style="font-size:9px;color:#8a90a2;margin-left:4px">green</span></div>
-      <div class="row"><div class="swatch" style="background:#0891b2"></div><div class="token">track.agent</div><div class="hex">#0891b2</div><span class="changed">CHANGED (was #d97706 amber &rarr; cyan)</span></div>
+      <div class="row"><div class="swatch" style="background:#0891b2"></div><div class="token">track.agent</div><div class="hex">#0891b2</div></div>
     </div>
   </div>
 </div>

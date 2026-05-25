@@ -100,10 +100,11 @@ function extractUsage(raw: RawRecord): TokenUsage | null {
   const usage = raw.usage || (raw.message && raw.message.usage) || null;
   if (!usage || typeof usage !== "object") return null;
 
-  const inputTokens = usage.input_tokens || usage.prompt_tokens || 0;
+  const uncachedInputTokens = usage.input_tokens || usage.prompt_tokens || 0;
   const outputTokens = usage.output_tokens || usage.completion_tokens || 0;
   const cacheRead = usage.cache_read_input_tokens || usage.cache_read_tokens || 0;
   const cacheWrite = usage.cache_creation_input_tokens || usage.cache_write_tokens || 0;
+  const inputTokens = uncachedInputTokens + cacheRead + cacheWrite;
 
   if (inputTokens + outputTokens + cacheRead + cacheWrite === 0) return null;
 

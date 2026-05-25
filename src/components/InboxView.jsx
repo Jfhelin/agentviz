@@ -1,13 +1,17 @@
 import { useMemo, useState, useEffect, useRef } from "react";
 import { theme, alpha } from "../lib/theme.js";
 import { formatDurationLong } from "../lib/formatTime.js";
-import { formatCost } from "../lib/pricing.js";
+import { formatCostValue, isPremiumRequestUnit } from "../lib/pricing.js";
 import { formatAutonomyEfficiency } from "../lib/autonomyMetrics.js";
 import {
   LANDING_FORMAT_OPTIONS,
   LANDING_SORT_LABELS,
+  collectAllTags,
+  computeVisibleTags,
+  filterByTags,
   formatLandingClientLabel,
   filterLandingEntriesByQuery,
+  getInitialTagsFromURL,
   getLandingEntryDisplayTitle,
   getLandingEntrySecondaryText,
   isLandingSearchShortcut,
@@ -92,46 +96,6 @@ function formatMtime(isoString) {
   var min = String(d.getMinutes()).padStart(2, "0");
   return mm + "-" + dd + " " + hh + ":" + min;
 }
-
-function filterByTags(entries, activeTags) {
-  if (!activeTags || activeTags.length === 0) return entries;
-  return entries.filter(function (e) {
-    var entryTags = e.tags || [];
-    return activeTags.every(function (tag) {
-      return entryTags.indexOf(tag) !== -1;
-    });
-  });
-}
-
-function collectAllTags(entries) {
-  var tagSet = {};
-  (entries || []).forEach(function (e) {
-    (e.tags || []).forEach(function (t) { tagSet[t] = true; });
-  });
-  return Object.keys(tagSet).sort();
-}
-
-// Faceted tags: when tags are active, only show co-occurring tags
-// (tags present in sessions that match ALL selected tags).
-// Always include activeTags so the user can deselect them.
-function computeVisibleTags(entries, activeTags) {
-  var base = activeTags.length > 0 ? filterByTags(entries, activeTags) : entries;
-  var coTags = collectAllTags(base);
-  if (!activeTags || activeTags.length === 0) return coTags;
-  var merged = {};
-  coTags.forEach(function (t) { merged[t] = true; });
-  activeTags.forEach(function (t) { merged[t] = true; });
-  return Object.keys(merged).sort();
-}
-
-function getInitialTagsFromURL() {
-  var params = new URLSearchParams(window.location.search);
-  var tags = params.getAll("tag");
-  return tags.length > 0 ? tags : [];
-}
-
-// Exported for testing
-export { filterByTags, collectAllTags, computeVisibleTags, getInitialTagsFromURL };
 
 export default function InboxView({ entries, onOpenSession, onImport, onLoadSample, onStartCompare, onRefresh, manifestError, isManifestMode }) {
   var [sortMode, setSortMode] = usePersistentState("agentviz:inbox-sort", "most-recent");
@@ -531,7 +495,7 @@ export default function InboxView({ entries, onOpenSession, onImport, onLoadSamp
                   { label: "Autonomy", value: formatAutonomyEfficiency(autonomy.autonomyEfficiency) },
                   { label: "Human response", value: formatDurationLong(autonomy.babysittingTime) },
                   { label: "Idle", value: formatDurationLong(autonomy.idleTime) },
-                  { label: "Cost", value: entry.totalCost != null ? formatCost(entry.totalCost) : "--" },
+                  { label: isPremiumRequestUnit(entry.totalCostUnit) ? "PRU" : "Cost", value: entry.totalCost != null ? formatCostValue(entry.totalCost, entry.totalCostUnit) : "--" },
                   { label: "Events", value: String(entry.totalEvents || 0) },
                 ].map(function (chip) {
                   return (

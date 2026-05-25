@@ -133,7 +133,10 @@ function getSearchCount(container) {
   return lastChild.textContent || null;
 }
 
-async function renderApp(fetchImpl) {
+async function renderApp(fetchImpl, options) {
+  if (!options || !options.defaultV2) {
+    window.localStorage.setItem("agentviz:v2:enabled", "false");
+  }
   global.fetch = fetchImpl || createInactiveFetch();
 
   var container = document.createElement("div");
@@ -361,6 +364,82 @@ describe("App browser regressions", function () {
     await app.unmount();
   });
 
+  it("defaults to v2 and can switch back to Classic UI", async function () {
+    var app = await renderApp(null, { defaultV2: true });
+
+    await waitFor(function () {
+      return findByText(app.container, "Open or discover a session");
+    }, "expected v2 shell to mount by default");
+
+    await waitFor(function () {
+      return window.localStorage.getItem("agentviz:v2:enabled") === null;
+    }, "expected default v2 preference to be implicit");
+
+    await click(findExactButton(app.container, "Classic UI"));
+    await waitFor(function () {
+      return findByText(app.container, "Inbox");
+    }, "expected classic UI to remount");
+
+    await waitFor(function () {
+      return window.localStorage.getItem("agentviz:v2:enabled") === "false";
+    }, "expected classic preference to persist");
+
+    await click(findExactButton(app.container, "Default UI"));
+    await waitFor(function () {
+      return findByText(app.container, "Open or discover a session");
+    }, "expected default UI to remount");
+
+    await waitFor(function () {
+      return window.localStorage.getItem("agentviz:v2:enabled") === "true";
+    }, "expected v2 preference to persist after returning from classic");
+
+    await app.unmount();
+  });
+
+  it("toggles between Classic UI and default v2 UI", async function () {
+    var app = await renderApp();
+
+    await waitFor(function () {
+      return findByText(app.container, "Default UI");
+    }, "expected default UI toggle on landing");
+
+    await click(findExactButton(app.container, "Default UI"));
+    await waitFor(function () {
+      return findByText(app.container, "Open or discover a session");
+    }, "expected v2 shell to mount");
+
+    await waitFor(function () {
+      return window.localStorage.getItem("agentviz:v2:enabled") === "true";
+    }, "expected v2 preference to persist");
+
+    await click(findExactButton(app.container, "Classic UI"));
+    await waitFor(function () {
+      return findByText(app.container, "Inbox");
+    }, "expected v1 UI to remount");
+
+    await waitFor(function () {
+      return window.localStorage.getItem("agentviz:v2:enabled") === "false";
+    }, "expected classic UI preference to persist");
+
+    await app.unmount();
+  });
+
+  it("shows the default UI toggle in the active session header", async function () {
+    var app = await renderApp();
+
+    await click(findClickableText(app.container, "load a demo session"));
+    await waitFor(function () {
+      return findByText(app.container, "demo-session.jsonl");
+    }, "expected demo session to load");
+
+    await click(findExactButton(app.container, "Default UI"));
+    await waitFor(function () {
+      return findByText(app.container, "Open or discover a session");
+    }, "expected v2 shell from session header");
+
+    await app.unmount();
+  });
+
   it("updates search results and track filters on the loaded demo session", async function () {
     var app = await renderApp();
 
@@ -384,6 +463,40 @@ describe("App browser regressions", function () {
     await waitFor(function () {
       return findButtonByTitle(app.container, "Filter tracks");
     }, "expected hidden filter count to update");
+
+    await app.unmount();
+  });
+
+  it("keeps v1 view navigation and command palette working with shared session provider", async function () {
+    var app = await renderApp();
+
+    await click(findClickableText(app.container, "load a demo session"));
+    await waitFor(function () {
+      return findByText(app.container, "demo-session.jsonl");
+    }, "expected demo session to load");
+
+    var viewExpectations = [
+      ["Replay", "Session Info"],
+      ["Tracks", "Tracks"],
+      ["Waterfall", "Waterfall Stats"],
+      ["Stats", "Autonomy Metrics"],
+      ["Cost", "Token spend & context buildup"],
+      ["Coach", "Session coaching:"],
+    ];
+
+    for (var i = 0; i < viewExpectations.length; i++) {
+      await click(findExactButton(app.container, viewExpectations[i][0]));
+      await waitFor(function (expectedText) {
+        return function () {
+          return findByText(app.container, expectedText);
+        };
+      }(viewExpectations[i][1]), "expected " + viewExpectations[i][0] + " view to render");
+    }
+
+    await click(findButtonByTitle(app.container, "Command Palette (Cmd+K)"));
+    await waitFor(function () {
+      return app.container.querySelector('input[placeholder="Search events, turns, tools..."]');
+    }, "expected command palette to open");
 
     await app.unmount();
   });

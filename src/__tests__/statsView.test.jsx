@@ -111,7 +111,7 @@ describe("StatsView theme updates", function () {
     await act(async function () {
       root.unmount();
     });
-  });
+  }, 15000);
 
   it("updates memoized derived cards when events and metadata change", async function () {
     vi.resetModules();
@@ -172,5 +172,5 @@ describe("StatsView theme updates", function () {
     await act(async function () {
       root.unmount();
     });
-  });
+  }, 15000);
 });

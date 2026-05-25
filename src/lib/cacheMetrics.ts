@@ -1,7 +1,11 @@
 import type { TokenUsage } from "./sessionTypes";
 
-export function computeEffectiveInputTokens(inputTokens: number, cacheReadTokens: number): number {
-  return Math.max(inputTokens - cacheReadTokens, 0);
+export function computeEffectiveInputTokens(
+  inputTokens: number,
+  cacheReadTokens: number,
+  cacheWriteTokens: number = 0,
+): number {
+  return Math.max(inputTokens - cacheReadTokens - Math.max(cacheWriteTokens, 0), 0);
 }
 
 function computeCacheHitRateDenomTokens(
@@ -9,7 +13,7 @@ function computeCacheHitRateDenomTokens(
   cacheWriteTokens: number,
   cacheReadTokens: number,
 ): number {
-  var effectiveInput = computeEffectiveInputTokens(inputTokens, cacheReadTokens);
+  var effectiveInput = computeEffectiveInputTokens(inputTokens, cacheReadTokens, cacheWriteTokens);
   return effectiveInput + Math.max(cacheWriteTokens, 0) + Math.max(cacheReadTokens, 0);
 }
 

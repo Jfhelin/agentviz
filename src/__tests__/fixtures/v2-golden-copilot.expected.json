@@ -1,0 +1,100 @@
+{
+  "sourceFixture": "test-copilot.jsonl",
+  "metadata": {
+    "format": "copilot-cli",
+    "sessionId": "aaaabbbb-1234-5678-abcd-000000000001",
+    "repository": "example-org/example-project",
+    "branch": "main",
+    "primaryModel": "claude-opus-4.6",
+    "totalEvents": 15,
+    "totalTurns": 3,
+    "totalToolCalls": 5,
+    "errorCount": 0,
+    "duration": 122.51,
+  "totalCost": 3,
+  "totalCostUnit": "premium_requests",
+    "premiumRequests": 3,
+    "codeChanges": {
+      "linesAdded": 5,
+      "linesRemoved": 1,
+      "filesModified": ["utils.js", "utils.test.js"]
+    },
+    "tokenUsage": {
+      "inputTokens": 8200,
+      "outputTokens": 420,
+      "cacheRead": 1200,
+      "cacheWrite": 800,
+      "cacheHitRate": 0.14634146341463414
+    }
+  },
+  "events": {
+    "firstText": "Can you add a hello world function to utils.js?",
+    "toolNames": ["report_intent", "view", "edit", "bash", "create"],
+    "errorEventIndexes": []
+  },
+  "turns": [
+    {
+      "index": 0,
+      "userMessage": "Can you add a hello world function to utils.js?",
+      "toolCount": 3,
+      "hasError": false
+    },
+    {
+      "index": 1,
+      "userMessage": "Can you also add a test for it?",
+      "toolCount": 2,
+      "hasError": false
+    },
+    {
+      "index": 2,
+      "userMessage": "Looks good, thanks!",
+      "toolCount": 0,
+      "hasError": false
+    }
+  ],
+  "autonomy": {
+    "productiveRuntime": 8.899999952316284,
+    "babysittingTime": 90,
+    "idleTime": 0,
+    "interventionCount": 2,
+    "autonomyEfficiency": 0.08998988833778905
+  },
+  "review": {
+    "score": 81,
+    "label": "Needs review",
+    "totalEvents": 15,
+    "totalTurns": 3,
+    "totalToolCalls": 5,
+    "errorCount": 0,
+    "duration": 122.51,
+    "cost": 3,
+    "autonomyEfficiency": 0.08998988833778905,
+    "interventions": 2,
+    "topTools": [
+      { "name": "report_intent", "count": 1 },
+      { "name": "view", "count": 1 },
+      { "name": "edit", "count": 1 }
+    ],
+    "insightIds": ["interventions", "token-usage"]
+  },
+  "cost": {
+    "inputTokens": 8200,
+    "outputTokens": 420,
+    "cacheRead": 1200,
+    "cacheWrite": 800,
+    "freshInputTokens": 6200,
+    "cost": 3,
+    "cacheHitRate": 0.14634146341463414,
+    "peakContext": 8200,
+    "callCount": 1
+  },
+  "ui": {
+    "reviewScoreText": "81",
+    "reviewLabelText": "Needs review",
+  "costText": "3 PRU",
+    "autonomyText": "9%",
+    "investigateEventText": "Can you add a hello world function to utils.js?",
+    "compareTitle": "golden-a.jsonl vs golden-b.jsonl",
+    "analyzePanels": ["Stats", "Tracks", "Waterfall", "Graph", "Cost"]
+  }
+}

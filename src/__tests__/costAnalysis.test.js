@@ -39,7 +39,7 @@ describe("buildCostAnalysis", function () {
     expect(analysis.calls).toHaveLength(2);
     expect(analysis.totals.inputTokens).toBe(2500);
     expect(analysis.totals.cacheRead).toBe(800);
-    expect(analysis.totals.freshInputTokens).toBe(1700);
+    expect(analysis.totals.freshInputTokens).toBe(1650);
     expect(analysis.calls[1].cumulativeCost).toBeGreaterThan(analysis.calls[0].cost);
     expect(analysis.totals.peakContext).toBe(1300);
   });
@@ -59,6 +59,84 @@ describe("buildCostAnalysis", function () {
     var analysis = buildCostAnalysis([{ text: "no usage" }], {});
     expect(analysis.hasCostData).toBe(false);
     expect(analysis.calls).toHaveLength(0);
+  });
+
+  it("uses metadata token totals when event-level usage is incomplete", function () {
+    var analysis = buildCostAnalysis([
+      event(0, { outputTokens: 100 }, "gpt-4.1", 0),
+    ], {
+      primaryModel: "gpt-4.1",
+      totalCost: 1.23,
+      tokenUsage: { inputTokens: 5000, outputTokens: 300, cacheRead: 1200, cacheWrite: 800 },
+      modelTokenUsage: {
+        "gpt-4.1": { inputTokens: 5000, outputTokens: 300, cacheRead: 1200, cacheWrite: 800 },
+      },
+    });
+
+    expect(analysis.hasCostData).toBe(true);
+    expect(analysis.calls).toHaveLength(1);
+    expect(analysis.calls[0].isMetadataSummary).toBe(true);
+    expect(analysis.totals.inputTokens).toBe(5000);
+    expect(analysis.totals.outputTokens).toBe(300);
+    expect(analysis.totals.cacheRead).toBe(1200);
+    expect(analysis.totals.cacheWrite).toBe(800);
+    expect(analysis.totals.cost).toBe(1.23);
+    expect(analysis.totals.costUnit).toBe("usd");
+  });
+
+  it("labels Copilot CLI reported request cost as PRU and keeps token USD estimate separate", function () {
+    var analysis = buildCostAnalysis([
+      event(0, { outputTokens: 100 }, "claude-opus-4.6", 0),
+    ], {
+      format: "copilot-cli",
+      primaryModel: "claude-opus-4.6",
+      totalCost: 3,
+      totalCostUnit: "premium_requests",
+      premiumRequests: 3,
+      tokenUsage: { inputTokens: 48382, outputTokens: 287, cacheRead: 24064, cacheWrite: 24314 },
+      modelTokenUsage: {
+        "claude-opus-4.6": { inputTokens: 48382, outputTokens: 287, cacheRead: 24064, cacheWrite: 24314 },
+      },
+    });
+
+    expect(analysis.calls).toHaveLength(1);
+    expect(analysis.calls[0].isMetadataSummary).toBe(true);
+    expect(analysis.calls[0].cost).toBe(3);
+    expect(analysis.calls[0].costUnit).toBe("premium_requests");
+    expect(analysis.calls[0].estimatedUsdCost).toBeGreaterThan(0);
+    expect(analysis.totals.cost).toBe(3);
+    expect(analysis.totals.costUnit).toBe("premium_requests");
+    expect(analysis.totals.estimatedUsdCost).toBeGreaterThan(0);
+    expect(analysis.totals.premiumRequests).toBe(3);
+  });
+
+  it("uses metadata-only token totals when no token events exist", function () {
+    var analysis = buildCostAnalysis([{ text: "no usage" }], {
+      primaryModel: "gpt-5.4",
+      tokenUsage: { inputTokens: 12000, outputTokens: 3400, cacheRead: 9000, cacheWrite: 0 },
+    });
+
+    expect(analysis.hasCostData).toBe(true);
+    expect(analysis.calls[0].title).toBe("Session token totals");
+    expect(analysis.totals.inputTokens).toBe(12000);
+    expect(analysis.totals.outputTokens).toBe(3400);
+    expect(analysis.totals.cacheRead).toBe(9000);
+    expect(analysis.totals.cacheWrite).toBe(0);
+  });
+
+  it("falls back to session totals when modelTokenUsage is incomplete", function () {
+    var analysis = buildCostAnalysis([], {
+      primaryModel: "gpt-5.4",
+      tokenUsage: { inputTokens: 12000, outputTokens: 3400, cacheRead: 9000, cacheWrite: 0 },
+      modelTokenUsage: {
+        "gpt-5.4": { inputTokens: 1000, outputTokens: 400, cacheRead: 0, cacheWrite: 0 },
+      },
+    });
+
+    expect(analysis.calls).toHaveLength(1);
+    expect(analysis.totals.inputTokens).toBe(12000);
+    expect(analysis.totals.outputTokens).toBe(3400);
+    expect(analysis.totals.cacheRead).toBe(9000);
   });
 });
 

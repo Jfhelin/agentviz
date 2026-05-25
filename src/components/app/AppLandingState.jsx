@@ -78,7 +78,7 @@ function DragOverlay({ onLoad }) {
   );
 }
 
-export default function AppLandingState({ error, onLoad, onLoadSample, onStartCompare, inboxEntries, onOpenInboxSession, onRefresh, manifestError, isManifestMode }) {
+export default function AppLandingState({ error, onLoad, onLoadSample, onStartCompare, onTryV2, inboxEntries, onOpenInboxSession, onRefresh, manifestError, isManifestMode }) {
   var [landingMode, setLandingMode] = usePersistentState("agentviz:landing-mode", "inbox");
 
   return (
@@ -102,7 +102,26 @@ export default function AppLandingState({ error, onLoad, onLoadSample, onStartCo
 
       <div style={{ width: "100%", maxWidth: landingMode === "dashboard" ? 1240 : 860, flex: 1, minHeight: 0, overflow: "hidden", display: "flex", flexDirection: "column", gap: 8 }}>
         {/* view toggle */}
-        <div style={{ display: "flex", justifyContent: "flex-end", flexShrink: 0 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: theme.space.md, flexShrink: 0 }}>
+          {onTryV2 ? (
+            <button
+              type="button"
+              className="av-btn"
+              onClick={onTryV2}
+              style={{
+                border: "1px solid " + theme.accent.primary,
+                borderRadius: theme.radius.md,
+                background: theme.accent.muted,
+                color: theme.accent.primary,
+                padding: "4px 10px",
+                fontSize: theme.fontSize.xs,
+                fontFamily: theme.font.mono,
+                cursor: "pointer",
+              }}
+            >
+              Default UI
+            </button>
+          ) : <span />}
           <div style={{ display: "flex", gap: 4, background: theme.bg.surface, border: "1px solid " + theme.border.default, borderRadius: theme.radius.lg, padding: 4 }}>
             {[
               { id: "inbox", icon: "layout-list", label: "List" },

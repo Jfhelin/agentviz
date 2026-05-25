@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { theme, alpha } from "../lib/theme.js";
-import { formatCost } from "../lib/pricing.js";
+import { formatCostValue, isPremiumRequestUnit } from "../lib/pricing.js";
 import { formatDurationLong as formatDuration } from "../lib/formatTime.js";
 import { buildAutonomyMetrics, formatAutonomyEfficiency, getSessionCost } from "../lib/autonomyMetrics.js";
 import ToolbarButton from "./ui/ToolbarButton.jsx";
@@ -59,6 +59,7 @@ export function buildMetrics(session) {
     format: format,
     duration: session.total || 0,
     cost: cost,
+    costUnit: meta.totalCostUnit || "usd",
     pru: format !== "claude-code" && meta.premiumRequests != null ? meta.premiumRequests : null,
     inputTokens: hasTokenUsage ? (tu.inputTokens || 0) : null,
     outputTokens: hasTokenUsage ? (tu.outputTokens || 0) : null,
@@ -134,12 +135,8 @@ function Scorecard({ mA, mB, fileA, fileB, onOpenSessionA, onOpenSessionB }) {
   // Claude uses USD estimates, Copilot uses PRUs or actual API cost.
   // Suppress the delta badge in that case.
   function costDisplay(m) {
-    if (m.pru !== null && (m.cost == null || m.cost === 0)) {
-      // Subscription Copilot: show PRUs as the consumption metric
-      return m.pru > 0 ? m.pru + " PRU" : "--";
-    }
     if (m.cost == null) return "N/A";
-    return formatCost(m.cost);
+    return formatCostValue(m.cost, m.costUnit);
   }
 
   return (
@@ -217,7 +214,7 @@ function Scorecard({ mA, mB, fileA, fileB, onOpenSessionA, onOpenSessionB }) {
 
       <Row label="Duration"     valA={formatDuration(mA.duration)}    valB={formatDuration(mB.duration)}    a={mA.duration}    b={mB.duration}    lowerIsBetter={true} />
       <Row
-        label={crossAgent ? "Cost / PRUs" : "Effective cost"}
+        label={crossAgent || isPremiumRequestUnit(mA.costUnit) || isPremiumRequestUnit(mB.costUnit) ? "Cost / PRUs" : "Effective cost"}
         valA={costDisplay(mA)}
         valB={costDisplay(mB)}
         a={crossAgent ? null : mA.cost}

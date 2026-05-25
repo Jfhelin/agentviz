@@ -16,6 +16,12 @@ describe("estimateCost", function () {
     expect(cost).toBeCloseTo(0.56, 2);
   });
 
+  it("prices cache write tokens separately from fresh input", function () {
+    var cost = estimateCost({ inputTokens: 1000000, outputTokens: 0, cacheRead: 400000, cacheWrite: 100000 }, "gpt-4.1");
+    // Fresh: 500K * $2/M = $1.00; cached: 400K * $2/M * 10% = $0.08; write: 100K * $2/M * 125% = $0.25
+    expect(cost).toBeCloseTo(1.33, 2);
+  });
+
   it("prices Claude Haiku 4 correctly", function () {
     var cost = estimateCost({ inputTokens: 1000000, outputTokens: 100000 }, "claude-haiku-4.5");
     // 1M * $0.80/M + 100K * $4.00/M = $0.80 + $0.40 = $1.20
@@ -101,6 +107,14 @@ describe("formatCost", function () {
 
   it("formats dollar amounts with 2 decimals", function () {
     expect(formatCost(6.12)).toBe("$6.12");
+  });
+});
+
+describe("formatCostValue", function () {
+  it("formats premium request units separately from USD", async function () {
+    var pricing = await import("../lib/pricing.js");
+    expect(pricing.formatCostValue(3, "premium_requests")).toBe("3 PRU");
+    expect(pricing.formatCostValue(0.5, "usd")).toBe("$0.500");
   });
 });
 

@@ -15,7 +15,7 @@ function clearCachedAnalysis(file) {
   try { localStorage.removeItem(CACHE_PREFIX + file); } catch (e) {}
 }
 
-export default function DebriefView({ file, summary, metadata, rawSession }) {
+export default function DebriefView({ file, summary, metadata, rawSession, prefersReducedMotion }) {
   var [configFiles, setConfigFiles] = useState([]);
   var [configLoaded, setConfigLoaded] = useState(false);
   var [showConfigExplorer, setShowConfigExplorer] = useState(true);
@@ -611,7 +611,7 @@ export default function DebriefView({ file, summary, metadata, rawSession }) {
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             <div style={{ background: alpha(theme.accent.primary, 0.04), border: "1px solid " + alpha(theme.accent.primary, 0.2), borderRadius: theme.radius.xl, padding: "10px 14px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <div style={{ fontSize: theme.fontSize.xs, color: theme.accent.primary, display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ animation: "spin 1.2s linear infinite", display: "inline-block" }}>{"✦"}</span>
+                <span style={{ animation: prefersReducedMotion ? "none" : "spin 1.2s linear infinite", display: "inline-block" }}>{"✦"}</span>
                 {progressStep ? progressStep.label : "Analyzing with Copilot SDK..."}
               </div>
               {liveRecs.length > 0 && (
