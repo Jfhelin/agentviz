@@ -2032,80 +2032,117 @@ function Kpis(props) {
   );
 }
 
-// Per-model summary strip. Aggregates user-facing LLM calls (excluding
-// 'overhead' category like title generation and prompt categorization) by
-// model name, showing share of total cost and share of call count.
+// Per-model summary strip. Aggregates LLM calls by model and splits into
+// two groups: user-facing calls vs 'overhead' calls (title generation,
+// prompt categorization, etc.). Overhead is rendered dimmer and tagged so
+// it stays accountable but visually deprioritised.
 function ModelBreakdown(props) {
   var prompts = props.prompts || [];
-  var totals = {};
-  var grandCost = 0;
-  var grandCalls = 0;
+  var mainTotals = {};
+  var ovhTotals = {};
+  var mainGrandCost = 0;
+  var mainGrandCalls = 0;
+  var ovhGrandCost = 0;
+  var ovhGrandCalls = 0;
   prompts.forEach(function (p) {
     (p.events || []).forEach(function (e) {
-      if (e.kind !== "llm" || e.category === "overhead") return;
+      if (e.kind !== "llm") return;
       var name = e.model || "(unknown)";
-      var t = totals[name] || { cost: 0, calls: 0, ctx: 0 };
+      var isOvh = e.category === "overhead";
+      var bucket = isOvh ? ovhTotals : mainTotals;
+      var t = bucket[name] || { cost: 0, calls: 0, ctx: 0 };
       t.cost += e.cost || 0;
       t.calls += 1;
       t.ctx += e.promptTokens || 0;
-      totals[name] = t;
-      grandCost += e.cost || 0;
-      grandCalls += 1;
+      bucket[name] = t;
+      if (isOvh) { ovhGrandCost += e.cost || 0; ovhGrandCalls += 1; }
+      else { mainGrandCost += e.cost || 0; mainGrandCalls += 1; }
     });
   });
-  var rows = Object.keys(totals).map(function (k) {
-    return { name: k, cost: totals[k].cost, calls: totals[k].calls, ctx: totals[k].ctx };
-  }).sort(function (a, b) { return b.cost - a.cost; });
-  if (rows.length === 0) return null;
-  // Trim noisy model-id prefixes/suffixes (e.g. 'claude-opus-4-5-20250929'
-  // -> 'claude-opus-4-5') so the strip stays readable.
+  var mkRows = function (totals) {
+    return Object.keys(totals).map(function (k) {
+      return { name: k, cost: totals[k].cost, calls: totals[k].calls, ctx: totals[k].ctx };
+    }).sort(function (a, b) { return b.cost - a.cost; });
+  };
+  var mainRows = mkRows(mainTotals);
+  var ovhRows = mkRows(ovhTotals);
+  if (mainRows.length === 0 && ovhRows.length === 0) return null;
   var shortName = function (n) {
     if (!n) return "(unknown)";
     return n.replace(/-(\d{8})$/, "").replace(/-\d{8}-v\d+$/, "");
   };
-  var multi = rows.length > 1;
+  var palette = [theme.cost.cached, theme.cost.fresh, theme.cost.cwrite, theme.cost.ctxHistory, theme.cost.ctxToolDefs, theme.cost.ctxImages];
+
+  function renderGroup(rows, grandCost, grandCalls, dim) {
+    if (rows.length === 0) return null;
+    var multi = rows.length > 1;
+    return (
+      <>
+        {multi && (
+          <div style={{ display: "flex", width: "100%", height: 6, borderRadius: 2, overflow: "hidden", background: theme.bg.base, marginBottom: 10, opacity: dim ? 0.6 : 1 }}>
+            {rows.map(function (r, i) {
+              var pct = grandCost > 0 ? 100 * r.cost / grandCost : 100 / rows.length;
+              return <div key={r.name} style={{ width: pct + "%", background: palette[i % palette.length] }} title={shortName(r.name) + ": " + pct.toFixed(0) + "% of " + (dim ? "overhead " : "") + "cost"} />;
+            })}
+          </div>
+        )}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10, opacity: dim ? 0.7 : 1 }}>
+          {rows.map(function (r, i) {
+            var color = palette[i % palette.length];
+            var costPct = grandCost > 0 ? Math.round(100 * r.cost / grandCost) : 100;
+            var callPct = grandCalls > 0 ? Math.round(100 * r.calls / grandCalls) : 100;
+            return (
+              <div key={r.name} style={{ display: "flex", alignItems: "baseline", gap: 8, fontSize: theme.fontSize.sm, fontVariantNumeric: "tabular-nums" }}>
+                <span style={{ display: "inline-block", width: 8, height: 8, background: color, borderRadius: 2, flex: "0 0 auto" }} />
+                <span style={{ color: dim ? theme.text.secondary : theme.text.primary, fontWeight: 500, fontFamily: theme.font.mono, fontSize: theme.fontSize.xs }} title={r.name}>{shortName(r.name)}</span>
+                <span style={{ color: theme.text.secondary, marginLeft: "auto" }}>
+                  {fmt$(r.cost)} <span style={{ color: theme.text.muted }}>· {costPct}%</span>
+                </span>
+                <span style={{ color: theme.text.muted, fontSize: theme.fontSize.xs, minWidth: 80, textAlign: "right" }}>
+                  {r.calls} call{r.calls === 1 ? "" : "s"} · {callPct}%
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </>
+    );
+  }
+
   return (
     <div style={{
       background: theme.bg.surface, border: "1px solid " + theme.border.default,
       borderRadius: theme.radius.md, padding: "10px 14px", marginBottom: 28,
     }}>
-      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: multi ? 8 : 4 }}>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: mainRows.length > 1 ? 8 : 4 }}>
         <div style={{ color: theme.text.muted, fontSize: theme.fontSize.xs, textTransform: "uppercase", letterSpacing: 0.6 }}>
-          Models used {multi ? "(" + rows.length + ")" : ""}
+          Models used {mainRows.length > 1 ? "(" + mainRows.length + " for chat)" : ""}
         </div>
         <div style={{ color: theme.text.muted, fontSize: theme.fontSize.xs }}>
-          excludes overhead calls (title, categorization)
+          {fmt$(mainGrandCost)} chat · {mainGrandCalls} call{mainGrandCalls === 1 ? "" : "s"}
         </div>
       </div>
-      {multi && (
-        <div style={{ display: "flex", width: "100%", height: 6, borderRadius: 2, overflow: "hidden", background: theme.bg.base, marginBottom: 10 }}>
-          {rows.map(function (r, i) {
-            var pct = grandCost > 0 ? 100 * r.cost / grandCost : 100 / rows.length;
-            var palette = [theme.cost.cached, theme.cost.fresh, theme.cost.cwrite, theme.cost.ctxHistory, theme.cost.ctxToolDefs, theme.cost.ctxImages];
-            return <div key={r.name} style={{ width: pct + "%", background: palette[i % palette.length] }} title={shortName(r.name) + ": " + pct.toFixed(0) + "% of cost"} />;
-          })}
-        </div>
-      )}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
-        {rows.map(function (r, i) {
-          var palette = [theme.cost.cached, theme.cost.fresh, theme.cost.cwrite, theme.cost.ctxHistory, theme.cost.ctxToolDefs, theme.cost.ctxImages];
-          var color = palette[i % palette.length];
-          var costPct = grandCost > 0 ? Math.round(100 * r.cost / grandCost) : 100;
-          var callPct = grandCalls > 0 ? Math.round(100 * r.calls / grandCalls) : 100;
-          return (
-            <div key={r.name} style={{ display: "flex", alignItems: "baseline", gap: 8, fontSize: theme.fontSize.sm, fontVariantNumeric: "tabular-nums" }}>
-              <span style={{ display: "inline-block", width: 8, height: 8, background: color, borderRadius: 2, flex: "0 0 auto" }} />
-              <span style={{ color: theme.text.primary, fontWeight: 500, fontFamily: theme.font.mono, fontSize: theme.fontSize.xs }} title={r.name}>{shortName(r.name)}</span>
-              <span style={{ color: theme.text.secondary, marginLeft: "auto" }}>
-                {fmt$(r.cost)} <span style={{ color: theme.text.muted }}>· {costPct}%</span>
-              </span>
-              <span style={{ color: theme.text.muted, fontSize: theme.fontSize.xs, minWidth: 80, textAlign: "right" }}>
-                {r.calls} call{r.calls === 1 ? "" : "s"} · {callPct}%
+      {renderGroup(mainRows, mainGrandCost, mainGrandCalls, false)}
+      {ovhRows.length > 0 && (
+        <>
+          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", margin: "14px 0 6px", paddingTop: 10, borderTop: "1px dashed " + theme.border.subtle }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{
+                fontSize: theme.fontSize.xs, fontWeight: 600, padding: "1px 6px", borderRadius: 3,
+                color: theme.text.muted, background: theme.bg.raised, border: "1px solid " + theme.border.subtle,
+                textTransform: "uppercase", letterSpacing: 0.4,
+              }}>overhead</span>
+              <span style={{ color: theme.text.muted, fontSize: theme.fontSize.xs }} title="Title generation, prompt categorization, and other UI/telemetry calls. Already counted in 'Total cost' above. Toggle 'Show overhead calls' to filter them from the timeline.">
+                title gen, categorization, telemetry
               </span>
             </div>
-          );
-        })}
-      </div>
+            <div style={{ color: theme.text.muted, fontSize: theme.fontSize.xs }}>
+              {fmt$(ovhGrandCost)} · {ovhGrandCalls} call{ovhGrandCalls === 1 ? "" : "s"}
+            </div>
+          </div>
+          {renderGroup(ovhRows, ovhGrandCost, ovhGrandCalls, true)}
+        </>
+      )}
     </div>
   );
 }
