@@ -31,6 +31,32 @@ describe("buildLlmAnalysisPrompt", () => {
     expect(out).toContain("developer_action_report");
   });
 
+  it("orders What happened before Bottom line in the default report", () => {
+    const out = buildLlmAnalysisPrompt(analysis);
+    const whatHappenedIdx = out.indexOf("1. **What happened**");
+    const bottomLineIdx = out.indexOf("2. **Bottom line**");
+    expect(whatHappenedIdx).toBeGreaterThan(0);
+    expect(bottomLineIdx).toBeGreaterThan(whatHappenedIdx);
+  });
+
+  it("splits Fix before next run into Workflow fixes and Setup cleanup subgroups", () => {
+    const out = buildLlmAnalysisPrompt(analysis);
+    expect(out).toContain("### Workflow fixes");
+    expect(out).toContain("### Setup cleanup");
+  });
+
+  it("caps Evidence at 5 bullets by default and tells the analyst not to dump every metric", () => {
+    const out = buildLlmAnalysisPrompt(analysis);
+    expect(out).toMatch(/max 5 bullets/i);
+    expect(out).toMatch(/do NOT dump every available metric/i);
+  });
+
+  it("frames cheaper-model suggestions as experimental when validation is missing", () => {
+    const out = buildLlmAnalysisPrompt(analysis);
+    expect(out).toMatch(/cheaper models? .*(not yet proven safe|hypothes)/i);
+  });
+
+
   it("falls back to the detailed_audit 12-section format on request", () => {
     const out = buildLlmAnalysisPrompt(analysis, { reportMode: "detailed_audit" });
     expect(out).toContain("TL;DR");
