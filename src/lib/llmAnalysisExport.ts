@@ -188,32 +188,56 @@ function aggregateSkillCarry(prompts: CostAnalysisPrompt[]): {
   skillTokensPerCall: number;
   totalSkillTokens: number;
   callsWithSkills: number;
+  /** Per-skill char + token estimate, sorted descending by size. Lets the
+   * analyst LLM name specific large skills as savings candidates. */
+  skills: { name: string; tokens: number }[];
 } {
-  // Skills are declared in the system prompt and shipped on every call.
-  // We can't tell *which* skill the model actually leaned on, but the
-  // attached-but-unused-for-this-task waste is something an LLM can judge
-  // from the user-message context. Expose the aggregate carrying cost.
+  // Sample the skill list from the first CHAT (non-overhead) LLM call.
+  // The very first LLM event in the session is usually an overhead call
+  // (title generation, prompt categorization) which has its own minimal
+  // system prompt without the user's skills attached -- sampling from
+  // there returned 0 skills even when 35 were configured.
   let charsPerCall = 0;
   let count = 0;
-  let calls = 0;
+  let chatCalls = 0;
+  let skillRows: { name: string; tokens: number }[] = [];
+  let sampled = false;
   prompts.forEach(p => p.events.forEach(e => {
-    if (e.kind !== "llm") return;
-    calls += 1;
-    if (calls === 1) {
-      (e.skills || []).forEach((s: { chars: number }) => { charsPerCall += s.chars || 0; count += 1; });
+    if (e.kind !== "llm" || e.category === "overhead") return;
+    chatCalls += 1;
+    if (!sampled) {
+      sampled = true;
+      (e.skills || []).forEach((s: { name: string; chars: number }) => {
+        charsPerCall += s.chars || 0;
+        count += 1;
+        skillRows.push({ name: s.name, tokens: Math.round((s.chars || 0) / 4) });
+      });
+      skillRows.sort((a, b) => b.tokens - a.tokens);
     }
   }));
   const tokensPerCall = Math.round(charsPerCall / 4);
-  return { skillCount: count, skillTokensPerCall: tokensPerCall, totalSkillTokens: tokensPerCall * calls, callsWithSkills: calls };
+  return {
+    skillCount: count,
+    skillTokensPerCall: tokensPerCall,
+    totalSkillTokens: tokensPerCall * chatCalls,
+    callsWithSkills: chatCalls,
+    skills: skillRows,
+  };
 }
 
 function aggregateUserMessages(prompts: CostAnalysisPrompt[]): { turn: number; text: string }[] {
-  // Each prompt is one user request -> one or more LLM calls. Use
-  // prompt index as the turn number for user-facing chronology.
+  // Skip prompts that are entirely overhead (e.g. internal title generation,
+  // conversation categorization). Number turns by chat-prompt sequence so
+  // the user sees "Turn 1" for their first real request, not "Turn 3"
+  // after a couple of overhead calls slipped into the count.
   const out: { turn: number; text: string }[] = [];
-  prompts.forEach((p, i) => {
+  let turn = 0;
+  prompts.forEach(p => {
+    const hasChatCall = p.events.some(e => e.kind === "llm" && e.category !== "overhead");
+    if (!hasChatCall) return;
+    turn += 1;
     if (p.userMessage && p.userMessage.trim()) {
-      out.push({ turn: i + 1, text: truncate(p.userMessage.trim(), USER_MSG_CHAR_CAP) });
+      out.push({ turn, text: truncate(p.userMessage.trim(), USER_MSG_CHAR_CAP) });
     }
   });
   return out;
@@ -225,23 +249,28 @@ function shortModelName(name: string | undefined): string {
 }
 
 function buildPerCallTable(prompts: CostAnalysisPrompt[], compact: boolean): unknown[] {
+  // Only emit CHAT calls. Overhead (title gen, prompt categorization,
+  // telemetry) is summarised separately so it doesn't pollute the
+  // user-visible turn numbering. Turn N == the user's Nth real request.
   const rows: unknown[] = [];
   let turn = 0;
   prompts.forEach(p => {
     p.events.forEach(e => {
-      if (e.kind !== "llm") return;
+      if (e.kind !== "llm" || e.category === "overhead") return;
       turn += 1;
       const toolCalls = (e.producedToolCalls || []).length;
       const comp = e.components || { system: 0, tool_defs: 0, history: 0, tool_results: 0, current: 0 };
+      // Tool count for cross-checking tool_defs growth. Copilot Chat
+      // dynamically expands the toolset when skills get invoked or new
+      // MCP tools are discovered, so tool_defs IS NOT necessarily
+      // constant across a session. Compare this count across rows
+      // before concluding tool_defs growth is parser noise.
+      let toolsOffered = 0;
+      (e.toolGroups || []).forEach(g => { toolsOffered += (g.tools || []).length; });
       const base: Record<string, unknown> = {
         turn,
         model: shortModelName(e.model),
-        category: e.category,
         ctx_in: e.promptTokens,
-        // Per-component breakdown of the input context (estimated token
-        // attribution from char counts of each section in the prompt).
-        // Sum approximates ctx_in. Use this to pinpoint which section
-        // grew (history vs tool_results vs tool_defs) instead of guessing.
         ctx_components: {
           system: comp.system || 0,
           tool_defs: comp.tool_defs || 0,
@@ -249,12 +278,10 @@ function buildPerCallTable(prompts: CostAnalysisPrompt[], compact: boolean): unk
           tool_results: comp.tool_results || 0,
           current: comp.current || 0,
         },
+        tools_offered_count: toolsOffered,
         cached: e.cached,
         cache_write: e.cacheWrite,
         out: e.output,
-        // Char counts of the three output components. Use to attribute a
-        // large `out` number: visible prose vs extended thinking vs JSON
-        // tool-call args. ~4 chars per token rough conversion.
         out_breakdown_chars: {
           visible_reply: e.visibleResponseChars || 0,
           thinking: e.thinkingChars || 0,
@@ -445,6 +472,9 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
   lines.push("**Hard rules:**");
   lines.push("- Use ONLY the facts below. Quote numbers verbatim.");
   lines.push("- When attributing context growth or output size, name the specific JSON field. Do not speculate.");
+  lines.push("- Per-call rows include CHAT calls only — overhead calls (title generation, prompt categorization, telemetry) are summarised separately and should NOT be referenced as user turns.");
+  lines.push("- `ctx_components.tool_defs` IS NOT necessarily constant across the session. Copilot Chat dynamically expands the toolset when skills are invoked or new MCP tools are discovered. Cross-check growth against `tools_offered_count` on each row before claiming it.");
+  lines.push("- We CANNOT directly detect which skills were USED during the session — Copilot does not expose a clean 'skill invoked' signal. Use the user's goal and the assistant's tool-call pattern to infer which attached skills are clearly unrelated to the task, and name those as removal candidates.");
   lines.push("- Reasoning-token counts are NOT in this data. Do not comment on reasoning effort.");
   lines.push("- When the data does not support a claim, say 'not determinable from the data'.");
   lines.push("");
@@ -512,7 +542,19 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
   lines.push("## System prompt anatomy");
   lines.push("");
   lines.push("- **Custom chat mode:** " + (chatMode ? chatMode.name + " (~" + (chatMode.tokensEst || 0).toLocaleString() + " tok)" : "(none)"));
-  lines.push("- **Attached skills:** " + skills.length + (skills.length > 0 ? " (" + skills.slice(0, 6).join(", ") + (skills.length > 6 ? ", …" : "") + ")" : ""));
+  lines.push("- **Attached skills (" + skillCarry.skillCount + " total, ~" + skillCarry.skillTokensPerCall.toLocaleString() + " tok per call):**");
+  if (skillCarry.skills.length === 0) {
+    lines.push("  - (none attached on the first chat call)");
+  } else {
+    // Show top 10 by size with a summary line for the rest.
+    const top = skillCarry.skills.slice(0, 10);
+    const rest = skillCarry.skills.slice(10);
+    top.forEach(s => lines.push("  - `" + s.name + "` — ~" + s.tokens.toLocaleString() + " tok"));
+    if (rest.length > 0) {
+      const restTok = rest.reduce((a, s) => a + s.tokens, 0);
+      lines.push("  - … " + rest.length + " more skills (~" + restTok.toLocaleString() + " tok combined)");
+    }
+  }
   lines.push("- **Attached instructions:** " + instructions.length + (instructions.length > 0 ? " (" + instructions.slice(0, 4).join(", ") + (instructions.length > 4 ? ", …" : "") + ")" : ""));
   lines.push("");
   lines.push("## Tools offered vs used");
