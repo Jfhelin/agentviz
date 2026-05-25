@@ -21,16 +21,17 @@ describe("buildLlmAnalysisPrompt", () => {
   it("includes all required report sections", () => {
     const out = buildLlmAnalysisPrompt(analysis);
     expect(out).toContain("TL;DR");
-    expect(out).toContain("What the user was trying to do");
-    expect(out).toContain("Effective task definition");
-    expect(out).toContain("How the agent actually executed");
-    expect(out).toContain("Where the money went");
+    expect(out).toContain("Developer takeaway");
+    expect(out).toContain("What made this session expensive");
+    expect(out).toContain("What was probably unavoidable");
     expect(out).toContain("Developer-action findings");
-    expect(out).toContain("Prompt/setup changes for next time");
-    expect(out).toContain("Tool and skill hygiene");
-    expect(out).toContain("Model and Auto-mode fit");
-    expect(out).toContain("What should be automated");
-    expect(out).toContain("Missing or uncertain data");
+    expect(out).toContain("Recommended custom chat mode");
+    expect(out).toContain("Recommended IDE/tool configuration");
+    expect(out).toContain("Recommended skills/profile cleanup");
+    expect(out).toContain("Recommended automation boundary");
+    expect(out).toContain("Model and Auto-mode guidance");
+    expect(out).toContain("What to change in the inline prompt");
+    expect(out).toContain("Data confidence and missing data");
   });
 
   it("embeds the don't-fabricate guard", () => {
@@ -125,8 +126,8 @@ describe("buildLlmAnalysisPrompt", () => {
     // Composition must identify the dominant output slice as one of the
     // three buckets and include an interpretation hint.
     expect(out).toMatch(/Output dominated by `(thinking|visible_reply|tool_args|\(unknown\))`/);
-    // Section 5 must require venue tagging.
-    expect(out).toContain("venue tag");
+    // Section 5 must require a venue for each finding.
+    expect(out).toContain("/ venue /");
     expect(out).toContain("Venue guide for section 5 suggestions");
     expect(out).toContain("[inline prompt]");
     expect(out).toContain("[AGENTS.md]");

@@ -600,25 +600,51 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
   }
   lines.push("## Instructions for the analyst LLM");
   lines.push("");
-  lines.push("You are evaluating one VS Code Copilot Chat session for cost efficiency AND developer workflow efficiency. The data below is structured and pre-computed where possible. Your job is to explain where the money went, what caused it (developer behavior vs agent behavior vs unavoidable task complexity), and what the user should change next time.");
+  lines.push("You are evaluating one VS Code Copilot Chat session for **developer efficiency and cost efficiency**. Your job is to help a developer understand what they can change next time to make the agent run more efficiently.");
   lines.push("");
-  lines.push("**Critical framing:** This session may have used a custom chat mode, custom agent, repo instructions, or skills. **Do not treat the visible user prompt as the full task definition** when the structured-facts block declares a custom chat mode or repo instructions were active. Use `effective_prompt_context` and `developer_behavior_signals` to judge prompt quality, model fit, and Auto-mode fit. The single field `developer_behavior_signals.effective_prompt_specificity` is the one to cite -- not `visible_prompt_specificity`.");
+  lines.push("**Prioritize developer actionability over token accounting.** Do not present raw telemetry as the finding. Use telemetry only as supporting evidence. For every important finding, translate the data into:");
   lines.push("");
-  lines.push("**Output format:** Start your reply with `# <session title>` as the very first line (the title IS the H1 -- do not write 'Session title' as a separate label). Then use `##` subheadings for the sections below. Keep the whole report under 900 words. Be specific, not narrative. Quote field paths from the JSON facts when citing numbers.");
+  lines.push("1. what happened in developer terms,");
+  lines.push("2. why it matters,");
+  lines.push("3. which lever the developer controls,");
+  lines.push("4. what exact change to make.");
+  lines.push("");
+  lines.push("**Bad:** \"`tool_usage.execution_counts_by_name` shows `run_in_terminal` used 5 times.\"");
+  lines.push("**Good:** \"The workflow was terminal-heavy, which means the agent was effectively orchestrating a small pipeline -- that is a script candidate. Evidence: `run_in_terminal` was used 5 times.\"");
+  lines.push("");
+  lines.push("**Bad:** \"`ctx_components_chars.history` grew from 1008 to 12895.\"");
+  lines.push("**Good:** \"Intermediate results accumulated in context. For repeat runs, store detailed extraction output in files and pass compact summaries back to the model. Evidence: history grew from 1008 to 12895 chars.\"");
+  lines.push("");
+  lines.push("**Critical framing:** This session may have used a custom chat mode, custom agent, repo instructions, or skills. **Do not treat the visible user prompt as the full task definition** when `developer_action_summary` or `developer_levers_detected` indicates the custom chat mode is the main control surface. Focus recommendations there rather than telling the user to write a longer inline prompt.");
+  lines.push("");
+  lines.push("**Output format:** Start your reply with `# <session title>` as the very first line (the title IS the H1 -- do not write 'Session title' as a separate label). Then use `##` subheadings for the sections below. Keep the whole report under 900 words.");
   lines.push("");
   lines.push("Sections, in this order:");
   lines.push("");
-  lines.push("1. **TL;DR** (~5 lines, write LAST but place FIRST): one-line story of what the user was doing, then top 3 cost levers as bullets with $ or % impact pulled from `optimization_opportunities.top_cost_levers`.");
-  lines.push("2. **What the user was trying to do** -- 1-2 sentences using `effective_prompt_context.visible_user_prompt` in the user's own framing.");
-  lines.push("3. **Effective task definition** -- 2-3 sentences. If `effective_prompt_context.custom_chat_mode_name` is present, describe the combined task shape (visible prompt + chat mode constraints). Cite `effective_prompt_context.effective_task_definition_note`. If no chat mode, say so explicitly.");
-  lines.push("4. **How the agent actually executed the work** -- 3-4 bullets. Cite tool usage (`tool_usage.tools_used`, `tool_usage.execution_counts_by_name`) and notable per-call events. Note any backtracking or pivots.");
-  lines.push("5. **Where the money went** -- 3-5 bullets. For each cost driver, cite the specific JSON field path and translate it into a savings opportunity. Use `ctx_components_chars.*` (not `ctx_components.*`) when discussing context growth, since the scaled token attributions can mislead. Cross-reference `agent_behavior_signals.largest_thinking_spike` for output spikes.");
-  lines.push("6. **Developer-action findings** -- 2-3 bullets. Use `developer_behavior_signals` to attribute cause. **Do NOT blame the visible user prompt for vagueness if `developer_behavior_signals.effective_prompt_specificity == 'high'`** -- in that case the chat mode supplied the task shape and the better fix is to improve the chat mode, not lengthen the prompt. Quote `developer_behavior_signals.recommended_setup_home` verbatim.");
-  lines.push("7. **Prompt/setup changes for next time** -- Up to 3 concrete changes. For each: (a) one-line rationale citing a JSON field, (b) qualitative impact (large / moderate / small), (c) **venue tag** in square brackets from the venue guide below, (d) copy-pasteable **snippet** in a fenced code block. Prefer venues from `developer_behavior_signals.recommended_setup_home` when applicable.");
-  lines.push("8. **Tool and skill hygiene** -- Two short paragraphs. (a) Tools: cite `tool_usage.unused_tool_definition_pct_of_session` and name 2-3 specific unused tools to disable. (b) Skills: cite `skill_usage.unused_skills_pct_of_session` and name the 2-3 largest unused skills from `skill_usage.skills` (filter by `used: false`).");
-  lines.push("9. **Model and Auto-mode fit** -- One paragraph. Cite `auto_mode_data.verdict` verbatim, then `auto_mode_data.drift_signals` and `auto_mode_data.chat_mode_present_for_picker`. Quote the cost from `auto_mode_data.recommended_estimate_to_quote`. Then 1-2 sentences on `model_fit_data` -- whether the chosen tier was right and whether `model_fit_data.alt_model_projections` shows a realistic cheaper alternative.");
-  lines.push("10. **What should be automated or scripted** -- 1-2 sentences. If `agent_behavior_signals.avg_tool_args_chars_per_chat_call` is high, or the same tool name dominates `tool_usage.execution_counts_by_name`, the workflow is a candidate for a deterministic script. State it explicitly or say 'no strong script-candidate signal'.");
-  lines.push("11. **Missing or uncertain data** -- list `missing_data` verbatim. This protects the user from over-confident conclusions.");
+  lines.push("1. **TL;DR** (~5 lines, write LAST but place FIRST). Use `developer_action_summary.primary_message` plus the top-3 `developer_action_summary.top_developer_levers` as bullets. Include $ or % where the lever evidence has it.");
+  lines.push("2. **Developer takeaway** -- 2-3 sentences in plain developer language. Explain the lesson, not the metrics. Example tone: \"This was not a normal chat-answer session. It behaved like a small file-processing pipeline. The biggest improvement is not a longer prompt; it is a narrower chat mode plus deterministic scripting for repeatable steps.\"");
+  lines.push("3. **What made this session expensive** -- Group cost by developer-facing cause. Use `developer_cost_categories` keys as the bullet headings (setup_overhead, workflow_execution, decision_overhead, model_choice, context_accumulation, tool_or_skill_over_attachment -- only those present). Each bullet: one-line summary + 1-2 supporting numbers in parentheses.");
+  lines.push("4. **What was probably unavoidable** -- 1-2 sentences. Separate avoidable waste from real task complexity. Only claim something is unavoidable if facts support it (mixed file types, first-run exploration, image inspection, irreversible operations). If you cannot tell, say so.");
+  lines.push("5. **Developer-action findings** -- Iterate `developer_efficiency_findings`. For each: finding (bold) / why it matters / evidence (compact) / lever / venue / impact. Skip findings where `confidence` is `low` unless they are the only signal.");
+  lines.push("6. **Recommended custom chat mode / custom agent changes** -- Iterate `custom_chat_mode_recommendations`. Give each `add_to_chat_mode` snippet in a fenced ```text block. Note expected impact.");
+  lines.push("7. **Recommended IDE/tool configuration** -- Iterate `ide_configuration_recommendations`. Name the surface (Configure Tools / chat mode whitelist) and list the specific tools.");
+  lines.push("8. **Recommended skills/profile cleanup** -- Use `skills_profile_recommendations` or, if absent, `skill_usage.largest_unused_skills`. Name 3-5 skills to remove first. Note the caveat that `skill_attachment_source` is not recorded.");
+  lines.push("9. **Recommended automation boundary** -- Use `automation_boundary_recommendation`. Two short lists: what should become deterministic code/script, what should remain model-driven. Skip this section if `automation_boundary_recommendation` is absent or its `confidence` is `low`.");
+  lines.push("10. **Model and Auto-mode guidance** -- Use `model_strategy_recommendation`. One paragraph. Cite `auto_mode_data.verdict` and quote the cost from `auto_mode_data.recommended_estimate_to_quote`. **Do not claim a cheaper model is definitely sufficient** if `model_fit_data.alt_model_projections[*].realistic_for_full_task == \"not_determinable_from_data\"`.");
+  lines.push("11. **What to change in the inline prompt, if anything** -- 1-3 sentences. If `developer_levers_detected.inline_prompt.priority == \"low\"`, say the inline prompt should provide only session-specific scope, not full workflow instructions. Give one short example.");
+  lines.push("12. **Data confidence and missing data** -- List `missing_data` entries. For each, quote `why_it_matters_for_developer_report` so the reader understands what the report cannot prove.");
+  lines.push("");
+  lines.push("**Hard rules:**");
+  lines.push("- Use ONLY the facts below.");
+  lines.push("- Do not infer quality if validation data is missing.");
+  lines.push("- Do not blame the visible prompt alone when a custom chat mode or custom agent was active.");
+  lines.push("- Do not present field paths as the main prose. Cite field paths only as supporting evidence in parentheses.");
+  lines.push("- Do not write a report that mainly describes `tool_usage`, `ctx_components`, or per-call rows. Translate telemetry into developer levers.");
+  lines.push("- Per-call rows include CHAT calls only -- overhead calls (title generation, prompt categorization, telemetry) are summarised separately and should NOT be referenced as user turns.");
+  lines.push("- `ctx_components.*` tokens are SCALED estimates. Always cite `ctx_components_chars.*` first to determine whether real change happened.");
+  lines.push("- Skills detection: `skill_usage.skills[*].used` is computed from tool-call args; cite those markers directly.");
+  lines.push("- Reasoning-token counts are NOT in this data. `agent_behavior_signals.avg_thinking_chars_per_chat_call` is a character count, not a billed token count.");
+  lines.push("- If something is not determinable from the data, say so.");
   lines.push("");
   lines.push("**Hard rules:**");
   lines.push("- Use ONLY the facts below. Quote numbers verbatim.");
@@ -839,7 +865,402 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
     .sort((a, b) => b.tokens - a.tokens)
     .slice(0, 5)
     .map(s => ({ name: s.name, tokens: s.tokens }));
+
+  // ---- Developer-facing abstraction layer ------------------------------
+  // Translates raw telemetry into developer-controllable levers so the
+  // analyst LLM produces a developer-action-friendly report rather than
+  // a field-by-field telemetry summary.
+
+  // Workflow classification heuristic.
+  const toolUsageCounts: Record<string, number> = {};
+  toolUsage.forEach(t => { toolUsageCounts[t.name] = (t as { uses?: number; count?: number }).uses ?? (t as { count?: number }).count ?? 0; });
+  const terminalCount = toolUsageCounts["run_in_terminal"] || 0;
+  const imageCount = (toolUsageCounts["view_image"] || 0) + (toolUsageCounts["view"] || 0);
+  const createFileCount = (toolUsageCounts["create_file"] || 0) + (toolUsageCounts["create"] || 0);
+  const editFileCount = (toolUsageCounts["edit_file"] || 0) + (toolUsageCounts["edit"] || 0) + (toolUsageCounts["replace_string_in_file"] || 0);
+  const searchReadCount = (toolUsageCounts["semantic_search"] || 0) + (toolUsageCounts["grep_search"] || 0) + (toolUsageCounts["grep"] || 0) + (toolUsageCounts["read_file"] || 0) + (toolUsageCounts["view_file"] || 0);
+  const fileMutationCount = createFileCount + editFileCount;
+  const totalToolExec = totals.toolCalls;
+  const promptLower = (firstUserPromptText || "").toLowerCase();
+  const mentionsFiles = /\b(folder|file|files|recipt|receipt|receipts|image|images|pdf|pdfs|directory|batch)\b/.test(promptLower);
+  const mentionsDebug = /\b(bug|error|failing|failure|test|tests|broken|fix|crash|stack)\b/.test(promptLower);
+  let workflowType = "unknown";
+  let workflowConfidence = "low";
+  let workflowReason = "Tool mix does not match a known workflow pattern.";
+  const alternativeWorkflowTypes: string[] = [];
+  if ((terminalCount + imageCount + createFileCount) >= 3 && mentionsFiles && fileMutationCount > 0) {
+    workflowType = "repeatable_file_processing";
+    workflowConfidence = "medium";
+    workflowReason = "Multiple terminal/image/file-creation tool executions with a file-oriented prompt suggest a small file-processing pipeline.";
+    if (fileMutationCount >= 2) alternativeWorkflowTypes.push("agentic_batch_operation");
+  } else if (mentionsDebug && (terminalCount > 0 || editFileCount > 0)) {
+    workflowType = "debugging";
+    workflowConfidence = "medium";
+    workflowReason = "Prompt references errors/tests/fixes and the session ran terminal and/or file-edit tools.";
+  } else if (searchReadCount >= 3 && fileMutationCount === 0) {
+    workflowType = "research_and_summarization";
+    workflowConfidence = "medium";
+    workflowReason = "Search/read tools dominated with no file mutation; output is mostly visible explanation.";
+  } else if (editFileCount >= 2 && totalToolExec >= 4) {
+    workflowType = "code_generation";
+    workflowConfidence = "low";
+    workflowReason = "Multiple file edits without strong debugging signals.";
+  }
+
+  // Developer-levers detection.
+  const unusedToolPctOffered = unused.offeredAll.size > 0 ? (unused.unused.length / unused.offeredAll.size) * 100 : 0;
+  const configureToolsPriority = (unusedToolPctOffered > 30 || unusedToolPctOfSession > 3) ? (unusedToolPctOfSession > 10 ? "high" : "medium") : "low";
+  const skillsPriority = (skillCarry.skillCount > 0 && skillCarry.unusedCount > 0 && (skillCarry.usedCount === 0 || unusedSkillPctOfSession > 3)) ? (unusedSkillPctOfSession > 10 ? "high" : "medium") : "low";
+  const scriptPriority = (workflowType === "repeatable_file_processing" || terminalCount >= 3 || fileMutationCount >= 3) ? "high_for_repeat_use" : "low";
+  const modelLeverPriority = (cheapestAlt && autoOptimalSavings != null && autoOptimalSavings > 0.05) ? "medium" : "low";
+  const inlinePromptPriority = firstChatMode ? "low" : (visibleSpecValue === "low" ? "high" : "medium");
+
+  const leversDetected: Record<string, unknown> = {};
+  if (firstChatMode) {
+    leversDetected.custom_chat_mode = {
+      available: true,
+      priority: "high",
+      recommended_action: "Improve the custom chat mode `" + firstChatMode.name + "` rather than telling the user to write a longer inline prompt.",
+      evidence: ["custom_chat_mode_used: true", "custom_chat_mode_name: " + firstChatMode.name],
+    };
+  } else {
+    leversDetected.custom_chat_mode = {
+      available: false,
+      priority: "low",
+      recommended_action: "No custom chat mode active. Consider adding one if this kind of session recurs.",
+      evidence: ["custom_chat_mode_used: false"],
+    };
+  }
+  leversDetected.configure_tools = {
+    available: unused.unused.length > 0,
+    priority: configureToolsPriority,
+    recommended_action: unused.unused.length > 0 ? "Disable unused tool families in VS Code Configure Tools or restrict the chat mode tool whitelist." : "Tool profile already narrow.",
+    evidence: [unused.unused.length + " unused tools", unused.used.size + " tools used", unusedToolPctOfSession.toFixed(1) + "% of session cost on unused tool defs"],
+  };
+  leversDetected.skills = {
+    available: skillCarry.skillCount > 0,
+    priority: skillsPriority,
+    recommended_action: skillCarry.unusedCount > 0 ? "Prune unused skills from whichever surface attached them (chat mode, profile, workspace -- not recorded)." : "Skill profile already narrow.",
+    evidence: [skillCarry.skillCount + " skills attached", skillCarry.usedCount + " used", skillCarry.unusedCount + " unused"],
+  };
+  leversDetected.script_or_cli = {
+    available: true,
+    priority: scriptPriority,
+    recommended_action: scriptPriority === "high_for_repeat_use" ? "Move deterministic steps (inventory, extraction, summary generation) into a script. Reserve the model for ambiguous interpretation and review." : "No strong script-candidate signal in this session.",
+    evidence: ["workflow_classification: " + workflowType, "run_in_terminal calls: " + terminalCount, "file mutation calls: " + fileMutationCount],
+  };
+  leversDetected.model_selection = {
+    available: true,
+    priority: modelLeverPriority,
+    recommended_action: cheapestAlt ? "Consider Auto or `" + cheapestAlt.model + "` for repeat runs once the workflow is scripted and validated. Quality is not proven without validation data." : "Alt-model projections do not show meaningful savings.",
+    evidence: cheapestAlt ? ["alt projection: " + cheapestAlt.model + " ~$" + (autoOptimalCost || 0).toFixed(4), "quality validation: not_available"] : ["no cheaper alternative projected"],
+  };
+  leversDetected.inline_prompt = {
+    available: true,
+    priority: inlinePromptPriority,
+    recommended_action: firstChatMode ? "Inline prompt should provide only session-specific scope; do not add full workflow instructions there -- they belong in the chat mode." : "Inline prompt is the only instruction surface here. Make it specific about scope and output format.",
+    evidence: firstChatMode ? ["custom chat mode active", "do_not_blame_visible_prompt_alone: true"] : ["no custom chat mode active"],
+  };
+
+  // Top developer levers (ranked).
+  const leverRankOrder: Record<string, number> = { high: 0, high_for_repeat_use: 1, medium: 2, low: 3 };
+  const topDeveloperLevers = Object.entries(leversDetected)
+    .map(([k, v]) => {
+      const obj = v as { priority: string; recommended_action: string; available: boolean };
+      return { key: k, priority: obj.priority, available: obj.available, action: obj.recommended_action };
+    })
+    .filter(l => l.available && l.priority !== "low")
+    .sort((a, b) => (leverRankOrder[a.priority] ?? 9) - (leverRankOrder[b.priority] ?? 9))
+    .slice(0, 5)
+    .map((l, idx) => ({
+      lever: l.key,
+      priority: idx + 1,
+      action: l.action,
+      why: (l.key === "custom_chat_mode" && firstChatMode) ? "The visible prompt was only a trigger; the active chat mode shaped the real behavior."
+        : l.key === "script_or_cli" ? "The session behaved like a repeatable workflow that can be partially scripted."
+        : l.key === "configure_tools" ? "Many tools were available but unused, adding cost to every call."
+        : l.key === "skills" ? "Many skills were attached but unused, adding cost to every call."
+        : l.key === "model_selection" ? "Cheaper model projections exist, but quality is not proven without validation data."
+        : "Adjust this lever to make the next session more efficient.",
+    }));
+
+  // Primary message synthesis.
+  const primaryMessageParts: string[] = [];
+  if (workflowType === "repeatable_file_processing") primaryMessageParts.push("This was a repeatable file-processing pipeline");
+  else if (workflowType === "debugging") primaryMessageParts.push("This was a debugging session");
+  else if (workflowType === "research_and_summarization") primaryMessageParts.push("This was a research/summarization session");
+  else if (workflowType === "code_generation") primaryMessageParts.push("This was a code-generation session");
+  else primaryMessageParts.push("This session does not match a clear workflow pattern");
+  if (firstChatMode) primaryMessageParts.push("running through the custom chat mode `" + firstChatMode.name + "`");
+  primaryMessageParts.push(".");
+  const primaryActions: string[] = [];
+  if (firstChatMode) primaryActions.push("optimize the chat mode");
+  if (configureToolsPriority !== "low" || skillsPriority !== "low") primaryActions.push("narrow the tool/skill profile");
+  if (scriptPriority === "high_for_repeat_use") primaryActions.push("script deterministic steps");
+  if (primaryActions.length > 0) primaryMessageParts.push(" Top levers: " + primaryActions.join("; ") + ".");
+  const primaryMessage = primaryMessageParts.join("");
+
+  // Developer cost categories.
+  const developerCostCategories: Record<string, unknown> = {};
+  if (unusedToolUsd > 0 || unusedSkillUsd > 0) {
+    developerCostCategories.setup_overhead = {
+      summary: "Cost from broad tools, skills, and attached instructions before useful work begins.",
+      evidence: [
+        unused.unused.length + " unused tools / " + unusedToolPctOfSession.toFixed(2) + "% of session cost",
+        skillCarry.unusedCount + " unused skills / " + unusedSkillPctOfSession.toFixed(2) + "% of session cost",
+      ],
+      developer_levers: ["Configure Tools", "skill pruning", "chat mode simplification"],
+      estimated_impact: (unusedToolPctOfSession + unusedSkillPctOfSession) > 10 ? "large" : "moderate",
+    };
+  }
+  if (totalToolExec > 0) {
+    developerCostCategories.workflow_execution = {
+      summary: "Cost from the agent running a multi-step workflow.",
+      evidence: [
+        totalToolExec + " tool executions",
+        terminalCount > 0 ? "run_in_terminal used " + terminalCount + " times" : null,
+        imageCount > 0 ? "image inspection used " + imageCount + " times" : null,
+      ].filter(Boolean),
+      developer_levers: ["script deterministic steps", "compact intermediate outputs"],
+      estimated_impact: workflowType === "repeatable_file_processing" ? "moderate to large for repeat runs" : "moderate",
+    };
+  }
+  if (maxThink.chars >= 5000) {
+    developerCostCategories.decision_overhead = {
+      summary: "Cost from hidden deliberation before a notable step.",
+      evidence: [
+        "turn " + maxThink.turn + " cost $" + maxThink.cost.toFixed(4),
+        "turn " + maxThink.turn + " thinking chars: " + maxThink.chars.toLocaleString(),
+      ],
+      developer_levers: ["brief-thinking rule in custom chat mode", "preview/confirm/execute pattern"],
+      estimated_impact: "large",
+    };
+  }
+  if (ctxGrowthSources.length > 0 && ctxGrowthSources[0].chars_end > ctxGrowthSources[0].chars_start * 3) {
+    developerCostCategories.context_accumulation = {
+      summary: "Intermediate results accumulated in the conversation across turns.",
+      evidence: ctxGrowthSources.slice(0, 2).map(s => s.source + " chars grew from " + s.chars_start + " to " + s.chars_end),
+      developer_levers: ["write detailed intermediate output to files", "feed compact summaries back to the model"],
+      estimated_impact: "moderate",
+    };
+  }
+  developerCostCategories.model_choice = {
+    summary: "Cost from running the chosen model tier across the whole session.",
+    evidence: [
+      "chosen model: " + (chosenModelName || "unknown") + " / " + (chosenTier || "unknown"),
+      "Auto same-model floor cost $" + autoSameModelCost.toFixed(4),
+      cheapestAlt ? "alt-model realism: not_determinable_from_data without validation" : "no meaningful cheaper alternative projected",
+    ],
+    developer_levers: ["Auto mode", cheapestAlt ? "cheaper model for repeat scripted workflows" : null].filter(Boolean) as string[],
+    estimated_impact: cheapestAlt ? "small to large depending on quality requirements" : "small",
+  };
+
+  // Developer efficiency findings.
+  const efficiencyFindings: Record<string, unknown>[] = [];
+  if (firstChatMode) {
+    efficiencyFindings.push({
+      finding: "The custom chat mode is the main place to optimize",
+      why_it_matters: "The visible prompt was only a trigger; the active chat mode shaped the actual behavior.",
+      evidence: ["custom_chat_mode_used: true", "custom_chat_mode_name: " + firstChatMode.name, "do_not_blame_visible_prompt_alone: true"],
+      developer_lever: "Improve the custom chat mode instructions",
+      recommended_venue: "custom chat mode .chatmode.md",
+      impact: "large",
+      confidence: "high",
+    });
+  }
+  if (workflowType === "repeatable_file_processing") {
+    efficiencyFindings.push({
+      finding: "This workflow is a script candidate",
+      why_it_matters: "The agent behaved like a small pipeline: inspect folder, process files, create output.",
+      evidence: ["workflow_classification: repeatable_file_processing", "run_in_terminal calls: " + terminalCount, "file mutation calls: " + fileMutationCount],
+      developer_lever: "Script deterministic steps and reserve the model for exceptions",
+      recommended_venue: "repo script + custom chat mode",
+      impact: "large for repeat use",
+      confidence: "medium",
+    });
+  }
+  if (unused.unused.length > 5 || skillCarry.unusedCount > 5) {
+    efficiencyFindings.push({
+      finding: "The session carried irrelevant tool and skill overhead",
+      why_it_matters: "Unused tools and skills add cost to every call without helping the workflow.",
+      evidence: [
+        unused.unused.length + " unused tools",
+        skillCarry.unusedCount + " unused skills",
+        unusedToolPctOfSession.toFixed(2) + "% unused tool definition cost",
+        unusedSkillPctOfSession.toFixed(2) + "% unused skill cost",
+      ],
+      developer_lever: "Whitelist tools and prune attached skills",
+      recommended_venue: "Configure Tools + custom chat mode / profile",
+      impact: (unusedToolPctOfSession + unusedSkillPctOfSession) > 10 ? "large" : "moderate",
+      confidence: "high",
+    });
+  }
+  if (maxThink.chars >= 5000) {
+    efficiencyFindings.push({
+      finding: "The expensive point was a hidden-deliberation step",
+      why_it_matters: "Agents can spend a lot of hidden work before a notable output or file-changing operation.",
+      evidence: [
+        "turn " + maxThink.turn + " cost $" + maxThink.cost.toFixed(4),
+        totals.cost > 0 ? "turn " + maxThink.turn + " was " + Math.round(100 * maxThink.cost / totals.cost) + "% of session cost" : null,
+        "turn " + maxThink.turn + " thinking chars: " + maxThink.chars.toLocaleString(),
+      ].filter(Boolean),
+      developer_lever: "Add a preview/confirm/execute pattern and brief-thinking rule",
+      recommended_venue: "custom chat mode",
+      impact: "large",
+      confidence: "high",
+    });
+  }
+  if (ctxGrowthSources.length > 0 && ctxGrowthSources[0].chars_end > ctxGrowthSources[0].chars_start * 3) {
+    efficiencyFindings.push({
+      finding: "Intermediate context accumulated across the workflow",
+      why_it_matters: "Long sessions get more expensive when extraction results and prior steps accumulate in conversation history.",
+      evidence: ctxGrowthSources.slice(0, 2).map(s => s.source + " chars grew from " + s.chars_start + " to " + s.chars_end),
+      developer_lever: "Write structured intermediate outputs to files and pass compact summaries back to the model",
+      recommended_venue: "custom chat mode + repo script",
+      impact: "moderate",
+      confidence: "medium",
+    });
+  }
+
+  // Custom chat mode recommendations.
+  const customChatModeRecommendations: Record<string, unknown>[] = [];
+  if (maxThink.chars >= 5000) {
+    customChatModeRecommendations.push({
+      problem: "Batch or routine work caused a large hidden-deliberation spike.",
+      add_to_chat_mode: "Before renaming or modifying multiple files, create a compact action plan. If all items have high confidence, execute directly with brief reasoning. If any item is ambiguous, ask only about those items.",
+      expected_impact: "large",
+      evidence: ["turn " + maxThink.turn + " cost $" + maxThink.cost.toFixed(4), "turn " + maxThink.turn + " thinking chars: " + maxThink.chars.toLocaleString()],
+    });
+  }
+  if (unused.unused.length > 5) {
+    customChatModeRecommendations.push({
+      problem: "Too many unrelated tools were available.",
+      add_to_chat_mode: "For this kind of session, use only " + Array.from(unused.used).sort().slice(0, 5).map(t => "`" + t + "`").join(", ") + " unless the user explicitly asks for codebase search, notebooks, or refactoring.",
+      expected_impact: "moderate",
+      evidence: [unused.unused.length + " unused tools", "tools used: " + Array.from(unused.used).sort().join(", ")],
+    });
+  }
+  if (workflowType === "repeatable_file_processing") {
+    customChatModeRecommendations.push({
+      problem: "The workflow appears repeatable.",
+      add_to_chat_mode: "Prefer a repository script when available for the deterministic steps of this workflow. Use the model for ambiguous interpretation, exception handling, and final review rather than rediscovering the full pipeline each session.",
+      expected_impact: "large for repeated use",
+      evidence: ["workflow_classification: repeatable_file_processing"],
+    });
+  }
+  if (ctxGrowthSources.length > 0 && ctxGrowthSources[0].chars_end > ctxGrowthSources[0].chars_start * 3) {
+    customChatModeRecommendations.push({
+      problem: "Intermediate context accumulated during the session.",
+      add_to_chat_mode: "Keep intermediate results compact. Store detailed extraction output in files and pass only structured summaries, unresolved items, and final decisions back into chat.",
+      expected_impact: "moderate",
+      evidence: ctxGrowthSources.slice(0, 2).map(s => s.source + " chars grew from " + s.chars_start + " to " + s.chars_end),
+    });
+  }
+
+  // IDE configuration recommendations.
+  const ideConfigRecommendations: Record<string, unknown>[] = [];
+  const notebookToolPatterns = ["notebook", "jupyter"];
+  const codeNavPatterns = ["semantic_search", "renameSymbol", "symbol", "rename"];
+  const unusedNotebookTools = unused.unused.filter(t => notebookToolPatterns.some(p => t.toLowerCase().includes(p)));
+  const unusedCodeNavTools = unused.unused.filter(t => codeNavPatterns.some(p => t.toLowerCase().includes(p)));
+  if (unusedNotebookTools.length > 0) {
+    ideConfigRecommendations.push({
+      surface: "VS Code Configure Tools",
+      action: "Disable notebook-related tools for this chat mode",
+      tools: unusedNotebookTools.slice(0, 6),
+      reason: "No notebook work occurred in this session.",
+      expected_impact: "small to moderate",
+    });
+  }
+  if (unusedCodeNavTools.length > 0) {
+    ideConfigRecommendations.push({
+      surface: "VS Code Configure Tools",
+      action: "Disable code-navigation/refactor tools for sessions like this",
+      tools: unusedCodeNavTools.slice(0, 6),
+      reason: "This was not a codebase navigation or symbol refactor task.",
+      expected_impact: "small",
+    });
+  }
+  if (unused.used.size > 0 && unused.used.size <= 6) {
+    ideConfigRecommendations.push({
+      surface: "custom chat mode tool whitelist",
+      action: "Whitelist only the tools used in this session for similar sessions",
+      tools_to_keep: Array.from(unused.used).sort(),
+      reason: "Only these tools were actually used.",
+      expected_impact: "moderate",
+    });
+  }
+
+  // Skills profile recommendations.
+  const skillsProfileRecommendations: Record<string, unknown>[] = [];
+  if (largestUnusedSkills.length > 0) {
+    skillsProfileRecommendations.push({
+      surface: "custom agent skills config / global skill profile / workspace skill profile",
+      action: "Remove unrelated skills from sessions like this",
+      skills_to_remove_first: largestUnusedSkills.map(s => s.name),
+      reason: "These were the largest unused skills attached to the session.",
+      expected_impact: unusedSkillPctOfSession > 5 ? "moderate" : "small",
+      caveat: "The export does not record which surface attached each skill, so remove them from the source that actually attaches them.",
+    });
+  }
+
+  // Automation boundary recommendation.
+  let automationBoundary: Record<string, unknown> | null = null;
+  if (workflowType === "repeatable_file_processing") {
+    automationBoundary = {
+      summary: "This workflow should be split: deterministic script for repeatable steps; model for ambiguous interpretation and review.",
+      should_script: ["folder inventory", "file type detection", "text/data extraction", "rename or transform preview generation", "summary or report file creation", "post-run validation"],
+      should_remain_model_driven: ["ambiguous interpretation", "exception handling", "normalization when extraction is unclear", "final human-readable review"],
+      confidence: "medium",
+      evidence: ["workflow_classification: repeatable_file_processing", "run_in_terminal calls: " + terminalCount, imageCount > 0 ? "image inspection calls: " + imageCount : null].filter(Boolean),
+    };
+  }
+
+  // Model strategy recommendation.
+  const modelStrategyRecommendation = {
+    summary: cheapestAlt
+      ? "Use the current " + (chosenTier || "chosen") + " tier or Auto for first runs with unknown complexity; consider Auto or a cheaper model for repeat runs after deterministic steps are scripted and validated."
+      : "Stay on the current model tier; cheaper alternatives do not show meaningful savings on this token shape.",
+    first_run: {
+      recommended: (chosenTier || "current tier") + " or Auto",
+      reason: "Unknown task complexity may need stronger interpretation on first runs.",
+    },
+    repeat_run_after_script: {
+      recommended: cheapestAlt ? "Auto or `" + cheapestAlt.model + "`" : "current model with Auto",
+      reason: cheapestAlt ? "Once deterministic steps are scripted, the model handles only exceptions and review." : "No cheaper realistic alternative projected.",
+    },
+    auto_mode: {
+      recommended: autoFitVerdict !== "poor",
+      reason: autoFitVerdict === "good"
+        ? "Drift was minimal; Auto's first-call pick likely holds across the session."
+        : autoFitVerdict === "borderline"
+          ? "Some drift detected; Auto may stay on the same tier or step up mid-session. Quote the floor cost."
+          : "Significant drift detected; if Auto picked a lighter model from the first prompt it would have under-served later turns. Use same-model floor as realistic Auto cost.",
+    },
+    do_not_claim: cheapestAlt ? "Do not claim `" + cheapestAlt.model + "` is definitely sufficient because quality validation data is missing." : "Do not claim a cheaper model is sufficient without quality validation data.",
+  };
+
+  const developerActionSummary = {
+    primary_message: primaryMessage,
+    top_developer_levers: topDeveloperLevers,
+  };
+
   const facts = {
+    developer_action_summary: developerActionSummary,
+    developer_efficiency_findings: efficiencyFindings,
+    developer_levers_detected: leversDetected,
+    workflow_classification: {
+      type: workflowType,
+      confidence: workflowConfidence,
+      reason: workflowReason,
+      alternative_types: alternativeWorkflowTypes,
+    },
+    developer_cost_categories: developerCostCategories,
+    custom_chat_mode_recommendations: customChatModeRecommendations,
+    ide_configuration_recommendations: ideConfigRecommendations,
+    skills_profile_recommendations: skillsProfileRecommendations,
+    automation_boundary_recommendation: automationBoundary,
+    model_strategy_recommendation: modelStrategyRecommendation,
     session_metadata: {
       session_label: opts.sessionLabel || null,
       primary_model: chosenModelName || null,
@@ -920,6 +1341,14 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
       unused_tool_definition_pct_of_session: Number(unusedToolPctOfSession.toFixed(2)),
       total_executions: totals.toolCalls,
       execution_counts_by_name: toolUsage,
+      developer_interpretation: {
+        tool_profile_too_broad: unused.unused.length > 5,
+        workflow_dominated_by_terminal: terminalCount >= 3,
+        recommended_tool_profile: {
+          keep: Array.from(unused.used).sort(),
+          disable_examples: unused.unused.slice(0, 8),
+        },
+      },
       confidence: "measured",
     },
     skill_usage: {
@@ -938,6 +1367,11 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
       })),
       largest_unused_skills: largestUnusedSkills,
       skill_attachment_source: "unknown_not_recorded_in_export",
+      developer_interpretation: {
+        skill_profile_too_broad: skillCarry.unusedCount >= 5,
+        recommended_action: skillCarry.unusedCount > 0 ? "Use a narrower skill profile for sessions like this." : "Skill profile already narrow.",
+        remove_first: largestUnusedSkills.slice(0, 3).map(s => s.name),
+      },
       confidence: "measured",
     },
     developer_behavior_signals: {
@@ -992,6 +1426,18 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
       model_switched_mid_session: autoModelSwitched,
       distinct_chat_models: Array.from(distinctChatModels).map(shortModelName),
       unexpected_cache_misses_detected: chatEvents.some(e => (e as { unexpectedMiss?: boolean }).unexpectedMiss === true),
+      developer_interpretation: {
+        hidden_deliberation_issue: {
+          present: maxThink.chars >= 5000,
+          meaning: maxThink.chars >= 5000 ? "The model spent a lot of hidden work before a notable step." : "No notable hidden-deliberation spike detected.",
+          developer_lever: maxThink.chars >= 5000 ? "Add brief-thinking and preview/execute rules to the custom chat mode." : null,
+        },
+        context_accumulation_issue: {
+          present: ctxGrowthSources.length > 0 && ctxGrowthSources[0].chars_end > ctxGrowthSources[0].chars_start * 3,
+          meaning: (ctxGrowthSources.length > 0 && ctxGrowthSources[0].chars_end > ctxGrowthSources[0].chars_start * 3) ? "Intermediate results accumulated in the conversation across turns." : "No notable context-accumulation issue detected.",
+          developer_lever: (ctxGrowthSources.length > 0 && ctxGrowthSources[0].chars_end > ctxGrowthSources[0].chars_start * 3) ? "Store detailed intermediate results in files and feed compact summaries back to the model." : null,
+        },
+      },
     },
     model_fit_data: {
       chosen_model: chosenModelName,
@@ -1036,51 +1482,59 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
     },
     missing_data: [
       firstChatMode ? {
-        field: "custom_agent_full_prompt",
+        field: "custom_chat_mode_full_prompt_or_summary",
         status: "not_available",
         reason: "Telemetry includes only the custom chat mode name and character count.",
-        future_instrumentation: "Store full custom chat mode prompt text when safe. Otherwise store name, hash, character count, and a redacted summary.",
+        why_it_matters_for_developer_report: "Without it, the report cannot say whether the chat mode caused the expensive behavior or exactly how to edit it.",
+        future_instrumentation: "Store full prompt text when safe. Otherwise store name, hash, character count, and a redacted summary.",
       } : null,
       {
         field: "workflow_phases",
         status: "not_available",
         reason: "No reliable phase labels or clustering heuristic is present in the export.",
+        why_it_matters_for_developer_report: "Without phase labels, the report cannot pinpoint which phase of the workflow cost the most.",
         future_instrumentation: "Capture explicit phase markers from the agent or infer them with a documented classifier.",
       },
       {
-        field: "files_and_artifacts",
+        field: "file_inventory_and_artifacts",
         status: "not_available",
         reason: "Tool results are aggregated; the export does not enumerate per-call file inventory or created/renamed/deleted artifacts.",
+        why_it_matters_for_developer_report: "Without it, the report cannot distinguish unavoidable file-handling complexity from waste, and cannot confirm the workflow_classification.",
         future_instrumentation: "Capture file inventory before/after, file types, sizes, and files touched per tool call.",
       },
       {
-        field: "quality_and_outcome",
+        field: "quality_validation",
         status: "not_available",
         reason: "No post-session validation, user correction, or acceptance signal is captured.",
+        why_it_matters_for_developer_report: "Without it, the report cannot say whether cheaper models or more automation would preserve correctness.",
         future_instrumentation: "Capture validation checks, user acceptance, and post-session corrections.",
       },
       {
         field: "was_rework_or_retry",
         status: "not_available",
         reason: "Per-call rework / retry detection would require command fingerprinting and file-operation diffing across turns.",
+        why_it_matters_for_developer_report: "Without it, the report cannot tell the developer how much cost came from the agent redoing prior work.",
         future_instrumentation: "Add command fingerprinting and repeated file/action detection.",
       },
       {
         field: "skill_attachment_source",
         status: "not_available",
         reason: "Export does not record which surface attached each skill (custom agent vs workspace vs global profile).",
+        why_it_matters_for_developer_report: "Without it, the report can only recommend removing skills generically; it cannot point the developer to the right config file.",
         future_instrumentation: "Annotate each attached skill with its source surface.",
       },
       {
         field: "per_command_tool_output_size",
         status: "not_available",
         reason: "Only aggregate tool_results component chars are available; individual command stdout/stderr sizes are not exposed.",
+        why_it_matters_for_developer_report: "Without it, the report cannot identify which specific commands bloated context.",
         future_instrumentation: "Capture per-command stdout/stderr byte counts and truncation flags.",
       },
       {
         field: "reasoning_token_counts",
         status: "not_available",
         reason: "Copilot does not report reasoning token counts even when the model emits extended thinking. Our `thinking_chars` is a character count from the visible thinking stream, not a billed token count.",
+        why_it_matters_for_developer_report: "Without billed reasoning tokens, the report cannot give exact $ savings for reducing extended thinking.",
         future_instrumentation: "Surface model-reported reasoning tokens when the platform exposes them.",
       },
     ].filter(Boolean),
@@ -1200,7 +1654,7 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
   lines.push("");
   lines.push("---");
   lines.push("");
-  lines.push("End of facts. Produce the 11-section report now. Remember: write the TL;DR last but place it first; the very first line of your reply is `# <session title>`.");
+  lines.push("End of facts. Produce the 12-section developer-facing report now. Remember: write the TL;DR last but place it first; the very first line of your reply is `# <session title>`. Telemetry field paths belong in parentheses as evidence, not as the main prose.");
   lines.push("");
   return lines.join("\n");
 }
