@@ -18,16 +18,19 @@ describe("buildLlmAnalysisPrompt", () => {
     expect(out.length).toBeGreaterThan(500);
   });
 
-  it("includes the eight required report sections", () => {
+  it("includes all required report sections", () => {
     const out = buildLlmAnalysisPrompt(analysis);
     expect(out).toContain("TL;DR");
-    expect(out).toContain("What the user wanted");
-    expect(out).toContain("How it played out");
+    expect(out).toContain("What the user was trying to do");
+    expect(out).toContain("Effective task definition");
+    expect(out).toContain("How the agent actually executed");
     expect(out).toContain("Where the money went");
-    expect(out).toContain("What the user could change");
-    expect(out).toContain("Model fit");
-    expect(out).toContain("Auto-mode verdict");
-    expect(out).toContain("Unused capacity");
+    expect(out).toContain("Developer-action findings");
+    expect(out).toContain("Prompt/setup changes for next time");
+    expect(out).toContain("Tool and skill hygiene");
+    expect(out).toContain("Model and Auto-mode fit");
+    expect(out).toContain("What should be automated");
+    expect(out).toContain("Missing or uncertain data");
   });
 
   it("embeds the don't-fabricate guard", () => {
@@ -112,8 +115,8 @@ describe("buildLlmAnalysisPrompt", () => {
     expect(out).toContain("Auto-mode fit verdict");
     // Verdict label must be one of the three buckets.
     expect(out).toMatch(/\*\*(Good fit|Borderline fit|Poor fit)\*\*/);
-    // Sec 7 instructions must reference the pre-computed verdict.
-    expect(out).toMatch(/cite the pre-computed \*\*Auto-mode fit verdict\*\*/);
+    // Section 9 instructions must reference the Auto-mode verdict by JSON field path.
+    expect(out).toContain("auto_mode_data.verdict");
   });
 
   it("emits a top-expensive-call composition bullet with cause interpretation and venue guide", () => {
@@ -128,5 +131,31 @@ describe("buildLlmAnalysisPrompt", () => {
     expect(out).toContain("[inline prompt]");
     expect(out).toContain("[AGENTS.md]");
     expect(out).toContain("[custom skill: SKILL.md]");
+  });
+
+  it("emits a structured facts JSON block with all top-level keys", () => {
+    const out = buildLlmAnalysisPrompt(analysis);
+    expect(out).toContain("## Structured facts (JSON)");
+    // Extract the JSON block that follows the heading.
+    const match = out.match(/## Structured facts \(JSON\)[\s\S]*?```json\n([\s\S]*?)\n```/);
+    expect(match).not.toBeNull();
+    const facts = JSON.parse(match![1]);
+    expect(facts).toHaveProperty("session_metadata");
+    expect(facts).toHaveProperty("effective_prompt_context");
+    expect(facts).toHaveProperty("instruction_sources");
+    expect(facts).toHaveProperty("cost_summary");
+    expect(facts).toHaveProperty("tool_usage");
+    expect(facts).toHaveProperty("skill_usage");
+    expect(facts).toHaveProperty("developer_behavior_signals");
+    expect(facts).toHaveProperty("agent_behavior_signals");
+    expect(facts).toHaveProperty("model_fit_data");
+    expect(facts).toHaveProperty("auto_mode_data");
+    expect(facts).toHaveProperty("optimization_opportunities");
+    expect(facts).toHaveProperty("missing_data");
+    expect(Array.isArray(facts.missing_data)).toBe(true);
+    expect(facts.missing_data.length).toBeGreaterThan(0);
+    // Developer signals must distinguish visible vs effective specificity.
+    expect(facts.developer_behavior_signals).toHaveProperty("visible_prompt_specificity");
+    expect(facts.developer_behavior_signals).toHaveProperty("effective_prompt_specificity");
   });
 });

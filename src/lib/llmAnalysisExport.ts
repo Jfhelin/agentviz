@@ -600,22 +600,25 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
   }
   lines.push("## Instructions for the analyst LLM");
   lines.push("");
-  lines.push("You are evaluating one VS Code Copilot Chat session for cost efficiency. The data below is structured and pre-computed where possible. Your job is to interpret it and tell the user where their money went and what to change next time.");
+  lines.push("You are evaluating one VS Code Copilot Chat session for cost efficiency AND developer workflow efficiency. The data below is structured and pre-computed where possible. Your job is to explain where the money went, what caused it (developer behavior vs agent behavior vs unavoidable task complexity), and what the user should change next time.");
   lines.push("");
-  lines.push("**Output format:** Start your reply with `# <session title>` as the very first line (the title IS the H1 — do not write 'Session title' as a separate label). Then use `##` subheadings for the sections below. Keep the whole report under 800 words. Be specific, not narrative.");
+  lines.push("**Critical framing:** This session may have used a custom chat mode, custom agent, repo instructions, or skills. **Do not treat the visible user prompt as the full task definition** when the structured-facts block declares a custom chat mode or repo instructions were active. Use `effective_prompt_context` and `developer_behavior_signals` to judge prompt quality, model fit, and Auto-mode fit. The single field `developer_behavior_signals.effective_prompt_specificity` is the one to cite -- not `visible_prompt_specificity`.");
+  lines.push("");
+  lines.push("**Output format:** Start your reply with `# <session title>` as the very first line (the title IS the H1 -- do not write 'Session title' as a separate label). Then use `##` subheadings for the sections below. Keep the whole report under 900 words. Be specific, not narrative. Quote field paths from the JSON facts when citing numbers.");
   lines.push("");
   lines.push("Sections, in this order:");
   lines.push("");
-  lines.push("1. **TL;DR** (~5 lines, write this LAST but place it FIRST):");
-  lines.push("    - one-line story of what the user was doing");
-  lines.push("    - top 3 cost levers as a bulleted list, each with the specific $ or % impact pulled from the pre-computed facts below");
-  lines.push("2. **What the user wanted** — 1-2 sentences, in the user's own framing.");
-  lines.push("3. **How it played out** — 3-4 bullets max. Note any backtracking or pivots.");
-  lines.push("4. **Where the money went** — Focus on cost. For each notable cost driver, name the specific data field (e.g. `ctx_components.tool_results grew from 12k to 28k between turns 8 and 10`) and translate it into a savings opportunity. Skip purely narrative observations. 3-5 bullets.");
-  lines.push("5. **What the user could change** — Up to 3 concrete prompt or setup changes. For each suggestion provide: (a) a one-line rationale citing the relevant cost-lever or composition data, (b) qualitative size (large / moderate / small), (c) a **venue tag** in square brackets from the venue guide below, and (d) a copy-pasteable **snippet** in a fenced code block showing the exact text to add. Example: '[inline prompt] Add: \\`Reply with only the renamed filenames, no explanation.\\` -- would cap visible_reply, large impact.'");
-  lines.push("6. **Model fit** — Was " + (chosenModelName ? shortModelName(chosenModelName) : "the chosen model") + " (" + (chosenTier || "unknown") + " tier) right for this task? 2-3 sentences. Reference the alt-model table.");
-  lines.push("7. **Auto-mode verdict** — One line: cite the pre-computed **Auto-mode fit verdict** (Good / Borderline / Poor fit) and the named drift signals verbatim, then quote the realistic cost figure the verdict points you at (floor for Poor, floor or in-between for Borderline, optimistic for Good).");
-  lines.push("8. **Unused capacity** — Two short paragraphs. (a) Unused tools: cite the pre-computed `% of session cost` figure, name 2-3 specific tools the user could safely disable in VS Code's Configure Tools UI for similar tasks. (b) Unused skills: cite the pre-computed **Unused skills** figure (`N skills / $X / Y%`) verbatim — that number is detected from the data, not inferred. Name the 2-3 largest unused skills from the System anatomy list as the top removal candidates.");
+  lines.push("1. **TL;DR** (~5 lines, write LAST but place FIRST): one-line story of what the user was doing, then top 3 cost levers as bullets with $ or % impact pulled from `optimization_opportunities.top_cost_levers`.");
+  lines.push("2. **What the user was trying to do** -- 1-2 sentences using `effective_prompt_context.visible_user_prompt` in the user's own framing.");
+  lines.push("3. **Effective task definition** -- 2-3 sentences. If `effective_prompt_context.custom_chat_mode_name` is present, describe the combined task shape (visible prompt + chat mode constraints). Cite `effective_prompt_context.effective_task_definition_note`. If no chat mode, say so explicitly.");
+  lines.push("4. **How the agent actually executed the work** -- 3-4 bullets. Cite tool usage (`tool_usage.tools_used`, `tool_usage.execution_counts_by_name`) and notable per-call events. Note any backtracking or pivots.");
+  lines.push("5. **Where the money went** -- 3-5 bullets. For each cost driver, cite the specific JSON field path and translate it into a savings opportunity. Use `ctx_components_chars.*` (not `ctx_components.*`) when discussing context growth, since the scaled token attributions can mislead. Cross-reference `agent_behavior_signals.largest_thinking_spike` for output spikes.");
+  lines.push("6. **Developer-action findings** -- 2-3 bullets. Use `developer_behavior_signals` to attribute cause. **Do NOT blame the visible user prompt for vagueness if `developer_behavior_signals.effective_prompt_specificity == 'high'`** -- in that case the chat mode supplied the task shape and the better fix is to improve the chat mode, not lengthen the prompt. Quote `developer_behavior_signals.recommended_setup_home` verbatim.");
+  lines.push("7. **Prompt/setup changes for next time** -- Up to 3 concrete changes. For each: (a) one-line rationale citing a JSON field, (b) qualitative impact (large / moderate / small), (c) **venue tag** in square brackets from the venue guide below, (d) copy-pasteable **snippet** in a fenced code block. Prefer venues from `developer_behavior_signals.recommended_setup_home` when applicable.");
+  lines.push("8. **Tool and skill hygiene** -- Two short paragraphs. (a) Tools: cite `tool_usage.unused_tool_definition_pct_of_session` and name 2-3 specific unused tools to disable. (b) Skills: cite `skill_usage.unused_skills_pct_of_session` and name the 2-3 largest unused skills from `skill_usage.skills` (filter by `used: false`).");
+  lines.push("9. **Model and Auto-mode fit** -- One paragraph. Cite `auto_mode_data.verdict` verbatim, then `auto_mode_data.drift_signals` and `auto_mode_data.chat_mode_present_for_picker`. Quote the cost from `auto_mode_data.recommended_estimate_to_quote`. Then 1-2 sentences on `model_fit_data` -- whether the chosen tier was right and whether `model_fit_data.alt_model_projections` shows a realistic cheaper alternative.");
+  lines.push("10. **What should be automated or scripted** -- 1-2 sentences. If `agent_behavior_signals.avg_tool_args_chars_per_chat_call` is high, or the same tool name dominates `tool_usage.execution_counts_by_name`, the workflow is a candidate for a deterministic script. State it explicitly or say 'no strong script-candidate signal'.");
+  lines.push("11. **Missing or uncertain data** -- list `missing_data` verbatim. This protects the user from over-confident conclusions.");
   lines.push("");
   lines.push("**Hard rules:**");
   lines.push("- Use ONLY the facts below. Quote numbers verbatim.");
@@ -710,6 +713,205 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
       lines.push("- **Top expensive call composition:** Turn " + topTurn + " cost **" + fmtUsd(topCall.cost) + " (" + topPct.toFixed(0) + "% of session)**, output " + topCall.output.toLocaleString() + " tokens. Output dominated by `" + dominant.name + "` (~" + dominant.pct + "% of output chars) -- " + dominant.interp + " Tools called next: " + toolSummary + ".");
     }
   }
+  lines.push("");
+  lines.push("---");
+  lines.push("");
+  lines.push("## Structured facts (JSON)");
+  lines.push("");
+  lines.push("The block below is machine-generated from the session export. The schema follows the project's session-analysis-package contract. Quote field paths (e.g. `effective_prompt_context.custom_agent_name`) when citing numbers. Empty arrays / nulls in `missing_data` declare what the export does not contain.");
+  lines.push("");
+  // Build the structured facts object.
+  const overheadCallCount = Object.values(perModel).reduce((a, v) => a + v.overheadCalls, 0);
+  const chatCallCount = totals.llmCalls - overheadCallCount;
+  // Effective vs visible prompt distinction. Visible = the user's first
+  // chat message. Effective = visible + custom chat mode prompt (when one
+  // is attached). The analyst LLM must judge prompt quality on effective,
+  // not visible -- otherwise it incorrectly blames the user for a terse
+  // prompt when the chat mode already supplied the task shape.
+  const visiblePromptLen = firstPromptChars;
+  const visibleSpecificity = visiblePromptLen >= 300 ? "high" : visiblePromptLen >= 80 ? "medium" : "low";
+  const effectiveSpecificity = firstChatMode ? "high" : visibleSpecificity;
+  const specificityReason = firstChatMode
+    ? "Visible user prompt was " + visibleSpecificity + " specificity (" + visiblePromptLen + " chars), but the active custom chat mode `" + firstChatMode.name + "` (~" + (firstChatMode.tokensEst || 0).toLocaleString() + " tok) supplied workflow constraints."
+    : "No custom chat mode active. Effective prompt specificity equals visible (" + visiblePromptLen + " chars).";
+  // Behavior-verbosity averages across chat calls.
+  let totalVis = 0, totalThink = 0, totalToolArgs = 0;
+  let maxThink = { turn: 0, chars: 0, out: 0, cost: 0 };
+  let turnIdx = 0;
+  chatEvents.forEach(e => {
+    turnIdx += 1;
+    const t = e.thinkingChars || 0;
+    totalVis += e.visibleResponseChars || 0;
+    totalThink += t;
+    totalToolArgs += e.toolArgsChars || 0;
+    if (t > maxThink.chars) maxThink = { turn: turnIdx, chars: t, out: e.output || 0, cost: e.cost || 0 };
+  });
+  const callsForAvg = Math.max(chatEvents.length, 1);
+  const avgVisible = Math.round(totalVis / callsForAvg);
+  const avgThink = Math.round(totalThink / callsForAvg);
+  const explanationVerbosity = avgVisible >= 2000 ? "high" : avgVisible >= 500 ? "medium" : "low";
+  const deliberationVerbosity = avgThink >= 5000 ? "high" : avgThink >= 1500 ? "medium" : "low";
+  // Top cost levers mirrored into structured form so the analyst can quote them.
+  const topCostLevers: Record<string, unknown>[] = [];
+  if (unusedToolUsd > 0) topCostLevers.push({
+    lever: "Disable unused tool definitions",
+    evidence: unused.unused.length + " tools / ~" + unused.unusedDefTokensTotal.toLocaleString() + " tokens across calls / ~" + fmtUsd(unusedToolUsd) + " / " + unusedToolPctOfSession.toFixed(1) + "% of session cost",
+    estimated_impact: unusedToolPctOfSession >= 10 ? "large" : unusedToolPctOfSession >= 3 ? "moderate" : "small",
+    recommended_venue: "VS Code Configure Tools UI or custom chat mode tool whitelist",
+    snippet: "(disable in VS Code: Settings -> Chat -> Tools, or restrict in `.chatmode.md` `tools:` frontmatter)",
+  });
+  if (unusedSkillUsd > 0) topCostLevers.push({
+    lever: "Remove unused skills from the active skill source",
+    evidence: skillCarry.unusedCount + " unused skills / ~" + skillCarry.unusedTokensPerCall.toLocaleString() + " tok per call / ~" + fmtUsd(unusedSkillUsd) + " / " + unusedSkillPctOfSession.toFixed(1) + "% of session cost",
+    estimated_impact: unusedSkillPctOfSession >= 10 ? "large" : unusedSkillPctOfSession >= 3 ? "moderate" : "small",
+    recommended_venue: "custom agent skills config / VS Code skill profile (depends on where the skills were attached)",
+    snippet: "(prune unused skills from whichever surface attached them; the export does not record skill_attachment_source)",
+  });
+  if (maxThink.chars >= 5000) topCostLevers.push({
+    lever: "Constrain extended deliberation on routine work",
+    evidence: "Turn " + maxThink.turn + " emitted " + maxThink.chars.toLocaleString() + " chars of thinking / " + maxThink.out.toLocaleString() + " output tokens / " + fmtUsd(maxThink.cost),
+    estimated_impact: "moderate",
+    recommended_venue: "custom chat mode or custom agent prompt",
+    snippet: "For routine extraction, renaming, and batch file operations, think briefly. Reserve extended deliberation for ambiguous receipts or irreversible operations.",
+  });
+  const facts = {
+    session_metadata: {
+      session_label: opts.sessionLabel || null,
+      primary_model: chosenModelName || null,
+      primary_model_tier: chosenTier || null,
+      chat_call_count: chatCallCount,
+      overhead_call_count: overheadCallCount,
+      tool_execution_count: totals.toolCalls,
+      total_cost_usd: Number(totals.cost.toFixed(4)),
+      total_billed_input_tokens: totals.promptTokens,
+      total_cached_input_tokens: totals.cached,
+      total_output_tokens: totals.output,
+      custom_chat_mode_used: !!firstChatMode,
+      repo_instructions_used: instructions.length > 0,
+    },
+    cost_summary: {
+      total_cost_usd: Number(totals.cost.toFixed(4)),
+      total_billed_input_tokens: totals.promptTokens,
+      total_cached_input_tokens: totals.cached,
+      total_cache_write_tokens: totals.cacheWrite,
+      total_output_tokens: totals.output,
+      chat_call_cost_usd: Number(Object.values(perModel).reduce((a, v) => a + v.cost, 0).toFixed(4)),
+      overhead_call_cost_usd: Number(Object.values(perModel).reduce((a, v) => a + v.overheadCost, 0).toFixed(4)),
+    },
+    effective_prompt_context: {
+      visible_user_prompt: firstUserPromptText,
+      visible_user_prompt_chars: visiblePromptLen,
+      custom_chat_mode_name: firstChatMode ? firstChatMode.name : null,
+      custom_chat_mode_tokens_est: firstChatMode ? (firstChatMode.tokensEst || 0) : 0,
+      custom_chat_mode_full_text_available: false,
+      effective_task_definition_note: firstChatMode
+        ? "Combined task is `visible_user_prompt` interpreted under the constraints set by the `" + firstChatMode.name + "` chat mode. Full chat-mode text is NOT in this export; only the name and token weight."
+        : "No chat mode active; effective task definition equals the visible user prompt.",
+    },
+    instruction_sources: {
+      custom_chat_mode_tokens: firstChatMode ? (firstChatMode.tokensEst || 0) : 0,
+      skills_attached_count: skillCarry.skillCount,
+      skills_attached_tokens_per_call: skillCarry.skillTokensPerCall,
+      tool_definitions_tokens_per_call_first: firstChat && firstChat.components ? (firstChat.components.tool_defs || 0) : 0,
+      repo_instruction_files: instructions,
+    },
+    tool_usage: {
+      tools_offered_count: unused.offeredAll.size,
+      tools_used_count: unused.used.size,
+      tools_used: Array.from(unused.used).sort(),
+      unused_tools: unused.unused,
+      unused_tool_definition_cost_usd: Number(unusedToolUsd.toFixed(4)),
+      unused_tool_definition_pct_of_session: Number(unusedToolPctOfSession.toFixed(2)),
+      total_executions: totals.toolCalls,
+      execution_counts_by_name: toolUsage,
+    },
+    skill_usage: {
+      skills_attached_count: skillCarry.skillCount,
+      skills_used_count: skillCarry.usedCount,
+      skills_unused_count: skillCarry.unusedCount,
+      skill_carry_cost_usd: Number(skillCarryUsd.toFixed(4)),
+      skill_carry_pct_of_session: Number(skillCarryPctOfSession.toFixed(2)),
+      unused_skills_cost_usd: Number(unusedSkillUsd.toFixed(4)),
+      unused_skills_pct_of_session: Number(unusedSkillPctOfSession.toFixed(2)),
+      skills: skillCarry.skills.map(s => ({
+        name: s.name,
+        tokens: s.tokens,
+        used: s.used,
+        evidence: s.used ? "skill file path appeared in at least one tool call's rawArgs" : "skill file path did not appear in any tool call's args",
+      })),
+      skill_attachment_source: "unknown (not recorded in export)",
+    },
+    developer_behavior_signals: {
+      visible_prompt_length_chars: visiblePromptLen,
+      visible_prompt_specificity: visibleSpecificity,
+      effective_prompt_specificity: effectiveSpecificity,
+      specificity_reason: specificityReason,
+      custom_chat_mode_supplied_task_shape: !!firstChatMode,
+      recommended_setup_home: firstChatMode
+        ? "improve the active custom chat mode (`" + firstChatMode.name + "`) rather than lengthening the user prompt"
+        : "add a custom chat mode or repo-level `.github/copilot-instructions.md` for repeatable workflows of this kind",
+    },
+    agent_behavior_signals: {
+      avg_visible_reply_chars_per_chat_call: avgVisible,
+      avg_thinking_chars_per_chat_call: avgThink,
+      avg_tool_args_chars_per_chat_call: Math.round(totalToolArgs / callsForAvg),
+      explanation_verbosity: explanationVerbosity,
+      internal_deliberation_verbosity: deliberationVerbosity,
+      largest_thinking_spike: maxThink.chars > 0 ? {
+        turn: maxThink.turn,
+        thinking_chars: maxThink.chars,
+        output_tokens: maxThink.out,
+        cost_usd: Number(maxThink.cost.toFixed(4)),
+      } : null,
+      model_switched_mid_session: autoModelSwitched,
+      distinct_chat_models: Array.from(distinctChatModels).map(shortModelName),
+    },
+    model_fit_data: {
+      chosen_model: chosenModelName,
+      chosen_model_category: chosenTier,
+      chosen_cost_usd: Number(totals.cost.toFixed(4)),
+      alt_model_projections: altCostRows.map(r => {
+        const delta = r.projected_cost_usd - totals.cost;
+        const denom = totals.cost || 1;
+        return {
+          model: r.model,
+          vendor: r.vendor,
+          category: r.category,
+          projected_cost_usd: r.projected_cost_usd,
+          delta_pct_vs_chosen: Math.round(100 * delta / denom),
+        };
+      }),
+      projection_caveat: "Same token shape this session produced, re-priced on each candidate. Behavior may differ on a different model (longer/shorter outputs, more/fewer tool calls).",
+    },
+    auto_mode_data: {
+      verdict: autoFitLabel,
+      verdict_bucket: autoFitVerdict,
+      drift_signals: driftSignals,
+      chat_mode_present_for_picker: !!firstChatMode,
+      same_model_floor_cost_usd: Number(autoSameModelCost.toFixed(4)),
+      same_model_floor_savings_usd: Number(autoSameModelSavings.toFixed(4)),
+      same_model_floor_savings_pct: 10,
+      optimistic_cheapest_viable_cost_usd: autoOptimalCost != null ? Number(autoOptimalCost.toFixed(4)) : null,
+      optimistic_cheapest_viable_model: cheapestAlt ? cheapestAlt.model : null,
+      recommended_estimate_to_quote: autoFitVerdict === "good" ? "optimistic_cheapest_viable" : autoFitVerdict === "borderline" ? "same_model_floor (in-between if a mid-tier alt is realistic)" : "same_model_floor",
+    },
+    optimization_opportunities: {
+      top_cost_levers: topCostLevers,
+    },
+    missing_data: [
+      firstChatMode ? "Full custom chat mode prompt text (only name + token weight available)." : null,
+      "Per-call workflow phase classification (no reliable heuristic; analyst can group by hand from per-call breakdown if useful).",
+      "File inventory / artifacts produced (export does not enumerate files touched per tool call).",
+      "Quality and outcome validation (no post-session correction or user-confirmation data).",
+      "Per-call rework / retry detection (would require diff/similarity across calls).",
+      "Skill attachment source (which surface attached each skill -- custom agent vs global profile vs workspace).",
+      "Tool stdout/stderr byte size per individual command (only aggregate tool_results component chars are available).",
+      "Reasoning token counts (Copilot does not report these even when the model emits extended thinking).",
+    ].filter(Boolean),
+  };
+  lines.push("```json");
+  lines.push(JSON.stringify(facts, null, 2));
+  lines.push("```");
   lines.push("");
   lines.push("---");
   lines.push("");
@@ -822,7 +1024,7 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
   lines.push("");
   lines.push("---");
   lines.push("");
-  lines.push("End of facts. Produce the 8-section report now.");
+  lines.push("End of facts. Produce the 11-section report now. Remember: write the TL;DR last but place it first; the very first line of your reply is `# <session title>`.");
   lines.push("");
   return lines.join("\n");
 }
