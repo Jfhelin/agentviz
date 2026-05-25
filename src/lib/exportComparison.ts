@@ -49,6 +49,85 @@ function trimAnswer(s: string, max = 200): string {
   return flat.length <= max ? flat : flat.slice(0, max) + "…";
 }
 
+function trimGoal(s: string): string {
+  return trimAnswer(s, 600);
+}
+
+interface DivergencePoint {
+  index: number;
+  axis: "name" | "model" | "absent_in_a" | "absent_in_b";
+  detail?: string;
+}
+
+function findFirstDivergencePoint(cmp: CostComparison): DivergencePoint | null {
+  for (let i = 0; i < cmp.callPairs.length; i++) {
+    const p = cmp.callPairs[i];
+    if (!p.a && !p.b) continue;
+    if (!p.a) return { index: i, axis: "absent_in_a", detail: `${p.name} only in B` };
+    if (!p.b) return { index: i, axis: "absent_in_b", detail: `${p.name} only in A` };
+    if (p.a.name !== p.b.name) {
+      return { index: i, axis: "name", detail: `A called \"${p.a.name}\", B called \"${p.b.name}\"` };
+    }
+    if (!p.sameModel) {
+      return { index: i, axis: "model", detail: `A used ${p.a.model || "?"}, B used ${p.b.model || "?"}` };
+    }
+  }
+  return null;
+}
+
+interface DecisionSupport {
+  cheaperRun: string;
+  moreExpensiveRun: string;
+  costDeltaMeaningful: boolean;
+  attributionConfidence: "high" | "medium" | "low";
+  safeToClaimCostSavings: boolean;
+  safeToClaimQualityEquivalence: boolean;
+  safeToRecommendCheaperRun: boolean;
+  reason: string;
+}
+
+function buildDecisionSupport(cmp: CostComparison, nameA: string, nameB: string): DecisionSupport {
+  const costA = cmp.a.totalCost;
+  const costB = cmp.b.totalCost;
+  const cheaper = costA <= costB ? nameA : nameB;
+  const moreExp = costA <= costB ? nameB : nameA;
+  const denom = Math.max(Math.abs(costA), Math.abs(costB), 1e-9);
+  const pct = Math.abs(costB - costA) / denom;
+  const costDeltaMeaningful = pct >= 0.02;
+
+  const blocking = cmp.drift.hasBlockingDrift;
+  const pollution = cmp.cachePollution.suspect;
+  let attribution: "high" | "medium" | "low";
+  if (blocking || pollution) attribution = "low";
+  else if (!cmp.sameShape || !cmp.answersEquivalent) attribution = "medium";
+  else attribution = "high";
+
+  const safeCost = costDeltaMeaningful && !pollution && !blocking;
+  const safeQuality = cmp.answersEquivalent && cmp.sameShape && !blocking;
+  const safeRecommend = safeCost && safeQuality;
+
+  const reasons: string[] = [];
+  if (!costDeltaMeaningful) reasons.push("cost delta is within noise (<2%)");
+  if (pollution) reasons.push("cache pollution suspected");
+  if (blocking) reasons.push("blocking drift on an axis that should be identical");
+  if (!cmp.sameShape) reasons.push("call shape differs (runs took different paths)");
+  if (!cmp.answersEquivalent) reasons.push("final answers differ — quality cannot be assumed equivalent");
+  const reason = reasons.length === 0
+    ? `Comparison is clean; ${cheaper} is cheaper and the two runs are shape- and answer-equivalent.`
+    : reasons.join("; ");
+
+  return {
+    cheaperRun: cheaper,
+    moreExpensiveRun: moreExp,
+    costDeltaMeaningful,
+    attributionConfidence: attribution,
+    safeToClaimCostSavings: safeCost,
+    safeToClaimQualityEquivalence: safeQuality,
+    safeToRecommendCheaperRun: safeRecommend,
+    reason,
+  };
+}
+
 function kpiRow(label: string, kpi: BehavioralKpiValue, decimals = 0): string {
   const a = fmtNum(kpi.a, decimals);
   const b = fmtNum(kpi.b, decimals);
@@ -101,17 +180,17 @@ export function formatComparisonAsMarkdown(
     if (goalA && goalB && goalA === goalB) {
       lines.push("Both runs started from the same prompt:");
       lines.push("```");
-      lines.push(trimAnswer(goalA));
+      lines.push(trimGoal(goalA));
       lines.push("```");
     } else {
       lines.push(`### A · ${nameA}`);
       lines.push("```");
-      lines.push(trimAnswer(goalA || "(no first user prompt captured)"));
+      lines.push(trimGoal(goalA || "(no first user prompt captured)"));
       lines.push("```");
       lines.push("");
       lines.push(`### B · ${nameB}`);
       lines.push("```");
-      lines.push(trimAnswer(goalB || "(no first user prompt captured)"));
+      lines.push(trimGoal(goalB || "(no first user prompt captured)"));
       lines.push("```");
       if (goalA && goalB && goalA !== goalB) {
         lines.push("");
@@ -142,6 +221,114 @@ export function formatComparisonAsMarkdown(
   lines.push(`- **Prefix tax (input tokens, first primary call):** A ${fmtNum(ds.preInputTokensA)} · B ${fmtNum(ds.preInputTokensB)} · Δ ${fmtSignedTok(ds.preInputDelta)} tok`);
   lines.push(`- **Pre-divergence cost:** A ${fmtCr(ds.preCostA)} · B ${fmtCr(ds.preCostB)} · Δ ${ds.preDelta >= 0 ? "+" : ""}${fmtCr(ds.preDelta)} (${fmtPctSigned(ds.preDeltaPct)})`);
   lines.push(`- **Post-divergence cost:** A ${fmtCr(ds.postCostA)} · B ${fmtCr(ds.postCostB)} · Δ ${ds.postDelta >= 0 ? "+" : ""}${fmtCr(ds.postDelta)} (${fmtPctSigned(ds.postDeltaPct)})`);
+  lines.push("");
+
+  // First divergence point (where call sequence first differs in name or model)
+  const divPoint = findFirstDivergencePoint(cmp);
+  if (divPoint) {
+    lines.push("## First divergence point");
+    lines.push(`- **First differing primary call index:** ${divPoint.index}`);
+    lines.push(`- **First differing axis:** ${divPoint.axis}`);
+    if (divPoint.detail) lines.push(`- **Detail:** ${divPoint.detail}`);
+    lines.push("");
+  }
+
+  // Configuration diff (synthesized from existing fingerprints)
+  const fa = cmp.fingerprintA;
+  const fb = cmp.fingerprintB;
+  lines.push("## Configuration diff");
+  lines.push("Deterministic. Compares the inputs to the agent, not the agent's behavior.");
+  lines.push("");
+  lines.push(`- **primary_model_same:** ${fa.primaryModel === fb.primaryModel} (A=${fa.primaryModel || "?"}, B=${fb.primaryModel || "?"})`);
+  lines.push(`- **system_prompt_same:** ${fa.systemPromptHash === fb.systemPromptHash}`);
+  lines.push(`- **system_prompt_chars:** A=${fa.systemPromptChars} · B=${fb.systemPromptChars} · Δ=${fb.systemPromptChars - fa.systemPromptChars}`);
+  lines.push(`- **system_prompt_hash:** A=${fa.systemPromptHash || "(n/a)"} · B=${fb.systemPromptHash || "(n/a)"}`);
+  if (!fa.systemPromptHashTrusted || !fb.systemPromptHashTrusted) {
+    lines.push("  > Hashes computed from preview only; treat \"same\" cautiously.");
+  }
+  const toolSetSame =
+    fa.toolsInvoked.length === fb.toolsInvoked.length &&
+    fa.toolsInvoked.every((t, i) => t === fb.toolsInvoked[i]);
+  lines.push(`- **tool_set_same (tools actually invoked):** ${toolSetSame}`);
+  lines.push("");
+
+  // Behavior diff (synthesized from existing fingerprints + KPIs)
+  const bkSrc = cmp.behavioralKpis;
+  const filesEditedSame =
+    fa.filesEdited.length === fb.filesEdited.length &&
+    fa.filesEdited.every((f, i) => f === fb.filesEdited[i]);
+  const filesReferencedSame =
+    fa.filesTouched.length === fb.filesTouched.length &&
+    fa.filesTouched.every((f, i) => f === fb.filesTouched[i]);
+  const outputDeltaPct = bkSrc.totalOutputTokens.deltaPct;
+  lines.push("## Behavior diff");
+  lines.push("Deterministic. How the runs actually behaved.");
+  lines.push("");
+  lines.push(`- **same_user_turns:** ${bkSrc.userTurns.a === bkSrc.userTurns.b} (A=${bkSrc.userTurns.a}, B=${bkSrc.userTurns.b})`);
+  lines.push(`- **same_primary_llm_call_count:** ${bkSrc.primaryLlmCalls.a === bkSrc.primaryLlmCalls.b} (A=${bkSrc.primaryLlmCalls.a}, B=${bkSrc.primaryLlmCalls.b})`);
+  lines.push(`- **same_tool_call_count:** ${bkSrc.toolCalls.a === bkSrc.toolCalls.b} (A=${bkSrc.toolCalls.a}, B=${bkSrc.toolCalls.b})`);
+  lines.push(`- **same_distinct_tools:** ${bkSrc.distinctTools.a === bkSrc.distinctTools.b} (A=${bkSrc.distinctTools.a}, B=${bkSrc.distinctTools.b})`);
+  lines.push(`- **same_tool_sequence:** ${toolSetSame}`);
+  lines.push(`- **same_files_edited:** ${filesEditedSame}`);
+  lines.push(`- **same_files_referenced:** ${filesReferencedSame}`);
+  lines.push(`- **same_call_shape:** ${cmp.sameShape}`);
+  lines.push(`- **same_final_answer:** ${cmp.answersEquivalent}`);
+  lines.push(`- **output_verbosity_delta_pct:** ${fmtPctSigned(outputDeltaPct)}`);
+  lines.push("");
+
+  // Fixed vs variable cost (synthesized from bucket deltas)
+  const fixedBuckets = new Set(["system", "tool_defs"]);
+  const variableBuckets = new Set(["history", "tool_results", "current", "output"]);
+  let fixedA = 0, fixedB = 0, varA = 0, varB = 0;
+  let systemDelta = 0, toolDefsDelta = 0;
+  for (const d of cmp.bucketDeltas) {
+    if (fixedBuckets.has(d.bucket as string)) {
+      fixedA += d.aCost;
+      fixedB += d.bCost;
+      if (d.bucket === "system") systemDelta = d.delta;
+      if (d.bucket === "tool_defs") toolDefsDelta = d.delta;
+    } else if (variableBuckets.has(d.bucket as string)) {
+      varA += d.aCost;
+      varB += d.bCost;
+    }
+  }
+  const totalA = fixedA + varA;
+  const totalB = fixedB + varB;
+  const fixedShareA = totalA > 0 ? fixedA / totalA : 0;
+  const fixedShareB = totalB > 0 ? fixedB / totalB : 0;
+  lines.push("## Fixed vs variable cost");
+  lines.push("Fixed overhead = system + tool_defs (paid on every call). Variable = history + tool_results + current + output (scales with the work).");
+  lines.push("");
+  lines.push(`- **fixed_overhead_share_a:** ${(fixedShareA * 100).toFixed(1)}%`);
+  lines.push(`- **fixed_overhead_share_b:** ${(fixedShareB * 100).toFixed(1)}%`);
+  lines.push(`- **system_delta_cr:** ${systemDelta >= 0 ? "+" : ""}${fmtCr(systemDelta)}`);
+  lines.push(`- **tool_defs_delta_cr:** ${toolDefsDelta >= 0 ? "+" : ""}${fmtCr(toolDefsDelta)}`);
+  const overheadInterp =
+    fixedShareB > fixedShareA + 0.02
+      ? `${nameB} carries more fixed overhead per call than ${nameA}; cost will scale worse on longer multi-call tasks.`
+      : fixedShareA > fixedShareB + 0.02
+        ? `${nameA} carries more fixed overhead per call than ${nameB}; the cheaper-prefix run will compound savings on longer tasks.`
+        : "Fixed overhead share is roughly equal between the two runs.";
+  lines.push(`- **interpretation:** ${overheadInterp}`);
+  lines.push("");
+
+  // Decision support (deterministic synthesis)
+  const ds2 = buildDecisionSupport(cmp, nameA, nameB);
+  lines.push("## Decision support");
+  lines.push("Deterministic synthesis of the safety of the obvious recommendations. The analyst must respect these flags.");
+  lines.push("");
+  lines.push(`- **cheaper_run:** ${ds2.cheaperRun}`);
+  lines.push(`- **more_expensive_run:** ${ds2.moreExpensiveRun}`);
+  lines.push(`- **cost_delta_meaningful:** ${ds2.costDeltaMeaningful} (abs(Δ%) ≥ 2%)`);
+  lines.push(`- **answers_equivalent:** ${cmp.answersEquivalent}`);
+  lines.push(`- **same_call_shape:** ${cmp.sameShape}`);
+  lines.push(`- **has_blocking_drift:** ${cmp.drift.hasBlockingDrift}`);
+  lines.push(`- **cache_pollution_suspect:** ${cmp.cachePollution.suspect}`);
+  lines.push(`- **attribution_confidence:** ${ds2.attributionConfidence}`);
+  lines.push(`- **safe_to_claim_cost_savings:** ${ds2.safeToClaimCostSavings}`);
+  lines.push(`- **safe_to_claim_quality_equivalence:** ${ds2.safeToClaimQualityEquivalence}`);
+  lines.push(`- **safe_to_recommend_cheaper_run:** ${ds2.safeToRecommendCheaperRun}`);
+  lines.push(`- **reason:** ${ds2.reason}`);
   lines.push("");
 
   // Prefix tax projection
@@ -350,136 +537,219 @@ function buildReportInstructions(planMode: boolean): string {
   const lines: string[] = [];
   lines.push("## What to produce");
   lines.push("");
-  lines.push("Write a focused developer-facing report with these sections, in order.");
-  lines.push("Use the run labels from \"Runs under comparison\" above; do not say \"A\"");
-  lines.push("or \"B\" in prose unless quoting a table.");
+  lines.push("Write a decision-quality A/B test report with the sections below,");
+  lines.push("in order. Use the run labels from \"Runs under comparison\" throughout");
+  lines.push("the prose; do not say \"A\" or \"B\" except when referring to a table");
+  lines.push("column. The deterministic blocks in the facts (Configuration diff,");
+  lines.push("Behavior diff, Fixed vs variable cost, Decision support) are the");
+  lines.push("source of truth — quote their values, do not re-derive them.");
   lines.push("");
-  lines.push("### What changed");
-  lines.push("2–3 sentences. Name the technique under test (use the provided or");
-  lines.push("inferred hypothesis above). State whether the runs are equivalent in");
-  lines.push("shape (same call count, same answers, same drift status) or whether");
-  lines.push("the second run diverged behaviorally from the first. If the runs");
-  lines.push("diverged, say so plainly — divergent runs cannot cleanly attribute");
-  lines.push("cost deltas to the technique.");
+
+  lines.push("### Experiment summary");
+  lines.push("2–4 sentences. Name the two runs, the apparent hypothesis (use the");
+  lines.push("provided plan or inferred-from-names hypothesis), the configuration");
+  lines.push("axes that were expected to stay equivalent, and whether the");
+  lines.push("comparison shape (drift, cache pollution, answer equivalence) looks");
+  lines.push("clean or contaminated. If the comparison is contaminated, say so");
+  lines.push("here so the reader holds the rest of the report at the right");
+  lines.push("confidence level.");
   lines.push("");
-  lines.push("### Output quality");
-  lines.push("Judge whether one run's final output actually served the user's goal");
-  lines.push("better than the other. Use the \"User goal\" block above as the");
-  lines.push("standard, and compare each run's final response against it. Lead with");
-  lines.push("one of these verdict prefixes, then 2–4 sentences of justification:");
+
+  lines.push("### A/B verdict");
+  lines.push("One short paragraph plus a one-line headline. Use the Decision");
+  lines.push("support block verbatim:");
+  lines.push("- Name `cheaper_run` and `more_expensive_run`.");
+  lines.push("- Quote `attribution_confidence` (high / medium / low).");
+  lines.push("- State whether the cheaper run is the recommended winner, an");
+  lines.push("  unproven candidate, or unsafe to recommend, based on");
+  lines.push("  `safe_to_recommend_cheaper_run` and the reason field.");
+  lines.push("- If both runs are within noise, say \"no winner — runs are");
+  lines.push("  effectively equivalent\".");
   lines.push("");
-  lines.push("- ✅ **<runLabel> answered better** — names which run's output more");
-  lines.push("  directly satisfied the request (correctness, completeness, format,");
-  lines.push("  actionability). Quote a short fragment from each to back the claim.");
-  lines.push("- ≈ **Equivalent for the user's goal** — both runs satisfied the");
-  lines.push("  request to the same useful level even if wording differed. Say so");
-  lines.push("  explicitly so the developer knows the cheaper run is the right pick.");
+
+  lines.push("### Behavior comparison");
+  lines.push("3–5 bullets. Translate the Behavior diff block into developer");
+  lines.push("language: did the runs use the same model, take the same call");
+  lines.push("shape, touch the same files, run the same tool sequence? Lead");
+  lines.push("with what stayed the same, then call out what diverged and by");
+  lines.push("how much (output verbosity delta, distinct tools, file sets).");
+  lines.push("Save cost interpretation for the Cost outcome section.");
+  lines.push("");
+
+  lines.push("### Output quality comparison");
+  lines.push("Judge each run's final response against the \"User goal\" block.");
+  lines.push("Lead with one of these verdict prefixes, then 2–4 sentences:");
+  lines.push("");
+  lines.push("- ✅ **<runLabel> answered better** — name which run more directly");
+  lines.push("  served the request (correctness, completeness, format,");
+  lines.push("  actionability). Quote a short fragment from each.");
+  lines.push("- ≈ **Equivalent for the user's goal** — both final responses");
+  lines.push("  satisfied the request to the same useful level. Default to this");
+  lines.push("  when `answers_equivalent: true` and the prompts match, unless a");
+  lines.push("  quality signal contradicts it.");
   lines.push("- ⚠ **One run is materially worse** — flag missing steps, wrong");
   lines.push("  answer, truncated output, or refusal. Name the run and the gap.");
-  lines.push("- ❓ **Cannot judge from this comparison** — use this if the user");
-  lines.push("  goal is missing, if both final answers are empty, or if quality");
-  lines.push("  cannot be assessed without ground truth (e.g. code that needs to");
-  lines.push("  be executed to know if it works). Tell the developer what to");
-  lines.push("  capture next time to make this judgable.");
+  lines.push("- ❓ **Cannot judge from this comparison** — use this when the");
+  lines.push("  user goal is missing, both finals are empty, or quality cannot");
+  lines.push("  be assessed without ground truth (e.g. code that needs to run).");
+  lines.push("  Say what would have made this judgable.");
   lines.push("");
-  lines.push("Rules:");
-  lines.push("- Do not infer quality from cost. A cheaper run is not automatically");
-  lines.push("  worse, and a more expensive run is not automatically better.");
-  lines.push("- If `Final answers equivalent: yes` and the prompts match, default");
-  lines.push("  to ≈ unless a clear quality signal contradicts it.");
-  lines.push("- If the first user prompts differ between runs, lead with that fact");
-  lines.push("  and constrain the judgment accordingly — the runs were not asked");
-  lines.push("  the same question.");
-  lines.push("- Never claim a cheaper model is \"safe\" based on output equivalence");
-  lines.push("  in a single comparison. Frame any such claim as a hypothesis.");
+  lines.push("Hard rules:");
+  lines.push("- Do not infer quality from cost.");
+  lines.push("- If the first user prompts differ between runs, lead with that");
+  lines.push("  fact — the runs were not asked the same question.");
+  lines.push("- Never claim a cheaper model is \"safe\" based on output");
+  lines.push("  equivalence in a single comparison; frame as a hypothesis.");
   lines.push("");
+
+  lines.push("### Artifact outcome");
+  lines.push("This section is required.");
+  lines.push("Compare the actual task outputs, not only the final chat text.");
+  lines.push("Use the Behavior diff `same_files_edited` and `same_files_referenced`");
+  lines.push("flags. When those agree, say \"both runs touched the same files\".");
+  lines.push("When they don't, list which files were only in one run.");
+  lines.push("");
+  lines.push("Then add this caveat verbatim if the comparison block does not");
+  lines.push("include a richer artifact diff:");
+  lines.push("");
+  lines.push("> Artifact equivalence cannot be fully verified from this comparison.");
+  lines.push("> Files-touched lists are derived from tool arguments, not filesystem");
+  lines.push("> snapshots. To strengthen this next time, capture file create/edit/");
+  lines.push("> rename/delete lists, content hashes, and any validation output.");
+  lines.push("");
+
   lines.push("### Cost outcome");
-  lines.push("One short paragraph. Did the second run save money, cost more, or stay");
-  lines.push("flat? Quote the headline delta in both cr and USD if shown. Use the");
-  lines.push("pre-vs-post-divergence split to say what fraction of the delta is");
-  lines.push("attributable to the prompt prefix change vs path-dependent agent");
-  lines.push("behavior. If a projection is shown, quote the projected savings over N");
-  lines.push("calls.");
+  lines.push("One short paragraph. Quote the headline delta in cr and USD if");
+  lines.push("shown. Use the pre-vs-post-divergence split to attribute the");
+  lines.push("delta to prompt prefix (every-call overhead) vs path-dependent");
+  lines.push("behavior. If a prefix-tax projection is shown, quote the projected");
+  lines.push("extra cost over N calls. Do not claim the cheaper run is");
+  lines.push("\"better\" here — Output quality and Artifact outcome already");
+  lines.push("answered that.");
   lines.push("");
-  lines.push("### What caused it");
-  lines.push("3–5 bullets. Translate the bucket waterfall and per-call breakdown");
-  lines.push("into developer meaning, e.g. \"<nameB> dropped tool_defs by X cr");
-  lines.push("because tools were unregistered\", \"<nameB> paid less in history");
-  lines.push("because the conversation was shorter\", \"<nameB> output Y% fewer");
-  lines.push("response tokens because the answer was terser\". Avoid raw field");
-  lines.push("names. End each bullet with the supporting number. Use the bucket");
-  lines.push("vocabulary defined in the appendix below.");
+
+  lines.push("### Cost drivers");
+  lines.push("3–5 bullets. Translate the bucket waterfall and Fixed vs variable");
+  lines.push("cost block into developer meaning, e.g. \"<nameB> carried a");
+  lines.push("larger system prompt on every call, which added +X cr in `system`");
+  lines.push("(+Y%)\". Avoid raw field names. End each bullet with the");
+  lines.push("supporting number. Use the bucket vocabulary defined in the");
+  lines.push("appendix.");
+  lines.push("");
+
+  lines.push("### Divergence analysis");
+  lines.push("2–4 sentences. Use the First divergence point block: which");
+  lines.push("primary call index first diverged, and on what axis (call name,");
+  lines.push("model, presence). Quote pre-divergence delta vs post-divergence");
+  lines.push("delta and say whether the remaining delta is prefix-driven,");
+  lines.push("behavior-driven, or mixed. If no divergence point was identified,");
+  lines.push("say so and recommend capturing per-call hashes next time.");
+  lines.push("");
+
+  lines.push("### Fixed overhead vs work-dependent cost");
+  lines.push("Quote `fixed_overhead_share_a` and `fixed_overhead_share_b` from");
+  lines.push("the Fixed vs variable cost block. Explain in one sentence which");
+  lines.push("run carries more per-call overhead and what that implies for");
+  lines.push("longer multi-call tasks. Quote the interpretation field verbatim");
+  lines.push("if it is conclusive.");
   lines.push("");
 
   if (planMode) {
     lines.push("### Did the planned change land?");
-    lines.push("This section is required because the developer provided an");
-    lines.push("experiment plan from the prior single-session analysis. For each");
-    lines.push("item in the plan (Hypothesis, Expected effect, Setup B differences,");
-    lines.push("Validation), give one bullet with a verdict prefix:");
+    lines.push("Required because the developer provided an experiment plan from");
+    lines.push("the prior single-session analysis. For each plan item, give one");
+    lines.push("bullet with a verdict prefix:");
     lines.push("");
-    lines.push("- ✅ **Landed, effect as expected** — the diff shows the change and");
-    lines.push("  the numbers match the predicted direction and magnitude.");
-    lines.push("- ✅ **Landed, smaller/larger than expected** — the change is");
-    lines.push("  visible but the effect is materially different. Quote both the");
-    lines.push("  expected and observed numbers.");
-    lines.push("- ⚠ **Landed with side effect** — the change is visible but caused");
-    lines.push("  an unintended shift (e.g. answer divergence, drift, cache pollution).");
-    lines.push("- ❌ **Not detectable in the diff** — the diff does not show evidence");
-    lines.push("  the change was actually made. Ask the developer to confirm.");
-    lines.push("- ❓ **Not measurable from this comparison** — the plan asks about");
-    lines.push("  something the comparison cannot show (e.g. answer quality without");
-    lines.push("  validation data).");
+    lines.push("- ✅ **Landed, effect as expected** — change visible in diff,");
+    lines.push("  numbers match predicted direction and magnitude.");
+    lines.push("- ✅ **Landed, smaller/larger than expected** — change visible,");
+    lines.push("  effect materially different. Quote expected vs observed.");
+    lines.push("- ⚠ **Landed with side effect** — change visible but caused an");
+    lines.push("  unintended shift (answer divergence, drift, cache pollution).");
+    lines.push("- ❌ **Not detectable in the diff** — diff shows no evidence the");
+    lines.push("  change was made. Ask the developer to confirm.");
+    lines.push("- ❓ **Not measurable from this comparison** — plan asks about");
+    lines.push("  something the comparison cannot show (e.g. answer quality");
+    lines.push("  without validation data).");
     lines.push("");
     lines.push("Cite the supporting metric in parentheses for each bullet.");
     lines.push("");
   }
 
+  lines.push("### Was the extra cost worth it?");
+  lines.push("One short paragraph. Combine the Cost outcome with the Output");
+  lines.push("quality and Artifact outcome verdicts. Use one of these openings:");
+  lines.push("");
+  lines.push("- \"Yes, likely.\" — the more expensive run produced a clearly");
+  lines.push("  better output or the only working artifact.");
+  lines.push("- \"No.\" — the more expensive run produced equivalent output and");
+  lines.push("  artifacts; the extra overhead is unjustified.");
+  lines.push("- \"Unproven.\" — outputs or artifacts differ but quality was not");
+  lines.push("  validated; cannot judge the tradeoff yet.");
+  lines.push("- \"Not applicable.\" — cost delta is within noise.");
+  lines.push("");
+
   lines.push("### Warnings and caveats");
-  lines.push("Surface anything that makes the comparison less trustworthy:");
-  lines.push("- run drift on identical-by-construction axes (blocking),");
-  lines.push("- cache pollution (a fresh cache run vs a warm cache run),");
-  lines.push("- divergent answers when the technique was expected to be answer-equivalent,");
-  lines.push("- different call shapes when the technique was expected to be shape-preserving.");
+  lines.push("List blocking and non-blocking caveats. Blocking includes: final");
+  lines.push("answers not equivalent when they were expected to be, run drift");
+  lines.push("on identical-by-construction axes, different first user prompts,");
+  lines.push("different models when same model was expected, cache pollution,");
+  lines.push("missing tools on one side.");
   lines.push("");
-  lines.push("If the inferred hypothesis from the file names does not match what");
-  lines.push("the numbers show (e.g. names suggest \"tool defs disabled\" but");
-  lines.push("tool_defs cost is unchanged), call that out explicitly.");
+  lines.push("If the inferred hypothesis from file names contradicts what the");
+  lines.push("numbers show (e.g. names suggest \"tool defs disabled\" but");
+  lines.push("`tool_defs` cost is unchanged), call that out explicitly.");
   lines.push("");
-  lines.push("If no caveats apply, say \"No blocking caveats. The comparison is");
-  lines.push("attributable to the technique under test.\"");
+  lines.push("If no caveats apply, say: \"No blocking caveats. The comparison");
+  lines.push("is attributable to the technique under test.\"");
   lines.push("");
+
   lines.push("### What to validate next");
-  lines.push("2–3 bullets. What follow-up runs or measurements would make the");
-  lines.push("result more conclusive? Examples: re-run with cache pre-warmed on");
-  lines.push("both sides, re-run with the same first prompt to remove prefix");
-  lines.push("drift, capture quality validation (tests / human review) before");
-  lines.push("claiming the cheaper run is \"as good\".");
-  lines.push(planMode
-    ? "If any plan item came back as ❌ or ❓, the first validation step should be re-running the experiment with that item explicitly addressed."
-    : "");
-  lines.push("");
-  lines.push("## Rules");
-  lines.push("");
-  lines.push("- Do not invent metrics. Only use numbers present in the comparison");
-  lines.push("  block. If a metric is missing, say so explicitly.");
-  lines.push("- Refer to the runs by their labels (provided above), not \"A\" / \"B\".");
-  lines.push("- If the runs have different answers and the technique was supposed");
-  lines.push("  to preserve the answer, flag that as a blocking caveat before");
-  lines.push("  recommending the cheaper run.");
-  lines.push("- Do not recommend a cheaper model or Auto mode based on this");
-  lines.push("  comparison alone unless quality validation is mentioned in the");
-  lines.push("  block.");
+  lines.push("2–4 specific follow-up experiments or measurements. Examples:");
+  lines.push("re-run with both caches warmed, re-run with identical first");
+  lines.push("prompt, capture artifact hashes and validation output, compare");
+  lines.push("generated files against expected output, run the same A/B pair");
+  lines.push("across 3–5 similar tasks before generalizing.");
   if (planMode) {
-    lines.push("- The plan-verification section is required. Do not skip it, even");
-    lines.push("  if the plan looks incomplete; mark unmeasurable items as ❓.");
+    lines.push("If any plan item came back as ❌ or ❓, the first validation");
+    lines.push("step should be re-running with that item explicitly addressed.");
   }
-  lines.push("- Keep the report " + (planMode ? "500–700" : "400–600") + " words. Use bullets liberally. Avoid section");
-  lines.push("  preambles like \"In this section we will…\".");
-  lines.push("- Cite numbers inline; do not duplicate the comparison block.");
   lines.push("");
-  lines.push("The comparison block is the source of truth. If your prose seems to");
-  lines.push("contradict it, the block wins — rewrite the prose.");
+
+  lines.push("## Hard rules (apply to every section)");
+  lines.push("");
+  lines.push("1. Never treat lower cost as better by itself.");
+  lines.push("2. Never treat higher cost as worse if the more expensive run");
+  lines.push("   produced better validated output.");
+  lines.push("3. If final answers differ and the test was supposed to preserve");
+  lines.push("   the answer, that is a blocking caveat — flag it before any");
+  lines.push("   recommendation.");
+  lines.push("4. If artifacts differ or are unavailable, do not claim output");
+  lines.push("   equivalence.");
+  lines.push("5. If quality validation is missing, use \"unknown\" rather than");
+  lines.push("   guessing.");
+  lines.push("6. If the system prompt changed and that was not the intended");
+  lines.push("   variable, call the experiment contaminated.");
+  lines.push("7. If the system prompt changed and that was the intended");
+  lines.push("   variable, explain the cost impact as every-call overhead.");
+  lines.push("8. Prefer developer meaning over raw telemetry names.");
+  lines.push("9. Always include \"Was the extra cost worth it?\" — even if the");
+  lines.push("   answer is \"Not applicable\".");
+  lines.push("10. Always include \"Artifact outcome\" — even if the answer is");
+  lines.push("    \"not captured\".");
+  lines.push("11. Do not invent metrics. If a number is not in the facts");
+  lines.push("    block, say it is missing.");
+  if (planMode) {
+    lines.push("12. The plan-verification section is required. Do not skip it,");
+    lines.push("    even if the plan looks incomplete; mark unmeasurable items");
+    lines.push("    as ❓.");
+  }
+  lines.push("");
+  lines.push("Target length: " + (planMode ? "700–1000" : "600–900") + " words. Use bullets and small tables.");
+  lines.push("Cite numbers inline; do not duplicate the comparison block.");
+  lines.push("");
+  lines.push("The comparison block is the source of truth. If your prose seems");
+  lines.push("to contradict it, the block wins — rewrite the prose.");
   lines.push("");
   lines.push("## Shared vocabulary (matches the single-session LLM analysis)");
   lines.push("");
@@ -493,6 +763,7 @@ function buildReportInstructions(planMode: boolean): string {
   lines.push("- **Workflow shape** — `efficient_single_pass`, `tool_heavy_but_expected`, `many_model_turns_for_repeatable_workflow`, `terminal_heavy_orchestration`, `hidden_deliberation_spike`.");
   lines.push("- **Cache pollution** — a comparison artifact where one run hit a warm cache and the other did not. Single-session analysis calls this `cache_health: poor`. Both views agree.");
   lines.push("- **Fixed vs variable cost** — the share of cost paid on every call regardless of the user's request (system + tool_defs + skill carry) vs the share that scales with the actual work. Single-session calls this `every_call_overhead`.");
+  lines.push("- **Attribution confidence** — `high` = comparison is clean (no blocking drift, no cache pollution, same shape and answers); `medium` = some divergence in shape or answers; `low` = blocking drift or cache pollution makes cost deltas unattributable.");
   return lines.join("\n");
 }
 

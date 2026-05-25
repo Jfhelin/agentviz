@@ -97,8 +97,16 @@ describe("buildComparisonLlmPrompt", () => {
     const out = buildComparisonLlmPrompt(cmp, { nameA: "baseline", nameB: "experiment" });
     expect(out).toContain("Cost Compare analysis prompt");
     expect(out).toContain("Runs under comparison");
-    expect(out).toContain("What changed");
+    expect(out).toContain("Experiment summary");
+    expect(out).toContain("A/B verdict");
+    expect(out).toContain("Behavior comparison");
+    expect(out).toContain("Output quality comparison");
+    expect(out).toContain("Artifact outcome");
     expect(out).toContain("Cost outcome");
+    expect(out).toContain("Cost drivers");
+    expect(out).toContain("Divergence analysis");
+    expect(out).toContain("Fixed overhead vs work-dependent cost");
+    expect(out).toContain("Was the extra cost worth it?");
     expect(out).toContain("Warnings and caveats");
     expect(out).toContain("What to validate next");
     expect(out).toContain("Comparison facts (source of truth)");
@@ -211,9 +219,37 @@ describe("buildComparisonLlmPrompt", () => {
   it("instructs the analyst to produce an Output quality verdict in the report", () => {
     const cmp = compareRunsCost(mkRun({}), mkRun({}))!;
     const out = buildComparisonLlmPrompt(cmp, { nameA: "a", nameB: "b" });
-    expect(out).toContain("### Output quality");
+    expect(out).toContain("### Output quality comparison");
     expect(out).toMatch(/answered better/);
     expect(out).toMatch(/Equivalent for the user's goal/);
     expect(out).toContain("Do not infer quality from cost");
+  });
+
+  it("emits deterministic decision-support, behavior-diff, configuration-diff, and fixed-vs-variable blocks in the facts", () => {
+    const cmp = compareRunsCost(mkRun({}), mkRun({}))!;
+    const out = buildComparisonLlmPrompt(cmp, { nameA: "a", nameB: "b" });
+    expect(out).toContain("## Decision support");
+    expect(out).toContain("cheaper_run:");
+    expect(out).toContain("attribution_confidence:");
+    expect(out).toContain("safe_to_recommend_cheaper_run:");
+    expect(out).toContain("## Behavior diff");
+    expect(out).toContain("same_call_shape:");
+    expect(out).toContain("same_final_answer:");
+    expect(out).toContain("## Configuration diff");
+    expect(out).toContain("primary_model_same:");
+    expect(out).toContain("system_prompt_hash:");
+    expect(out).toContain("## Fixed vs variable cost");
+    expect(out).toContain("fixed_overhead_share_a:");
+    expect(out).toContain("fixed_overhead_share_b:");
+  });
+
+  it("encodes the hard rules and requires Artifact outcome and 'Was the extra cost worth it?' sections", () => {
+    const cmp = compareRunsCost(mkRun({}), mkRun({}))!;
+    const out = buildComparisonLlmPrompt(cmp, { nameA: "a", nameB: "b" });
+    expect(out).toContain("Hard rules");
+    expect(out).toContain("Never treat lower cost as better by itself");
+    expect(out).toContain("Always include \"Artifact outcome\"");
+    expect(out).toContain("Always include \"Was the extra cost worth it?\"");
+    expect(out).toContain("attribution_confidence");
   });
 });
