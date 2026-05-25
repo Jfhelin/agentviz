@@ -204,3 +204,104 @@ export function formatComparisonAsMarkdown(
 
   return lines.join("\n");
 }
+
+// ---------------------------------------------------------------------------
+// LLM analysis export
+// ---------------------------------------------------------------------------
+//
+// Wraps formatComparisonAsMarkdown with analyst instructions so an external
+// LLM can write a focused report comparing two runs. Mirrors the
+// single-session llmAnalysisExport pattern: structured facts (the markdown
+// summary) + a "what to produce" instruction block, all in one pasteable
+// string.
+
+export interface LlmCompareOptions extends FormatOptions {
+  /** Optional one-line description of what changed between A and B
+   * (e.g. "B disables tool defs", "B uses Auto mode"). Helps the analyst
+   * frame the diff as a hypothesis under test. */
+  techniqueUnderTest?: string;
+}
+
+const COMPARE_REPORT_PROMPT = `# Cost Compare analysis prompt
+
+You are a Copilot cost-optimization analyst. The block below contains a
+deterministic, side-by-side comparison of two VS Code Copilot Chat runs
+(A and B), exported from agentviz Cost Compare. All numbers in the block
+are ground truth.
+
+## What to produce
+
+Write a focused developer-facing report with these sections, in order:
+
+### What changed
+2–3 sentences. Name the technique under test (if given). State whether
+the runs are equivalent in shape (same call count, same answers, same
+drift status) or whether B diverged behaviorally from A. If the runs
+diverged, say so plainly — divergent runs cannot cleanly attribute cost
+deltas to the technique.
+
+### Cost outcome
+One short paragraph. Did B save money, cost more, or stay flat? Quote
+the headline delta in both cr and USD if shown. Use the
+pre-vs-post-divergence split to say what fraction of the delta is
+attributable to the prompt prefix change vs path-dependent agent
+behavior. If a projection is shown, quote the projected savings over N
+calls.
+
+### What caused it
+3–5 bullets. Translate the bucket waterfall and per-call breakdown into
+developer meaning: e.g. "B dropped tool_defs by X cr because tools were
+unregistered", "B paid less in history because the conversation was
+shorter", "B output Y% fewer response tokens because the answer was
+terser". Avoid raw field names. End each bullet with the supporting
+number.
+
+### Warnings and caveats
+Surface anything that makes the comparison less trustworthy:
+- run drift on identical-by-construction axes (blocking),
+- cache pollution (a fresh cache run vs a warm cache run),
+- divergent answers when the technique was expected to be answer-equivalent,
+- different call shapes when the technique was expected to be shape-preserving.
+
+If no caveats apply, say "No blocking caveats. The comparison is
+attributable to the technique under test."
+
+### What to validate next
+2–3 bullets. What follow-up runs or measurements would make the result
+more conclusive? Examples: re-run with cache pre-warmed on both sides,
+re-run with the same first prompt to remove prefix drift, capture
+quality validation (tests / human review) before claiming B is "as
+good".
+
+## Rules
+
+- Do not invent metrics. Only use numbers present in the comparison
+  block. If a metric is missing, say so explicitly.
+- If the runs have different answers and the technique was supposed to
+  preserve the answer, flag that as a blocking caveat before
+  recommending B.
+- Do not recommend a cheaper model or Auto mode based on this
+  comparison alone unless quality validation is mentioned in the block.
+- Keep the report 400–600 words. Use bullets liberally. Avoid section
+  preambles like "In this section we will…".
+- Cite numbers inline; do not duplicate the comparison block.
+
+The comparison block is the source of truth. If your prose seems to
+contradict it, the block wins — rewrite the prose.
+`;
+
+export function buildComparisonLlmPrompt(
+  cmp: CostComparison,
+  opts: LlmCompareOptions = {}
+): string {
+  const facts = formatComparisonAsMarkdown(cmp, opts);
+  const technique = opts.techniqueUnderTest
+    ? `\n## Technique under test\n\n${opts.techniqueUnderTest.trim()}\n`
+    : "";
+  return [
+    COMPARE_REPORT_PROMPT,
+    technique,
+    "## Comparison facts (source of truth)\n",
+    facts,
+  ].join("\n");
+}

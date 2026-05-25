@@ -88,3 +88,36 @@ describe("formatComparisonAsMarkdown", () => {
     expect(md).toContain("…");
   });
 });
+
+import { buildComparisonLlmPrompt } from "../lib/exportComparison";
+
+describe("buildComparisonLlmPrompt", () => {
+  it("wraps comparison markdown with analyst instructions and run names", () => {
+    const cmp = compareRunsCost(mkRun({}), mkRun({}))!;
+    const out = buildComparisonLlmPrompt(cmp, { nameA: "baseline", nameB: "experiment" });
+    expect(out).toContain("Cost Compare analysis prompt");
+    expect(out).toContain("What changed");
+    expect(out).toContain("Cost outcome");
+    expect(out).toContain("Warnings and caveats");
+    expect(out).toContain("What to validate next");
+    expect(out).toContain("Comparison facts (source of truth)");
+    expect(out).toContain("baseline");
+    expect(out).toContain("experiment");
+  });
+
+  it("includes a technique-under-test header when provided", () => {
+    const cmp = compareRunsCost(mkRun({}), mkRun({}))!;
+    const out = buildComparisonLlmPrompt(cmp, {
+      nameA: "a", nameB: "b",
+      techniqueUnderTest: "B disables tool definitions",
+    });
+    expect(out).toContain("Technique under test");
+    expect(out).toContain("B disables tool definitions");
+  });
+
+  it("omits the technique section when not provided", () => {
+    const cmp = compareRunsCost(mkRun({}), mkRun({}))!;
+    const out = buildComparisonLlmPrompt(cmp, { nameA: "a", nameB: "b" });
+    expect(out).not.toContain("Technique under test");
+  });
+});

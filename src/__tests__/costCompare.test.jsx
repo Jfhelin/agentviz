@@ -75,7 +75,7 @@ describe("CostCompare", function () {
   });
   afterEach(function () { document.body.innerHTML = ""; });
 
-  it("renders headline cards, behavioral KPIs, and bucket waterfall", async function () {
+  it("renders header strip, behavioral KPIs, and divergence split", async function () {
     var container = document.createElement("div");
     document.body.appendChild(container);
     var root = createRoot(container);
@@ -86,9 +86,10 @@ describe("CostCompare", function () {
 
     expect(findByText(container, "run-a")).not.toBeNull();
     expect(findByText(container, "run-b")).not.toBeNull();
-    expect(findByText(container, "B - A")).not.toBeNull();
     expect(findByText(container, "Behavioral KPIs")).not.toBeNull();
-    expect(findByText(container, "Bucket cost delta")).not.toBeNull();
+    expect(findByText(container, "Pre- vs post-divergence")).not.toBeNull();
+    expect(findByText(container, "Per-call breakdown")).not.toBeNull();
+    expect(findByText(container, "Input vs. output, side by side")).not.toBeNull();
 
     await act(async function () { root.unmount(); });
   });
@@ -102,12 +103,13 @@ describe("CostCompare", function () {
 
     await act(async function () { root.render(<CostCompare sessionA={a} sessionB={b} />); });
 
-    expect(findByText(container, "only available when both sessions are VS Code Copilot Chat exports")).not.toBeNull();
+    expect(findByText(container, "Cost data not available")).not.toBeNull();
+    expect(findByText(container, "copilot_all_prompts_")).not.toBeNull();
 
     await act(async function () { root.unmount(); });
   });
 
-  it("exposes USD and AI Credits unit toggles and a copy-as-markdown button", async function () {
+  it("exposes copy-summary and LLM-analysis export buttons", async function () {
     var container = document.createElement("div");
     document.body.appendChild(container);
     var root = createRoot(container);
@@ -116,9 +118,8 @@ describe("CostCompare", function () {
 
     await act(async function () { root.render(<CostCompare sessionA={a} sessionB={b} />); });
 
-    expect(findByText(container, "USD")).not.toBeNull();
-    expect(findByText(container, "AI Credits")).not.toBeNull();
-    expect(findByText(container, "copy summary as markdown")).not.toBeNull();
+    expect(findByText(container, "Copy summary as markdown")).not.toBeNull();
+    expect(findByText(container, "Copy for LLM analysis")).not.toBeNull();
 
     await act(async function () { root.unmount(); });
   });
