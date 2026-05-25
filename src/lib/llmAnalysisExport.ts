@@ -330,6 +330,14 @@ function buildPerCallTable(prompts: CostAnalysisPrompt[], compact: boolean): unk
       turn += 1;
       const toolCalls = (e.producedToolCalls || []).length;
       const comp = e.components || { system: 0, tool_defs: 0, history: 0, tool_results: 0, current: 0 };
+      // Raw character counts for each ctx component, BEFORE the parser
+      // scales them to match the model's reported prompt_tokens. Use these
+      // to tell whether real change happened or whether attributed-token
+      // growth is just a scaling artifact (see hard rule). tool_defs_chars
+      // in particular is byte-identical across calls when no new tools or
+      // skills are introduced -- if these chars are constant but the
+      // attributed token count grows, the growth is purely from rescaling.
+      const compChars = e.componentChars || { system: 0, tool_defs: 0, history: 0, tool_results: 0, current: 0 };
       // Tool count for cross-checking tool_defs growth. Copilot Chat
       // dynamically expands the toolset when skills get invoked or new
       // MCP tools are discovered, so tool_defs IS NOT necessarily
@@ -347,6 +355,13 @@ function buildPerCallTable(prompts: CostAnalysisPrompt[], compact: boolean): unk
           history: comp.history || 0,
           tool_results: comp.tool_results || 0,
           current: comp.current || 0,
+        },
+        ctx_components_chars: {
+          system: compChars.system || 0,
+          tool_defs: compChars.tool_defs || 0,
+          history: compChars.history || 0,
+          tool_results: compChars.tool_results || 0,
+          current: compChars.current || 0,
         },
         tools_offered_count: toolsOffered,
         cached: e.cached,
@@ -550,7 +565,7 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
   lines.push("- Use ONLY the facts below. Quote numbers verbatim.");
   lines.push("- When attributing context growth or output size, name the specific JSON field. Do not speculate.");
   lines.push("- Per-call rows include CHAT calls only — overhead calls (title generation, prompt categorization, telemetry) are summarised separately and should NOT be referenced as user turns.");
-  lines.push("- `ctx_components.tool_defs` IS NOT necessarily constant across the session. Copilot Chat dynamically expands the toolset when skills are invoked or new MCP tools are discovered. Cross-check growth against `tools_offered_count` on each row before claiming it.");
+  lines.push("- `ctx_components.*` tokens are SCALED estimates: the parser apportions the model's real `prompt_tokens` across components by char share. If `ctx_components_chars.tool_defs` is constant across rows but the attributed `ctx_components.tool_defs` token count grows, that growth is a SCALING ARTIFACT (some other component was under-estimated, inflating all buckets). Always cite `ctx_components_chars.*` first to determine whether real change happened. Copilot Chat CAN dynamically expand the toolset when skills get invoked or new MCP tools are discovered -- you can verify that by comparing `ctx_components_chars.tool_defs` and `tools_offered_count` across rows.");
   lines.push("- We DO detect which skills were USED during the session by matching each skill's `file` path against tool call args. The pre-computed cost-lever block lists the unused-skill count, token cost, and per-skill ✓/✗ markers in System anatomy. Cite those numbers directly — do not re-infer skill usage from prompt context.");
   lines.push("- Reasoning-token counts are NOT in this data. Do not comment on reasoning effort.");
   lines.push("- When the data does not support a claim, say 'not determinable from the data'.");

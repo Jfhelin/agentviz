@@ -842,6 +842,14 @@ export interface CostAnalysisCall {
   cacheMissDiag: CallAnalysis["cacheMissDiag"];
   newPerBucket: ComponentBreakdown;
   components: ComponentBreakdown;
+  /** Raw character counts per ctx component, BEFORE scaling to match the
+   * model's reported `prompt_tokens`. Lets consumers distinguish real
+   * component-size changes from scaling-artifact growth -- if
+   * `componentChars.tool_defs` is byte-identical across calls but
+   * `components.tool_defs` (the scaled token estimate) grows, the growth
+   * is purely from the per-call scale factor being inflated by another
+   * under-estimated component. */
+  componentChars: ComponentBreakdown;
   /** Estimated input tokens for the new images on this call (added to the
    * `current` bucket of `components` for display). 0 when no images are new
    * or the model has no documented image-token rule. Approximation only --
@@ -1429,6 +1437,7 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
         cacheMissDiag: ca.cacheMissDiag,
         newPerBucket: ca.newPerBucket,
         components: componentsForDisplay,
+        componentChars: cls.componentChars,
         imageTokensEst,
         visionTokensTotal,
         totalTools: cls.totalTools,
