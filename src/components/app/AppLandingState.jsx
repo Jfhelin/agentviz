@@ -9,31 +9,56 @@ import usePersistentState from "../../hooks/usePersistentState.js";
 
 // Full-page drag overlay. Attaches listeners to document so it detects drags
 // even when the overlay div itself has pointerEvents:none.
-function DragOverlay({ onLoad }) {
+// Accepts 1 or 2 files. 2 files immediately enter compare mode via onLoadPair.
+function DragOverlay({ onLoad, onLoadPair }) {
   var [active, setActive] = useState(false);
+  var [fileCount, setFileCount] = useState(0);
   // Track enter/leave with a counter so nested element transitions don't flicker.
   var enterCount = useRef(0);
 
   var stableOnLoad = useRef(onLoad);
   stableOnLoad.current = onLoad;
+  var stableOnLoadPair = useRef(onLoadPair);
+  stableOnLoadPair.current = onLoadPair;
 
   useEffect(function () {
     function onDragEnter(e) {
       if (!e.dataTransfer || !Array.from(e.dataTransfer.types || []).includes("Files")) return;
       enterCount.current += 1;
+      // dataTransfer.items reports the count during drag; files is empty until drop.
+      var n = (e.dataTransfer.items && e.dataTransfer.items.length) || 0;
+      if (n > 0) setFileCount(n);
       setActive(true);
     }
     function onDragLeave() {
       enterCount.current = Math.max(0, enterCount.current - 1);
-      if (enterCount.current === 0) setActive(false);
+      if (enterCount.current === 0) { setActive(false); setFileCount(0); }
     }
     function onDragOver(e) { e.preventDefault(); }
     function onDrop(e) {
       e.preventDefault();
       enterCount.current = 0;
       setActive(false);
-      var file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
-      if (!file) return;
+      setFileCount(0);
+      var files = (e.dataTransfer && e.dataTransfer.files) ? Array.from(e.dataTransfer.files) : [];
+      if (files.length === 0) return;
+      if (files.length >= 2 && stableOnLoadPair.current) {
+        // Use the first two files for the pair; ignore the rest.
+        var fA = files[0], fB = files[1];
+        var rA = new FileReader(), rB = new FileReader();
+        var textA = null, textB = null;
+        function maybeFire() {
+          if (textA != null && textB != null) {
+            stableOnLoadPair.current(textA, fA.name, textB, fB.name);
+          }
+        }
+        rA.onload = function (ev) { textA = ev.target.result; maybeFire(); };
+        rB.onload = function (ev) { textB = ev.target.result; maybeFire(); };
+        rA.readAsText(fA);
+        rB.readAsText(fB);
+        return;
+      }
+      var file = files[0];
       var reader = new FileReader();
       reader.onload = function (ev) { stableOnLoad.current(ev.target.result, file.name); };
       reader.readAsText(file);
@@ -49,6 +74,8 @@ function DragOverlay({ onLoad }) {
       document.removeEventListener("drop", onDrop);
     };
   }, []);
+
+  var pairMode = fileCount >= 2 && Boolean(onLoadPair);
 
   return (
     <div
@@ -67,10 +94,12 @@ function DragOverlay({ onLoad }) {
         }}>
           <Icon name="upload" size={32} style={{ color: theme.accent.primary }} />
           <div style={{ fontSize: theme.fontSize.xl, color: theme.accent.primary, fontFamily: theme.font.mono }}>
-            Drop session file to import
+            {pairMode ? "Drop two files to compare runs" : "Drop session file to import"}
           </div>
           <div style={{ fontSize: theme.fontSize.sm, color: theme.text.muted }}>
-            Claude Code, VS Code, and Copilot CLI sessions
+            {pairMode
+              ? "First file becomes A (baseline), second becomes B (experiment)"
+              : "Claude Code, VS Code, and Copilot CLI sessions · drop two files to compare"}
           </div>
         </div>
       )}
@@ -78,7 +107,7 @@ function DragOverlay({ onLoad }) {
   );
 }
 
-export default function AppLandingState({ error, onLoad, onLoadSample, onStartCompare, onTryV2, inboxEntries, onOpenInboxSession, onRefresh, manifestError, isManifestMode }) {
+export default function AppLandingState({ error, onLoad, onLoadPair, onLoadSample, onStartCompare, onTryV2, inboxEntries, onOpenInboxSession, onRefresh, manifestError, isManifestMode }) {
   var [landingMode, setLandingMode] = usePersistentState("agentviz:landing-mode", "inbox");
 
   return (
@@ -91,7 +120,7 @@ export default function AppLandingState({ error, onLoad, onLoadSample, onStartCo
         padding: "28px 24px",
       }}
     >
-      <DragOverlay onLoad={onLoad} />
+      <DragOverlay onLoad={onLoad} onLoadPair={onLoadPair} />
 
       <div style={{ textAlign: "center" }}>
         <BrandWordmark style={{ fontSize: theme.fontSize.hero }} />

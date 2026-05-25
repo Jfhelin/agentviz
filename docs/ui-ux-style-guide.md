@@ -100,6 +100,44 @@ Balanced luminance so no track visually dominates another.
 | `theme.track.output` | `#10d97a` | `#0ea86b` | Output/results |
 | `theme.track.agent` | `#06b6d4` | `#0891b2` | Agent/subagent events |
 
+### Cost View Colors
+
+Cost view, Cost Compare, and the cost tooltips read from `theme.cost.*`. The palette is mode-aware (registered for both DARK_THEME and LIGHT_THEME via `defineThemeSection`). Use these tokens instead of hardcoded hex literals.
+
+**Billed-call categorical colors** (BILLED lens):
+
+| Token | Use |
+|-------|-----|
+| `theme.cost.fresh` | Fresh input tokens (full-rate prompt) |
+| `theme.cost.cwrite` | Cache write tokens (one-time amortizable) |
+| `theme.cost.cached` | Cache read tokens (discounted) |
+| `theme.cost.output` | Output / response tokens |
+
+**Context-bucket colors** (CTX lens; also used by Cost Compare's bucket waterfall):
+
+| Token | Bucket |
+|-------|--------|
+| `theme.cost.ctxSystem` | system |
+| `theme.cost.ctxToolDefs` | tool_defs |
+| `theme.cost.ctxHistory` | history |
+| `theme.cost.ctxToolResults` | tool_results |
+| `theme.cost.ctxCurrent` | current prompt |
+| `theme.cost.ctxOutput` | response |
+
+**Call-kind chips** (when surfaced):
+
+| Token | Use |
+|-------|-----|
+| `theme.cost.kindMcp` | MCP-server-backed tool |
+| `theme.cost.kindExtension` | Extension-backed tool |
+| `theme.cost.kindBuiltin` | Built-in tool |
+
+Rules:
+
+- Cost categorical colors are categorical, not sequential -- do not interpolate or alpha-blend across them.
+- For "B better than A" / "B worse than A" deltas in Cost Compare, use `theme.semantic.success` / `theme.semantic.warning` (the same diverging convention used in the Scorecard).
+- `theme.bg.surface` is the only acceptable bar-track background inside Cost View / Cost Compare; do not invent new neutrals.
+
 ### Data Visualization Scales
 
 Track colors (above) work for categorical data. For sequential/intensity data (heatmaps,

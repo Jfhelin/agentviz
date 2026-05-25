@@ -272,6 +272,7 @@ function AppShell({
       <AppLandingState
         error={session.error || sessionState.loadError}
         onLoad={sessionState.handleFile}
+        onLoadPair={sessionState.handleFilePair}
         onLoadSample={sessionState.loadSample}
         onStartCompare={function () { sessionState.setCompareLanding(true); }}
         onTryV2={onTryV2}

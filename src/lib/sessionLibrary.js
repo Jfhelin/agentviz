@@ -39,9 +39,30 @@ function hashText(text) {
 }
 
 function buildPrimaryPrompt(result) {
+  var metadata = (result && result.metadata) || {};
+  if (metadata.generatedTitle) return metadata.generatedTitle;
+
+  var overheadTurns = new Set();
+  var costPrompts = metadata.costAnalysis && metadata.costAnalysis.prompts;
+  if (Array.isArray(costPrompts)) {
+    costPrompts.forEach(function (p, idx) {
+      var events = p && p.prompt && p.prompt.events;
+      if (!Array.isArray(events) || events.length === 0) {
+        overheadTurns.add(idx);
+        return;
+      }
+      var allOverhead = events.every(function (ev) { return ev && ev.category === "overhead"; });
+      if (allOverhead) overheadTurns.add(idx);
+    });
+  }
+
   if (result && result.turns) {
     for (var index = 0; index < result.turns.length; index += 1) {
+      if (overheadTurns.has(index)) continue;
       if (result.turns[index].userMessage) return result.turns[index].userMessage;
+    }
+    for (var idx2 = 0; idx2 < result.turns.length; idx2 += 1) {
+      if (result.turns[idx2].userMessage) return result.turns[idx2].userMessage;
     }
   }
 

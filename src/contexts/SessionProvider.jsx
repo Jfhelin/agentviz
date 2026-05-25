@@ -135,6 +135,17 @@ export function SessionProvider({ children, onBeforeSessionChange, onStoredSessi
     session.handleFile(text, name, sourcePath);
   }, [beforeSessionChange, session.handleFile]);
 
+  // Fork-only: drag-and-drop two files at once to enter compare landing immediately.
+  // Used by the V1 Cost Compare workflow; AppShell wires this to AppLandingState.onLoadPair.
+  var handleFilePair = useCallback(function (textA, nameA, textB, nameB) {
+    sessionLoadCount.current += 1;
+    beforeSessionChange();
+    sessionB.resetSession();
+    setCompareLanding(true);
+    session.handleFile(textA, nameA);
+    sessionB.handleFile(textB, nameB);
+  }, [beforeSessionChange, session.handleFile, sessionB.handleFile, sessionB.resetSession]);
+
   var loadSample = useCallback(function (mode) {
     sessionLoadCount.current += 1;
     beforeSessionChange();
@@ -330,6 +341,7 @@ export function SessionProvider({ children, onBeforeSessionChange, onStoredSessi
       autonomyMetrics: autonomyMetrics,
       debrief: debrief,
       handleFile: handleFile,
+      handleFilePair: handleFilePair,
       loadSample: loadSample,
       openStoredSession: openStoredSession,
       openCompareEntries: openCompareEntries,
@@ -346,7 +358,7 @@ export function SessionProvider({ children, onBeforeSessionChange, onStoredSessi
     compareReady, sessionExport, compareExport, autonomyMetrics, debrief,
     handleFile, loadSample, openStoredSession, openCompareEntries, openCompareCurrentWithEntry, reset, exitCompare,
     openCompareSessionInCoach, handleExportSession, handleExportComparison,
-    refreshSessions,
+    refreshSessions, handleFilePair,
   ]);
 
   return (

@@ -1,5 +1,6 @@
 import { computeCacheHitRate, computeEffectiveInputTokens } from "./cacheMetrics";
 import { estimateCost } from "./pricing.js";
+import { analyzeSessionCalls, emptyComponents } from "./cacheAnalysis";
 
 var CACHE_MISS_MAX_CACHE_READ_RATIO = 0.35;
 var CACHE_MISS_FRESH_SPIKE_MULTIPLIER = 1.5;
@@ -264,6 +265,7 @@ export function buildCostAnalysis(events, metadata) {
   }
 
   var cacheHitRate = computeCacheHitRate(totals.inputTokens, totals.cacheWrite, totals.cacheRead) || 0;
+  var enhancedCacheAnalysis = buildEnhancedCacheAnalysis(calls);
   return {
     calls: calls,
     totals: {
@@ -280,6 +282,235 @@ export function buildCostAnalysis(events, metadata) {
       peakContext: peakContext,
     },
     cacheMisses: cacheMisses,
+    cacheAnalysis: enhancedCacheAnalysis,
     hasCostData: calls.length > 0,
   };
+}
+
+/**
+ * Run the per-model cache analysis (cacheAnalysis.ts) over the calls already
+ * built by buildCostAnalysis. Returns a parallel array of CallAnalysis (one
+ * per call, same order) plus an `unexpectedMisses` array of calls flagged as
+ * unexpected cache misses with structured diagnosis. The new CostView consumes
+ * this; the legacy heuristic `cacheMisses` is kept for backward compatibility.
+ */
+function buildEnhancedCacheAnalysis(calls) {
+  if (!calls || calls.length === 0) {
+    return { perCall: [], unexpectedMisses: [], unexpectedMissCost: 0 };
+  }
+  var promptGroups = groupCallsByPrompt(calls);
+  var groupResults = analyzeSessionCalls(promptGroups.groups);
+  var perCallByEventIndex = {};
+  for (var g = 0; g < groupResults.length; g += 1) {
+    var groupCallIds = promptGroups.callIds[g];
+    var analyzed = groupResults[g].calls;
+    for (var i = 0; i < analyzed.length; i += 1) {
+      perCallByEventIndex[groupCallIds[i]] = analyzed[i];
+    }
+  }
+
+  var perCall = [];
+  var unexpectedMisses = [];
+  var unexpectedMissCost = 0;
+  for (var c = 0; c < calls.length; c += 1) {
+    var call = calls[c];
+    var key = String(call.eventIndex);
+    var analysis = perCallByEventIndex[key] || null;
+    perCall.push(analysis);
+    if (analysis && analysis.unexpectedMiss) {
+      unexpectedMissCost += call.cost || 0;
+      unexpectedMisses.push({
+        callIndex: call.index,
+        eventIndex: call.eventIndex,
+        model: call.model,
+        promptTokens: call.tokenUsage ? call.tokenUsage.inputTokens || 0 : 0,
+        cost: call.cost || 0,
+        diag: analysis.cacheMissDiag,
+      });
+    }
+  }
+  return { perCall: perCall, unexpectedMisses: unexpectedMisses, unexpectedMissCost: unexpectedMissCost };
+}
+
+function getCostPromptForCall(call) {
+  var event = call && call.event;
+  var raw = event && event.raw;
+  return raw && raw.costPrompt ? raw.costPrompt : null;
+}
+
+function getToolDefs(call) {
+  var prompt = getCostPromptForCall(call);
+  if (!prompt || !Array.isArray(prompt.tools)) return [];
+  return prompt.tools.map(function (tool, idx) {
+    if (tool && typeof tool === "object") {
+      var name = tool.name || (tool.function && tool.function.name) || ("tool_" + idx);
+      var copy = Object.assign({}, tool);
+      copy.name = name;
+      return copy;
+    }
+    return { name: "tool_" + idx, value: tool };
+  });
+}
+
+function getComponentsFromBreakdown(breakdown) {
+  return {
+    system: breakdown.system || 0,
+    tool_defs: breakdown.tools || 0,
+    history: breakdown.history || 0,
+    tool_results: breakdown.toolResults || 0,
+    current: breakdown.user || 0,
+  };
+}
+
+/**
+ * Group calls into "prompts" for cacheAnalysis. We use event.turnIndex as the
+ * grouping key when available; otherwise each call is its own prompt. Returns
+ * parallel arrays so we can map results back to call.eventIndex.
+ */
+function groupCallsByPrompt(calls) {
+  var groups = [];
+  var callIds = [];
+  var currentKey = null;
+  var current = null;
+  var currentIds = null;
+  for (var i = 0; i < calls.length; i += 1) {
+    var call = calls[i];
+    var key = call.event && typeof call.event.turnIndex === "number"
+      ? "turn:" + call.event.turnIndex
+      : "call:" + call.eventIndex;
+    if (key !== currentKey || !current) {
+      if (current) { groups.push(current); callIds.push(currentIds); }
+      current = { calls: [], cacheWriteSum: 0 };
+      currentIds = [];
+      currentKey = key;
+    }
+    var usage = call.tokenUsage || {};
+    var components = getComponentsFromBreakdown(call.contextBreakdown || emptyComponents());
+    current.calls.push({
+      id: String(call.eventIndex),
+      model: call.model || "unknown",
+      usage: {
+        prompt_tokens: usage.inputTokens || 0,
+        completion_tokens: usage.outputTokens || 0,
+        cached_tokens: usage.cacheRead || 0,
+        cache_write: usage.cacheWrite || 0,
+      },
+      tools: getToolDefs(call),
+      components: components,
+    });
+    current.cacheWriteSum += usage.cacheWrite || 0;
+    currentIds.push(String(call.eventIndex));
+  }
+  if (current) { groups.push(current); callIds.push(currentIds); }
+  return { groups: groups, callIds: callIds };
+}
+
+/**
+ * Project the upstream-shape analysis (calls[], totals.inputTokens...) into the
+ * shape compareCost.ts and exportComparison.ts expect (prompts[], totals.promptTokens...).
+ *
+ * Used by parsers that want to expose a self-contained `metadata.costAnalysis`
+ * for the Compare view and the markdown export, without forcing every consumer
+ * to re-run buildCostAnalysis. The upstream-shape `analysis` is still authoritative
+ * for CostView; this is purely an additional consumer-facing surface.
+ */
+export function buildCompareCostShape(analysis) {
+  if (!analysis || !Array.isArray(analysis.calls) || analysis.calls.length === 0) {
+    return null;
+  }
+
+  var prompts = [];
+  var currentKey = null;
+  var current = null;
+
+  function freshFromUsage(usage) {
+    return computeEffectiveInputTokens(usage.inputTokens || 0, usage.cacheRead || 0);
+  }
+
+  for (var i = 0; i < analysis.calls.length; i += 1) {
+    var call = analysis.calls[i];
+    var event = call.event || {};
+    var prompt = getCostPromptForCall(call) || {};
+    var usage = call.tokenUsage || {};
+    var bd = call.contextBreakdown || emptyComponents();
+    var fresh = freshFromUsage(usage);
+    var cached = usage.cacheRead || 0;
+    var cacheWrite = usage.cacheWrite || 0;
+    var output = usage.outputTokens || 0;
+    var promptTokens = usage.inputTokens || 0;
+    var cost = call.cost || 0;
+
+    var key = typeof event.turnIndex === "number" ? "turn:" + event.turnIndex : "call:" + call.eventIndex;
+    if (key !== currentKey || !current) {
+      current = {
+        index: prompts.length,
+        cost: 0, output: 0, cached: 0, fresh: 0, cacheWrite: 0, promptTokens: 0,
+        llmCount: 0,
+        events: [],
+      };
+      if (typeof prompt.userPromptText === "string") current.label = prompt.userPromptText;
+      else if (typeof prompt.callName === "string") current.label = prompt.callName;
+      prompts.push(current);
+      currentKey = key;
+    }
+
+    var eventLike = {
+      name: prompt.callName || event.text || "LLM call",
+      model: call.model || "unknown",
+      cost: cost,
+      output: output,
+      cached: cached,
+      fresh: fresh,
+      cacheWrite: cacheWrite,
+      promptTokens: promptTokens,
+      components: {
+        system: bd.system || 0,
+        tool_defs: bd.tools || 0,
+        history: bd.history || 0,
+        tool_results: bd.toolResults || 0,
+        current: bd.user || 0,
+        output: output,
+      },
+      kind: "llm",
+    };
+    if (typeof prompt.category === "string") eventLike.category = prompt.category;
+    if (typeof prompt.responsePreview === "string") eventLike.responsePreview = prompt.responsePreview;
+    if (typeof prompt.currentText === "string") eventLike.currentText = prompt.currentText;
+    if (typeof prompt.systemPreview === "string") {
+      eventLike.systemPreview = prompt.systemPreview;
+      if (typeof prompt.systemChars === "number") eventLike.systemChars = prompt.systemChars;
+      if (typeof prompt.systemHash === "string") eventLike.systemHash = prompt.systemHash;
+    }
+    if (typeof prompt.argsSummary === "string") eventLike.argsSummary = prompt.argsSummary;
+    if (typeof prompt.rawArgs === "string") eventLike.rawArgs = prompt.rawArgs;
+
+    current.events.push(eventLike);
+    current.cost += cost;
+    current.output += output;
+    current.cached += cached;
+    current.fresh += fresh;
+    current.cacheWrite += cacheWrite;
+    current.promptTokens += promptTokens;
+    current.llmCount += 1;
+  }
+
+  var t = analysis.totals || {};
+  var totalDenom = (t.cacheRead || 0) + (t.cacheWrite || 0) + (t.freshInputTokens || 0);
+  var totals = {
+    promptTokens: t.inputTokens || 0,
+    output: t.outputTokens || 0,
+    cached: t.cacheRead || 0,
+    fresh: t.freshInputTokens || 0,
+    cacheWrite: t.cacheWrite || 0,
+    cost: t.cost || 0,
+    llmCalls: analysis.calls.length,
+    toolCalls: 0,
+    cacheHitRate: totalDenom > 0 ? (t.cacheRead || 0) / totalDenom : 0,
+  };
+  if (analysis.cacheAnalysis) {
+    totals.unexpectedMissCount = (analysis.cacheAnalysis.unexpectedMisses || []).length;
+    totals.unexpectedMissCost = analysis.cacheAnalysis.unexpectedMissCost || 0;
+  }
+
+  return { prompts: prompts, totals: totals };
 }

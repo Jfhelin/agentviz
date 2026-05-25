@@ -122,6 +122,25 @@ var DARK_THEME = {
     lg: "0 12px 32px rgba(0,0,0,0.35)",
     inset: "inset 0 1px 2px rgba(0,0,0,0.2)",
   },
+  cost: {
+    // Cumulative cost stack colors (token-type categorical)
+    fresh:    "#56d364",
+    cwrite:   "#f4b340",
+    cached:   "#3DA9D4",
+    output:   "#a371f7",
+    // Per-call context-window stack colors (component categorical)
+    ctxSystem:      "#7A8B9E",
+    ctxToolDefs:    "#4A5568",
+    ctxHistory:     "#E6A847",
+    ctxToolResults: "#B8642F",
+    ctxCurrent:     "#3DA9D4",
+    ctxOutput:      "#2C7A99",
+    ctxImages:      "#C77BC2",
+    // Tool-group kind chips
+    kindMcp:        "#a371f7",
+    kindExtension:  "#f4b340",
+    kindBuiltin:    "#3DA9D4",
+  },
 };
 
 var LIGHT_THEME = {
@@ -185,6 +204,22 @@ var LIGHT_THEME = {
     md: "0 4px 12px rgba(17,24,39,0.08)",
     lg: "0 12px 32px rgba(17,24,39,0.10)",
     inset: "inset 0 1px 2px rgba(17,24,39,0.06)",
+  },
+  cost: {
+    fresh:    "#0ea86b",
+    cwrite:   "#ca8a04",
+    cached:   "#1e88c4",
+    output:   "#7c5ce6",
+    ctxSystem:      "#5a6b80",
+    ctxToolDefs:    "#2d3748",
+    ctxHistory:     "#b87a1a",
+    ctxToolResults: "#8a4a1f",
+    ctxCurrent:     "#1e88c4",
+    ctxOutput:      "#1c5f78",
+    ctxImages:      "#9b4f97",
+    kindMcp:        "#7c5ce6",
+    kindExtension:  "#ca8a04",
+    kindBuiltin:    "#1e88c4",
   },
 };
 
@@ -287,6 +322,7 @@ defineThemeSection(theme, "agent");
 defineThemeSection(theme, "agentType");
 defineThemeSection(theme, "track");
 defineThemeSection(theme, "shadow");
+defineThemeSection(theme, "cost");
 theme.font = SHARED_THEME.font;
 theme.fontSize = SHARED_THEME.fontSize;
 theme.space = SHARED_THEME.space;
