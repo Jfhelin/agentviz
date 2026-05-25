@@ -146,36 +146,65 @@ function detectUnusedTools(prompts: CostAnalysisPrompt[]): {
   offeredAll: Set<string>;
   used: Set<string>;
   unused: string[];
-  estimatedUnusedCostUsd: number;
+  unusedDefTokensTotal: number;
+  callsWithDefs: number;
 } {
   const offered = new Set<string>();
   const used = new Set<string>();
-  let unusedDefChars = 0;
+  // Track per-tool char weight from toolGroups so unused estimate uses real
+  // sizes instead of a 120-tok-each guess.
+  const toolCharsByName = new Map<string, number>();
   let callsWithDefs = 0;
   prompts.forEach(p => {
     p.events.forEach(e => {
       if (e.kind === "llm") {
         callsWithDefs += 1;
-        (e.toolGroups || []).forEach(g => (g.tools || []).forEach(t => offered.add(t.name)));
+        (e.toolGroups || []).forEach(g => (g.tools || []).forEach(t => {
+          offered.add(t.name);
+          // Take max observed size (defs are stable across calls but be safe).
+          const prev = toolCharsByName.get(t.name) || 0;
+          if (t.chars > prev) toolCharsByName.set(t.name, t.chars);
+        }));
       } else if (e.kind === "tool" && e.name) {
         used.add(e.name);
       }
     });
   });
   const unused = Array.from(offered).filter(t => !used.has(t)).sort();
-  // Estimate cost: avg ~120 tokens per tool def, summed across all calls
-  // that include the tool defs (which is every chat LLM call). Cost is at
-  // input rate of the chosen model.
-  const PER_TOOL_DEF_TOKENS = 120;
-  const totalToolDefTokens = unused.length * PER_TOOL_DEF_TOKENS * callsWithDefs;
-  // We don't price here; the caller has the chosen-model price. Just
-  // expose the token figure and let the export include the math.
+  // ~4 chars per token.
+  const unusedCharsPerCall = unused.reduce((a, n) => a + (toolCharsByName.get(n) || 0), 0);
+  const unusedTokensPerCall = Math.round(unusedCharsPerCall / 4);
   return {
     offeredAll: offered,
     used,
     unused,
-    estimatedUnusedCostUsd: totalToolDefTokens / 1e6 * 5.0, // ~Opus input rate as a worst case; LLM can recompute
+    unusedDefTokensTotal: unusedTokensPerCall * callsWithDefs,
+    callsWithDefs,
   };
+}
+
+function aggregateSkillCarry(prompts: CostAnalysisPrompt[]): {
+  skillCount: number;
+  skillTokensPerCall: number;
+  totalSkillTokens: number;
+  callsWithSkills: number;
+} {
+  // Skills are declared in the system prompt and shipped on every call.
+  // We can't tell *which* skill the model actually leaned on, but the
+  // attached-but-unused-for-this-task waste is something an LLM can judge
+  // from the user-message context. Expose the aggregate carrying cost.
+  let charsPerCall = 0;
+  let count = 0;
+  let calls = 0;
+  prompts.forEach(p => p.events.forEach(e => {
+    if (e.kind !== "llm") return;
+    calls += 1;
+    if (calls === 1) {
+      (e.skills || []).forEach((s: { chars: number }) => { charsPerCall += s.chars || 0; count += 1; });
+    }
+  }));
+  const tokensPerCall = Math.round(charsPerCall / 4);
+  return { skillCount: count, skillTokensPerCall: tokensPerCall, totalSkillTokens: tokensPerCall * calls, callsWithSkills: calls };
 }
 
 function aggregateUserMessages(prompts: CostAnalysisPrompt[]): { turn: number; text: string }[] {
@@ -347,6 +376,45 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
     });
   }));
 
+  // Pre-compute cost levers so the LLM doesn't have to do arithmetic.
+  // We surface them as concrete numbers in a single block; the LLM
+  // references them in TL;DR + sections 5 and 8 instead of generating
+  // its own estimates.
+  const chosenPriceRow = chosenModelName ? findCatalogModel(chosenModelName) : null;
+  const chosenInputRate = chosenPriceRow ? chosenPriceRow.inputPerMTok : 0;
+  const chosenCachedRate = chosenPriceRow ? chosenPriceRow.cachedInputPerMTok : 0;
+  // Unused-tool defs sit in every call's prompt: first call pays cache-write
+  // (or fresh), every subsequent call pays cached-read rate. Approximate as
+  // one fresh + (N-1) cached.
+  const unusedToolFirstCallUsd = (unused.unusedDefTokensTotal / Math.max(unused.callsWithDefs, 1)) / 1e6 * chosenInputRate;
+  const unusedToolLaterCallsUsd = (unused.unusedDefTokensTotal / Math.max(unused.callsWithDefs, 1)) / 1e6 * chosenCachedRate * Math.max(unused.callsWithDefs - 1, 0);
+  const unusedToolUsd = unusedToolFirstCallUsd + unusedToolLaterCallsUsd;
+  const unusedToolPctOfSession = totals.cost > 0 ? (unusedToolUsd / totals.cost) * 100 : 0;
+
+  const skillCarry = aggregateSkillCarry(prompts);
+  const skillCarryFirstCallUsd = skillCarry.skillTokensPerCall / 1e6 * chosenInputRate;
+  const skillCarryLaterUsd = skillCarry.skillTokensPerCall / 1e6 * chosenCachedRate * Math.max(skillCarry.callsWithSkills - 1, 0);
+  const skillCarryUsd = skillCarryFirstCallUsd + skillCarryLaterUsd;
+  const skillCarryPctOfSession = totals.cost > 0 ? (skillCarryUsd / totals.cost) * 100 : 0;
+
+  // Auto mode: VS Code picks ONE model based on the first prompt and applies
+  // a 10% discount. Two scenarios: (a) Auto picks the same model the user
+  // picked manually — savings is just the 10% discount; (b) Auto picks the
+  // cheapest Versatile-tier alt — savings is the alt cost projection × 0.9
+  // minus the actual cost.
+  const AUTO_DISCOUNT = 0.10;
+  const autoSameModelCost = totals.cost * (1 - AUTO_DISCOUNT);
+  const autoSameModelSavings = totals.cost - autoSameModelCost;
+  // Cheapest alt across ALL tiers (excluding the chosen model itself) —
+  // the "best case" Auto mode could deliver if it picked the cheapest
+  // viable model for the first prompt. The analyst LLM judges whether
+  // that pick is realistic for the task.
+  const cheapestAlt = altCostRows
+    .filter(r => r.model !== findCatalogModel(chosenModelName)?.name)
+    .sort((a, b) => a.projected_cost_usd - b.projected_cost_usd)[0];
+  const autoOptimalCost = cheapestAlt ? cheapestAlt.projected_cost_usd * (1 - AUTO_DISCOUNT) : null;
+  const autoOptimalSavings = autoOptimalCost != null ? totals.cost - autoOptimalCost : null;
+
   // Build the markdown.
   const lines: string[] = [];
   lines.push("# Copilot session analysis request");
@@ -357,26 +425,43 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
   }
   lines.push("## Instructions for the analyst LLM");
   lines.push("");
-  lines.push("You are an expert evaluator of AI coding agent sessions. Below is a structured summary of one VS Code Copilot Chat session. Produce a report following the format below.");
+  lines.push("You are evaluating one VS Code Copilot Chat session for cost efficiency. The data below is structured and pre-computed where possible. Your job is to interpret it and tell the user where their money went and what to change next time.");
   lines.push("");
-  lines.push("**Output format:** Start your reply with `# <session title>` as the very first line — the title IS the heading, do not write 'Session title' as a separate label. Then write sections 2 through 8 using `##` subheadings.");
+  lines.push("**Output format:** Start your reply with `# <session title>` as the very first line (the title IS the H1 — do not write 'Session title' as a separate label). Then use `##` subheadings for the sections below. Keep the whole report under 800 words. Be specific, not narrative.");
   lines.push("");
-  lines.push("1. **Session title** (the H1): one short line, ≤8 words, describing the actual work done.");
-  lines.push("2. **The user's goal** — one paragraph in the user's own framing. Reconstruct from the user messages, not the assistant's interpretation.");
-  lines.push("3. **How the agent got there** — 3-5 bullet narrative of the trajectory. Note any backtracking, re-reading, or dead ends.");
-  lines.push("4. **Efficiency analysis** — Was anything redundant? Did the model thrash or converge? Cite specific turn numbers. When context jumps or output sizes spike, attribute the cause using `ctx_components` and `out_breakdown_chars` from the per-call JSON — name the specific component (history, tool_results, visible_reply, tool_args, thinking) that grew, do NOT guess.");
-  lines.push("5. **What the user could have done differently** — Up to 4 actionable suggestions. For each: rationale, and a *qualitative* savings estimate (large / moderate / small) tied to a specific signal from the facts. Do not invent dollar figures.");
-  lines.push("6. **Model fit** — Was the chosen model (" + (chosenModelName ? shortModelName(chosenModelName) : "n/a") + ", category: " + (chosenTier || "unknown") + ") justified? Review the alt-model projections table and judge whether a Lightweight or Versatile model would have produced acceptable results for this task. Use the conversation difficulty as your evidence.");
-  lines.push("7. **Auto-mode suitability** — VS Code's Auto mode picks one model based on the first prompt and sticks with it for the session. Score 1-5 (5 = would have worked perfectly, 1 = would have failed) based on whether complexity stayed steady or drifted. Cite the complexity drift signals.");
-  lines.push("8. **Unused capacity** — Tools and skills attached but never used. The unused-tools list is pre-computed below. The user CAN selectively disable tools via VS Code's tool picker (the 'Configure Tools' UI in chat), and CAN remove unused skills/instructions from their workspace config. Treat this as actionable. Identify which specific unused tools / skill groups the user could safely turn off for similar future sessions, and what the rough constant overhead cost is.");
+  lines.push("Sections, in this order:");
   lines.push("");
-  lines.push("**Important constraints:**");
-  lines.push("- Use ONLY the facts below. Do not invent token counts, dollar figures, or technical details that are not present in the data.");
-  lines.push("- When you cite a number, quote it exactly from the facts.");
-  lines.push("- When attributing context growth or large outputs, name the specific JSON field (e.g. `ctx_components.tool_results grew from 12,000 to 28,000`) instead of speculating.");
-  lines.push("- When something is not determinable from the facts, say so explicitly. Do not guess.");
-  lines.push("- Note: reasoning-token counts are NOT included in this data — do not comment on reasoning effort.");
-  lines.push("- Keep the report under 1500 words.");
+  lines.push("1. **TL;DR** (~5 lines, write this LAST but place it FIRST):");
+  lines.push("    - one-line story of what the user was doing");
+  lines.push("    - top 3 cost levers as a bulleted list, each with the specific $ or % impact pulled from the pre-computed facts below");
+  lines.push("2. **What the user wanted** — 1-2 sentences, in the user's own framing.");
+  lines.push("3. **How it played out** — 3-4 bullets max. Note any backtracking or pivots.");
+  lines.push("4. **Where the money went** — Focus on cost. For each notable cost driver, name the specific data field (e.g. `ctx_components.tool_results grew from 12k to 28k between turns 8 and 10`) and translate it into a savings opportunity. Skip purely narrative observations. 3-5 bullets.");
+  lines.push("5. **What the user could change** — Up to 3 concrete prompt or setup changes. For each: one-line rationale + qualitative size (large / moderate / small). Reference the pre-computed cost-lever block when possible.");
+  lines.push("6. **Model fit** — Was " + (chosenModelName ? shortModelName(chosenModelName) : "the chosen model") + " (" + (chosenTier || "unknown") + " tier) right for this task? 2-3 sentences. Reference the alt-model table.");
+  lines.push("7. **Auto-mode verdict** — Score 1-5. Reference the pre-computed Auto-mode savings figures below. Cite complexity drift signals.");
+  lines.push("8. **Unused capacity** — Two short paragraphs. (a) Unused tools: cite the pre-computed `% of session cost` figure, name 2-3 specific tools the user could safely disable in VS Code's Configure Tools UI for similar tasks. (b) Carried skills: cite the pre-computed total skill cost share; if any attached skills seem unrelated to the user's actual goal, name them.");
+  lines.push("");
+  lines.push("**Hard rules:**");
+  lines.push("- Use ONLY the facts below. Quote numbers verbatim.");
+  lines.push("- When attributing context growth or output size, name the specific JSON field. Do not speculate.");
+  lines.push("- Reasoning-token counts are NOT in this data. Do not comment on reasoning effort.");
+  lines.push("- When the data does not support a claim, say 'not determinable from the data'.");
+  lines.push("");
+  lines.push("---");
+  lines.push("");
+  lines.push("## Pre-computed cost levers (cite these in TL;DR + sections 5, 7, 8)");
+  lines.push("");
+  lines.push("- **Unused tool definitions:** " + unused.unused.length + " tools / ~" + unused.unusedDefTokensTotal.toLocaleString() + " tokens shipped across all calls / **~" + fmtUsd(unusedToolUsd) + " (" + unusedToolPctOfSession.toFixed(1) + "% of session cost)** at chosen-model rates (1 fresh + " + Math.max(unused.callsWithDefs - 1, 0) + " cached). User can disable per-tool in VS Code's Configure Tools UI.");
+  lines.push("- **Skill carry overhead:** " + skillCarry.skillCount + " skills attached / ~" + skillCarry.skillTokensPerCall.toLocaleString() + " tokens per call / **~" + fmtUsd(skillCarryUsd) + " (" + skillCarryPctOfSession.toFixed(1) + "% of session cost)** at chosen-model rates. Removing unrelated skills scales linearly with their char count.");
+  lines.push("- **Auto-mode floor (same model):** Auto applies a flat 10% discount on model rates. If Auto picked the same model, session cost would be ~" + fmtUsd(autoSameModelCost) + " (save ~" + fmtUsd(autoSameModelSavings) + ", 10%). This is the conservative lower-bound estimate.");
+  if (autoOptimalCost != null && cheapestAlt && autoOptimalSavings != null && autoOptimalSavings > 0) {
+    const altPct = totals.cost > 0 ? (autoOptimalSavings / totals.cost) * 100 : 0;
+    lines.push("- **Auto-mode optimistic (cheapest viable pick):** Auto picks a model from the first prompt and applies 10% off. If Auto picked the cheapest model in the alt-projection table (" + cheapestAlt.model + ", " + cheapestAlt.category + " tier), projected ~" + fmtUsd(autoOptimalCost) + " (save ~" + fmtUsd(autoOptimalSavings) + ", " + altPct.toFixed(0) + "%). Judge whether " + cheapestAlt.category + "-tier is realistic for this task before quoting this number — if the task needed a Versatile or Powerful model, the realistic Auto cost is between the floor and this figure.");
+  }
+  if (totals.unexpectedMissCount > 0) {
+    lines.push("- **Unexpected cache misses:** " + totals.unexpectedMissCount + " calls / wasted **~" + fmtUsd(totals.unexpectedMissCost) + " (" + (totals.cost > 0 ? (totals.unexpectedMissCost / totals.cost * 100).toFixed(1) : "0") + "% of session cost)**. See per-call rows with `unexpected_cache_miss: true`.");
+  }
   lines.push("");
   lines.push("---");
   lines.push("");
@@ -391,9 +476,6 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
   lines.push("| total cost | " + fmtUsd(totals.cost) + " |");
   lines.push("| billed input tokens | " + totals.promptTokens.toLocaleString() + " (" + pct(totals.cached, totals.promptTokens) + " cached) |");
   lines.push("| output tokens | " + totals.output.toLocaleString() + " |");
-  if (totals.unexpectedMissCount > 0) {
-    lines.push("| unexpected cache misses | " + totals.unexpectedMissCount + " (wasted ~" + fmtUsd(totals.unexpectedMissCost) + ") |");
-  }
   lines.push("");
   lines.push("## Models used (with cost share)");
   lines.push("");
@@ -412,9 +494,9 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
   lines.push("");
   lines.push("## Alt-model cost projection");
   lines.push("");
-  lines.push("Same token shape this session produced, re-priced on each candidate model. Cache reads, cache writes, and output assumed to follow the same proportions (a coarse projection — a different model might produce more or fewer output tokens in practice).");
+  lines.push("Same token shape this session produced, re-priced on each candidate. Coarse projection — a different model might produce more or fewer output tokens in practice. Numbers DO NOT include Auto mode's 10% discount; subtract another 10% to model that.");
   lines.push("");
-  lines.push("| model | vendor | category | projected total cost | delta vs chosen |");
+  lines.push("| model | vendor | category | projected cost | delta vs chosen |");
   lines.push("|---|---|---|---|---|");
   const chosenProjection = altCostRows.find(r => r.model === findCatalogModel(chosenModelName)?.name);
   const chosenCost = chosenProjection ? chosenProjection.projected_cost_usd : totals.cost;
@@ -425,37 +507,23 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
     lines.push("| " + r.model + tag + " | " + r.vendor + " | " + r.category + " | " + fmtUsd(r.projected_cost_usd) + " | " + (delta >= 0 ? "+" : "") + fmtUsd(delta) + " (" + (deltaPct >= 0 ? "+" : "") + deltaPct + "%) |");
   });
   lines.push("");
-  lines.push("## GitHub Copilot model pricing reference");
-  lines.push("");
-  lines.push("For category tiers (Lightweight / Versatile / Powerful) and current per-token rates of any model not in the alt-projection table above, consult: https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing");
+  lines.push("Tier reference: https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing");
   lines.push("");
   lines.push("## System prompt anatomy");
   lines.push("");
   lines.push("- **Custom chat mode:** " + (chatMode ? chatMode.name + " (~" + (chatMode.tokensEst || 0).toLocaleString() + " tok)" : "(none)"));
-  lines.push("- **Attached skills:** " + (skills.length > 0 ? skills.join(", ") : "(none)"));
-  lines.push("- **Attached instructions:** " + (instructions.length > 0 ? instructions.join(", ") : "(none)"));
+  lines.push("- **Attached skills:** " + skills.length + (skills.length > 0 ? " (" + skills.slice(0, 6).join(", ") + (skills.length > 6 ? ", …" : "") + ")" : ""));
+  lines.push("- **Attached instructions:** " + instructions.length + (instructions.length > 0 ? " (" + instructions.slice(0, 4).join(", ") + (instructions.length > 4 ? ", …" : "") + ")" : ""));
   lines.push("");
   lines.push("## Tools offered vs used");
   lines.push("");
   lines.push("- **Tools offered to model:** " + unused.offeredAll.size);
-  lines.push("- **Tools actually used:** " + unused.used.size);
-  lines.push("- **Unused tools (definitions in every prompt, never called):**");
-  if (unused.unused.length === 0) {
-    lines.push("  - (none — every offered tool was used at least once)");
+  lines.push("- **Tools actually used:** " + unused.used.size + " — `" + Array.from(unused.used).sort().join("`, `") + "`");
+  if (unused.unused.length > 0) {
+    // Show all unused names but inline (one line) to save space.
+    lines.push("- **Unused (" + unused.unused.length + "):** `" + unused.unused.join("`, `") + "`");
   } else {
-    unused.unused.forEach(t => lines.push("  - `" + t + "`"));
-    lines.push("");
-    lines.push("Rough estimate: ~120 tokens per tool definition × " + unused.unused.length + " unused × " + llmCount + " calls = ~" + Math.round(unused.unused.length * 120 * llmCount / 1000) + "k tokens of definition shipped but never invoked. The user can selectively disable these via VS Code's 'Configure Tools' chat UI, which removes them from every future call's prompt.");
-  }
-  lines.push("");
-  lines.push("### Tools actually called (with frequency)");
-  lines.push("");
-  if (toolUsage.length === 0) {
-    lines.push("(none)");
-  } else {
-    lines.push("| tool | uses |");
-    lines.push("|---|---|");
-    toolUsage.forEach(t => lines.push("| `" + t.name + "` | " + t.uses + " |"));
+    lines.push("- **Unused:** (none)");
   }
   lines.push("");
   lines.push("## Complexity drift signals (for auto-mode judgement)");

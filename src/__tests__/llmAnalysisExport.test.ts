@@ -20,20 +20,20 @@ describe("buildLlmAnalysisPrompt", () => {
 
   it("includes the eight required report sections", () => {
     const out = buildLlmAnalysisPrompt(analysis);
-    expect(out).toContain("Session title");
-    expect(out).toContain("The user's goal");
-    expect(out).toContain("How the agent got there");
-    expect(out).toContain("Efficiency analysis");
-    expect(out).toContain("What the user could have done differently");
+    expect(out).toContain("TL;DR");
+    expect(out).toContain("What the user wanted");
+    expect(out).toContain("How it played out");
+    expect(out).toContain("Where the money went");
+    expect(out).toContain("What the user could change");
     expect(out).toContain("Model fit");
-    expect(out).toContain("Auto-mode suitability");
+    expect(out).toContain("Auto-mode verdict");
     expect(out).toContain("Unused capacity");
   });
 
   it("embeds the don't-fabricate guard", () => {
     const out = buildLlmAnalysisPrompt(analysis);
-    expect(out.toLowerCase()).toContain("do not invent");
     expect(out.toLowerCase()).toContain("only the facts");
+    expect(out.toLowerCase()).toContain("do not speculate");
   });
 
   it("includes a per-call JSON breakdown", () => {
@@ -59,5 +59,16 @@ describe("buildLlmAnalysisPrompt", () => {
   it("respects the session label when provided", () => {
     const out = buildLlmAnalysisPrompt(analysis, { sessionLabel: "test-session-xyz" });
     expect(out).toContain("test-session-xyz");
+  });
+
+  it("emits the pre-computed cost-lever block with Auto-mode bullets", () => {
+    const out = buildLlmAnalysisPrompt(analysis);
+    expect(out).toContain("Pre-computed cost levers");
+    expect(out).toContain("Unused tool definitions");
+    expect(out).toContain("Skill carry overhead");
+    expect(out).toContain("Auto-mode floor");
+    // The optimistic Auto bullet only appears when a cheaper alt exists,
+    // which depends on the chosen model. Just check the floor bullet is
+    // always present.
   });
 });
