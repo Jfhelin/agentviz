@@ -22,16 +22,16 @@ describe("buildLlmAnalysisPrompt", () => {
     const out = buildLlmAnalysisPrompt(analysis);
     expect(out).toContain("TL;DR");
     expect(out).toContain("Developer takeaway");
+    expect(out).toContain("Main efficiency levers");
     expect(out).toContain("What made this session expensive");
     expect(out).toContain("What was probably unavoidable");
-    expect(out).toContain("Developer-action findings");
-    expect(out).toContain("Recommended custom chat mode");
-    expect(out).toContain("Recommended IDE/tool configuration");
-    expect(out).toContain("Recommended skills/profile cleanup");
-    expect(out).toContain("Recommended automation boundary");
+    expect(out).toContain("Recommended changes");
+    expect(out).toContain("Automation boundary");
+    expect(out).toContain("Tool and skill profile cleanup");
     expect(out).toContain("Model and Auto-mode guidance");
-    expect(out).toContain("What to change in the inline prompt");
+    expect(out).toContain("Inline prompt guidance");
     expect(out).toContain("Data confidence and missing data");
+    expect(out).toContain("Suggestions for improving future telemetry");
   });
 
   it("embeds the don't-fabricate guard", () => {
@@ -78,10 +78,12 @@ describe("buildLlmAnalysisPrompt", () => {
 
   it("declares skill-usage detection rather than asking the analyst to infer it", () => {
     const out = buildLlmAnalysisPrompt(analysis);
-    // The new positive rule must be present; the old guard line must be gone.
+    // The pre-computed cost-lever bullet must still surface unused skills.
     expect(out).toContain("Unused skills (directly removable)");
-    expect(out).toContain("We DO detect which skills were USED");
-    expect(out).not.toContain("We CANNOT directly detect which skills were USED");
+    // The structured skill_usage block (and the spec-named skills_profile_analysis)
+    // must be present so the analyst can cite per-skill detection rather than re-inferring it.
+    expect(out).toContain("\"skills_profile_analysis\"");
+    expect(out).toContain("\"skill_attachment_source\": \"unknown_not_recorded_in_export\"");
   });
 
   it("detects used skills when a skill's file path appears in any tool call's args", () => {
@@ -116,8 +118,9 @@ describe("buildLlmAnalysisPrompt", () => {
     expect(out).toContain("Auto-mode fit verdict");
     // Verdict label must be one of the three buckets.
     expect(out).toMatch(/\*\*(Good fit|Borderline fit|Poor fit)\*\*/);
-    // Section 9 instructions must reference the Auto-mode verdict by JSON field path.
-    expect(out).toContain("auto_mode_data.verdict");
+    // Auto-mode guidance section must reference the Auto-mode verdict by JSON field path.
+    expect(out).toContain("auto_mode_data");
+    expect(out).toContain("verdict");
   });
 
   it("emits a top-expensive-call composition bullet with cause interpretation and venue guide", () => {
@@ -126,37 +129,55 @@ describe("buildLlmAnalysisPrompt", () => {
     // Composition must identify the dominant output slice as one of the
     // three buckets and include an interpretation hint.
     expect(out).toMatch(/Output dominated by `(thinking|visible_reply|tool_args|\(unknown\))`/);
-    // Section 5 must require a venue for each finding.
-    expect(out).toContain("/ venue /");
-    expect(out).toContain("Venue guide for section 5 suggestions");
+    // The venue guide must spell out the four canonical surfaces.
+    expect(out).toContain("Venue guide");
     expect(out).toContain("[inline prompt]");
     expect(out).toContain("[AGENTS.md]");
     expect(out).toContain("[custom skill: SKILL.md]");
   });
 
-  it("emits a structured facts JSON block with all top-level keys", () => {
+  it("emits a structured facts JSON block with all top-level developer-facing keys", () => {
     const out = buildLlmAnalysisPrompt(analysis);
     expect(out).toContain("## Structured facts (JSON)");
     // Extract the JSON block that follows the heading.
     const match = out.match(/## Structured facts \(JSON\)[\s\S]*?```json\n([\s\S]*?)\n```/);
     expect(match).not.toBeNull();
     const facts = JSON.parse(match![1]);
+    // Developer-facing top-level keys (the source of truth).
     expect(facts).toHaveProperty("session_metadata");
-    expect(facts).toHaveProperty("effective_prompt_context");
-    expect(facts).toHaveProperty("instruction_sources");
-    expect(facts).toHaveProperty("cost_summary");
-    expect(facts).toHaveProperty("tool_usage");
-    expect(facts).toHaveProperty("skill_usage");
-    expect(facts).toHaveProperty("developer_behavior_signals");
-    expect(facts).toHaveProperty("agent_behavior_signals");
-    expect(facts).toHaveProperty("model_fit_data");
-    expect(facts).toHaveProperty("auto_mode_data");
-    expect(facts).toHaveProperty("optimization_opportunities");
+    expect(facts).toHaveProperty("developer_action_summary");
+    expect(facts).toHaveProperty("workflow_classification");
+    expect(facts).toHaveProperty("developer_efficiency_findings");
+    expect(facts).toHaveProperty("developer_levers_detected");
+    expect(facts).toHaveProperty("developer_cost_categories");
+    expect(facts).toHaveProperty("recommended_changes");
+    expect(facts).toHaveProperty("custom_mode_or_agent_analysis");
+    expect(facts).toHaveProperty("ide_tool_configuration_analysis");
+    expect(facts).toHaveProperty("skills_profile_analysis");
+    expect(facts).toHaveProperty("automation_boundary_recommendation");
+    expect(facts).toHaveProperty("model_strategy_recommendation");
+    expect(facts).toHaveProperty("prompt_strategy_recommendation");
+    expect(facts).toHaveProperty("quality_and_validation");
     expect(facts).toHaveProperty("missing_data");
     expect(Array.isArray(facts.missing_data)).toBe(true);
     expect(facts.missing_data.length).toBeGreaterThan(0);
+    // Raw telemetry must be nested under raw_supporting_telemetry.
+    expect(facts).toHaveProperty("raw_supporting_telemetry");
+    expect(facts.raw_supporting_telemetry).toHaveProperty("cost_summary");
+    expect(facts.raw_supporting_telemetry).toHaveProperty("effective_prompt_context");
+    expect(facts.raw_supporting_telemetry).toHaveProperty("instruction_sources");
+    expect(facts.raw_supporting_telemetry).toHaveProperty("tool_usage");
+    expect(facts.raw_supporting_telemetry).toHaveProperty("skill_usage");
+    expect(facts.raw_supporting_telemetry).toHaveProperty("developer_behavior_signals");
+    expect(facts.raw_supporting_telemetry).toHaveProperty("agent_behavior_signals");
+    expect(facts.raw_supporting_telemetry).toHaveProperty("model_fit_data");
+    expect(facts.raw_supporting_telemetry).toHaveProperty("auto_mode_data");
+    expect(facts.raw_supporting_telemetry).toHaveProperty("optimization_opportunities");
     // Developer signals must distinguish visible vs effective specificity.
-    expect(facts.developer_behavior_signals).toHaveProperty("visible_prompt_specificity");
-    expect(facts.developer_behavior_signals).toHaveProperty("effective_prompt_specificity");
+    expect(facts.raw_supporting_telemetry.developer_behavior_signals).toHaveProperty("visible_prompt_specificity");
+    expect(facts.raw_supporting_telemetry.developer_behavior_signals).toHaveProperty("effective_prompt_specificity");
+    // Missing_data entries use the new field shape.
+    expect(facts.missing_data[0]).toHaveProperty("why_it_matters_for_developer_report");
+    expect(facts.missing_data[0]).toHaveProperty("future_instrumentation");
   });
 });
