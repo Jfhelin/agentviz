@@ -629,6 +629,20 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
   lines.push("- Reasoning-token counts are NOT in this data. Do not comment on reasoning effort.");
   lines.push("- When the data does not support a claim, say 'not determinable from the data'.");
   lines.push("");
+  lines.push("**Custom agent caution:**");
+  lines.push("");
+  lines.push("Do not judge prompt quality from the visible user prompt alone. If `effective_prompt_context.custom_chat_mode_name` is set (or `developer_behavior_signals.do_not_blame_visible_prompt_alone == true`), treat the visible user prompt as only the trigger. Judge prompt quality and model fit from the effective prompt context. If the full custom agent prompt is unavailable (`effective_prompt_context.custom_agent_full_prompt.status == \"not_available\"`), say so. You may say the effective prompt was likely more specific than the visible prompt if the custom agent name and chars are present, but do not claim specific locked behaviors (output schema, naming policy, confirmation policy) unless the data includes them.");
+  lines.push("");
+  lines.push("**Extra analyst emphasis (prioritize developer actionability over token accounting):**");
+  lines.push("");
+  lines.push("Focus on:");
+  lines.push("- whether the custom agent / chat mode caused the behavior,");
+  lines.push("- whether the visible user prompt was actually responsible,");
+  lines.push("- what should move into the custom chat mode prompt vs the inline user prompt vs a reusable script,");
+  lines.push("- which tools/skills should be removed,");
+  lines.push("- whether a cheaper model would be realistic for repeat runs (cite `model_fit_data.alt_model_projections[*].realistic_for_full_task` -- which is `not_determinable_from_data` for every alt unless validation data exists),");
+  lines.push("- the exact text the developer should add to the custom chat mode, Configure Tools setup, or repo instructions (deliver as fenced code blocks in section 7).");
+  lines.push("");
   lines.push("**Venue guide for section 5 suggestions (choose the right home for each fix):**");
   lines.push("- `[inline prompt]` -- one-off fix the user types into the next prompt. Good for output-shape constraints (\"reply in <=5 bullets\", \"output only the filename\") and for narrowing scope on this specific task.");
   lines.push("- `[AGENTS.md]` or `[.github/copilot-instructions.md]` -- repo-level instructions auto-attached to every chat in this workspace. Good for project-wide conventions (file naming, tool preferences, output format defaults).");
@@ -729,14 +743,17 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
   // not visible -- otherwise it incorrectly blames the user for a terse
   // prompt when the chat mode already supplied the task shape.
   const visiblePromptLen = firstPromptChars;
-  const visibleSpecificity = visiblePromptLen >= 300 ? "high" : visiblePromptLen >= 80 ? "medium" : "low";
-  const effectiveSpecificity = firstChatMode ? "high" : visibleSpecificity;
-  const specificityReason = firstChatMode
-    ? "Visible user prompt was " + visibleSpecificity + " specificity (" + visiblePromptLen + " chars), but the active custom chat mode `" + firstChatMode.name + "` (~" + (firstChatMode.tokensEst || 0).toLocaleString() + " tok) supplied workflow constraints."
-    : "No custom chat mode active. Effective prompt specificity equals visible (" + visiblePromptLen + " chars).";
-  // Behavior-verbosity averages across chat calls.
+  const visibleSpecValue = visiblePromptLen >= 300 ? "high" : visiblePromptLen >= 80 ? "medium" : "low";
+  const effectiveSpecValue = firstChatMode ? "higher_than_visible_prompt" : visibleSpecValue;
+  const visibleSpecRule = "Specificity bucket derived from prompt length: <80 chars = low, 80-299 = medium, >=300 = high. Short prompts with broad verbs and no explicit output format default to low.";
+  const effectiveSpecRule = firstChatMode
+    ? "A custom chat mode (`" + firstChatMode.name + "`, ~" + (firstChatMode.tokensEst || 0).toLocaleString() + " tok) was active. Effective specificity is treated as higher than visible because the chat mode contributed additional instruction text. Full chat mode text is not in this export, so the exact additional specificity is not measurable."
+    : "No custom chat mode active. Effective specificity equals visible.";
+  // Per-call walk: collect output/thinking spikes and ctx component growth.
   let totalVis = 0, totalThink = 0, totalToolArgs = 0;
   let maxThink = { turn: 0, chars: 0, out: 0, cost: 0 };
+  const perTurnOutputs: { turn: number; output: number; cost: number; visibleReplyChars: number; thinkingChars: number }[] = [];
+  const ctxComponentSeries: Record<string, number[]> = {};
   let turnIdx = 0;
   chatEvents.forEach(e => {
     turnIdx += 1;
@@ -745,12 +762,52 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
     totalThink += t;
     totalToolArgs += e.toolArgsChars || 0;
     if (t > maxThink.chars) maxThink = { turn: turnIdx, chars: t, out: e.output || 0, cost: e.cost || 0 };
+    perTurnOutputs.push({ turn: turnIdx, output: e.output || 0, cost: e.cost || 0, visibleReplyChars: e.visibleResponseChars || 0, thinkingChars: t });
+    if (e.componentChars) {
+      Object.entries(e.componentChars).forEach(([k, v]) => {
+        if (!ctxComponentSeries[k]) ctxComponentSeries[k] = [];
+        ctxComponentSeries[k].push(v as number);
+      });
+    }
   });
   const callsForAvg = Math.max(chatEvents.length, 1);
   const avgVisible = Math.round(totalVis / callsForAvg);
   const avgThink = Math.round(totalThink / callsForAvg);
+  const avgOutput = perTurnOutputs.reduce((a, p) => a + p.output, 0) / Math.max(perTurnOutputs.length, 1);
   const explanationVerbosity = avgVisible >= 2000 ? "high" : avgVisible >= 500 ? "medium" : "low";
   const deliberationVerbosity = avgThink >= 5000 ? "high" : avgThink >= 1500 ? "medium" : "low";
+  // Output spikes: turns where output is >= 3x the session average AND >= 1500 tokens.
+  const largeOutputSpikes = perTurnOutputs
+    .filter(p => avgOutput > 0 && p.output >= 3 * avgOutput && p.output >= 1500)
+    .map(p => ({
+      turn: p.turn,
+      output_tokens: p.output,
+      cost_usd: Number(p.cost.toFixed(4)),
+      reason: "Output >= 3x session average and >= 1500 tokens.",
+      confidence: "measured",
+    }));
+  // Thinking spikes: turns where thinkingChars >= 3x average thinking AND >= 3000 chars.
+  const thinkingSpikes = perTurnOutputs
+    .filter(p => avgThink > 0 && p.thinkingChars >= 3 * avgThink && p.thinkingChars >= 3000)
+    .map(p => ({
+      turn: p.turn,
+      thinking_chars: p.thinkingChars,
+      visible_reply_chars: p.visibleReplyChars,
+      confidence: "measured",
+    }));
+  // Context growth top sources: top-2 components by absolute char delta first->last.
+  const ctxGrowthSources = Object.entries(ctxComponentSeries)
+    .map(([source, series]) => {
+      const start = series[0] || 0;
+      const end = series[series.length - 1] || 0;
+      return { source, chars_start: start, chars_end: end, delta: end - start };
+    })
+    .filter(s => s.delta > 0)
+    .sort((a, b) => b.delta - a.delta)
+    .slice(0, 3)
+    .map(s => ({ source: s.source, chars_start: s.chars_start, chars_end: s.chars_end, confidence: "measured" }));
+  // Developer-supplied signals: detected from presence of scaffolding.
+  const devSuppliedScope = !!firstChatMode || instructions.length > 0;
   // Top cost levers mirrored into structured form so the analyst can quote them.
   const topCostLevers: Record<string, unknown>[] = [];
   if (unusedToolUsd > 0) topCostLevers.push({
@@ -758,6 +815,7 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
     evidence: unused.unused.length + " tools / ~" + unused.unusedDefTokensTotal.toLocaleString() + " tokens across calls / ~" + fmtUsd(unusedToolUsd) + " / " + unusedToolPctOfSession.toFixed(1) + "% of session cost",
     estimated_impact: unusedToolPctOfSession >= 10 ? "large" : unusedToolPctOfSession >= 3 ? "moderate" : "small",
     recommended_venue: "VS Code Configure Tools UI or custom chat mode tool whitelist",
+    confidence: "measured",
     snippet: "(disable in VS Code: Settings -> Chat -> Tools, or restrict in `.chatmode.md` `tools:` frontmatter)",
   });
   if (unusedSkillUsd > 0) topCostLevers.push({
@@ -765,6 +823,7 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
     evidence: skillCarry.unusedCount + " unused skills / ~" + skillCarry.unusedTokensPerCall.toLocaleString() + " tok per call / ~" + fmtUsd(unusedSkillUsd) + " / " + unusedSkillPctOfSession.toFixed(1) + "% of session cost",
     estimated_impact: unusedSkillPctOfSession >= 10 ? "large" : unusedSkillPctOfSession >= 3 ? "moderate" : "small",
     recommended_venue: "custom agent skills config / VS Code skill profile (depends on where the skills were attached)",
+    confidence: "measured",
     snippet: "(prune unused skills from whichever surface attached them; the export does not record skill_attachment_source)",
   });
   if (maxThink.chars >= 5000) topCostLevers.push({
@@ -772,8 +831,14 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
     evidence: "Turn " + maxThink.turn + " emitted " + maxThink.chars.toLocaleString() + " chars of thinking / " + maxThink.out.toLocaleString() + " output tokens / " + fmtUsd(maxThink.cost),
     estimated_impact: "moderate",
     recommended_venue: "custom chat mode or custom agent prompt",
+    confidence: "derived",
     snippet: "For routine extraction, renaming, and batch file operations, think briefly. Reserve extended deliberation for ambiguous receipts or irreversible operations.",
   });
+  const largestUnusedSkills = skillCarry.skills
+    .filter(s => !s.used)
+    .sort((a, b) => b.tokens - a.tokens)
+    .slice(0, 5)
+    .map(s => ({ name: s.name, tokens: s.tokens }));
   const facts = {
     session_metadata: {
       session_label: opts.sessionLabel || null,
@@ -787,7 +852,9 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
       total_cached_input_tokens: totals.cached,
       total_output_tokens: totals.output,
       custom_chat_mode_used: !!firstChatMode,
+      custom_skill_used: skillCarry.usedCount > 0,
       repo_instructions_used: instructions.length > 0,
+      confidence: "measured",
     },
     cost_summary: {
       total_cost_usd: Number(totals.cost.toFixed(4)),
@@ -797,16 +864,44 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
       total_output_tokens: totals.output,
       chat_call_cost_usd: Number(Object.values(perModel).reduce((a, v) => a + v.cost, 0).toFixed(4)),
       overhead_call_cost_usd: Number(Object.values(perModel).reduce((a, v) => a + v.overheadCost, 0).toFixed(4)),
+      top_expensive_call: maxThink.cost > 0 ? {
+        turn: maxThink.turn,
+        cost_usd: Number(maxThink.cost.toFixed(4)),
+        percent_of_session_cost: totals.cost > 0 ? Math.round(100 * maxThink.cost / totals.cost) : 0,
+        output_tokens: maxThink.out,
+        confidence: "measured",
+      } : null,
+      confidence: "measured",
     },
     effective_prompt_context: {
       visible_user_prompt: firstUserPromptText,
       visible_user_prompt_chars: visiblePromptLen,
       custom_chat_mode_name: firstChatMode ? firstChatMode.name : null,
       custom_chat_mode_tokens_est: firstChatMode ? (firstChatMode.tokensEst || 0) : 0,
-      custom_chat_mode_full_text_available: false,
-      effective_task_definition_note: firstChatMode
-        ? "Combined task is `visible_user_prompt` interpreted under the constraints set by the `" + firstChatMode.name + "` chat mode. Full chat-mode text is NOT in this export; only the name and token weight."
-        : "No chat mode active; effective task definition equals the visible user prompt.",
+      custom_agent_full_prompt: {
+        status: "not_available",
+        reason: firstChatMode
+          ? "Telemetry includes only the chat mode name and token weight. Full prompt text is not in this export."
+          : "No custom chat mode active in this session.",
+      },
+      visible_prompt_specificity: {
+        value: visibleSpecValue,
+        confidence: "derived",
+        rule: visibleSpecRule,
+      },
+      effective_prompt_specificity: {
+        value: effectiveSpecValue,
+        confidence: "derived",
+        rule: effectiveSpecRule,
+      },
+      effective_task_definition: {
+        status: firstChatMode ? "partial" : "complete_visible_only",
+        value: firstChatMode
+          ? "Visible prompt plus active custom chat mode `" + firstChatMode.name + "`. Full chat mode prompt text was not available."
+          : "Visible user prompt is the full effective task definition. No chat mode or custom agent active.",
+        confidence: "derived",
+      },
+      do_not_blame_visible_prompt_alone: !!firstChatMode || instructions.length > 0,
     },
     instruction_sources: {
       custom_chat_mode_tokens: firstChatMode ? (firstChatMode.tokensEst || 0) : 0,
@@ -814,6 +909,7 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
       skills_attached_tokens_per_call: skillCarry.skillTokensPerCall,
       tool_definitions_tokens_per_call_first: firstChat && firstChat.components ? (firstChat.components.tool_defs || 0) : 0,
       repo_instruction_files: instructions,
+      confidence: "measured",
     },
     tool_usage: {
       tools_offered_count: unused.offeredAll.size,
@@ -824,6 +920,7 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
       unused_tool_definition_pct_of_session: Number(unusedToolPctOfSession.toFixed(2)),
       total_executions: totals.toolCalls,
       execution_counts_by_name: toolUsage,
+      confidence: "measured",
     },
     skill_usage: {
       skills_attached_count: skillCarry.skillCount,
@@ -839,14 +936,31 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
         used: s.used,
         evidence: s.used ? "skill file path appeared in at least one tool call's rawArgs" : "skill file path did not appear in any tool call's args",
       })),
-      skill_attachment_source: "unknown (not recorded in export)",
+      largest_unused_skills: largestUnusedSkills,
+      skill_attachment_source: "unknown_not_recorded_in_export",
+      confidence: "measured",
     },
     developer_behavior_signals: {
       visible_prompt_length_chars: visiblePromptLen,
-      visible_prompt_specificity: visibleSpecificity,
-      effective_prompt_specificity: effectiveSpecificity,
-      specificity_reason: specificityReason,
-      custom_chat_mode_supplied_task_shape: !!firstChatMode,
+      visible_prompt_specificity: {
+        value: visibleSpecValue,
+        confidence: "derived",
+        rule: visibleSpecRule,
+      },
+      effective_prompt_specificity: {
+        value: effectiveSpecValue,
+        confidence: "derived",
+        rule: effectiveSpecRule,
+      },
+      developer_supplied_scope: devSuppliedScope,
+      developer_supplied_cost_constraint: false,
+      developer_supplied_model_preference: false,
+      do_not_blame_visible_prompt_alone: !!firstChatMode || instructions.length > 0,
+      recommended_analysis_focus: firstChatMode
+        ? "Evaluate and improve the custom chat mode `" + firstChatMode.name + "`, not only the visible user prompt."
+        : instructions.length > 0
+          ? "Evaluate repo-level instruction files in addition to the visible user prompt."
+          : "Visible user prompt is the only instruction surface; recommend adding a custom chat mode or repo instructions for repeatable workflows.",
       recommended_setup_home: firstChatMode
         ? "improve the active custom chat mode (`" + firstChatMode.name + "`) rather than lengthening the user prompt"
         : "add a custom chat mode or repo-level `.github/copilot-instructions.md` for repeatable workflows of this kind",
@@ -855,16 +969,29 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
       avg_visible_reply_chars_per_chat_call: avgVisible,
       avg_thinking_chars_per_chat_call: avgThink,
       avg_tool_args_chars_per_chat_call: Math.round(totalToolArgs / callsForAvg),
-      explanation_verbosity: explanationVerbosity,
-      internal_deliberation_verbosity: deliberationVerbosity,
+      explanation_verbosity: {
+        value: explanationVerbosity,
+        confidence: "derived",
+        rule: "Bucket from avg visible reply chars per chat call: <500 = low, 500-1999 = medium, >=2000 = high.",
+      },
+      internal_deliberation_verbosity: {
+        value: deliberationVerbosity,
+        confidence: "derived",
+        rule: "Bucket from avg thinking chars per chat call: <1500 = low, 1500-4999 = medium, >=5000 = high.",
+      },
+      large_output_spikes: largeOutputSpikes,
+      thinking_spikes: thinkingSpikes,
       largest_thinking_spike: maxThink.chars > 0 ? {
         turn: maxThink.turn,
         thinking_chars: maxThink.chars,
         output_tokens: maxThink.out,
         cost_usd: Number(maxThink.cost.toFixed(4)),
+        confidence: "measured",
       } : null,
+      context_growth_main_sources: ctxGrowthSources,
       model_switched_mid_session: autoModelSwitched,
       distinct_chat_models: Array.from(distinctChatModels).map(shortModelName),
+      unexpected_cache_misses_detected: chatEvents.some(e => (e as { unexpectedMiss?: boolean }).unexpectedMiss === true),
     },
     model_fit_data: {
       chosen_model: chosenModelName,
@@ -879,13 +1006,17 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
           category: r.category,
           projected_cost_usd: r.projected_cost_usd,
           delta_pct_vs_chosen: Math.round(100 * delta / denom),
+          realistic_for_full_task: "not_determinable_from_data",
         };
       }),
-      projection_caveat: "Same token shape this session produced, re-priced on each candidate. Behavior may differ on a different model (longer/shorter outputs, more/fewer tool calls).",
+      projection_caveat: "Alt-model projections re-price the same token shape this session produced. Actual token shape may differ on a different model.",
+      confidence: "measured",
     },
     auto_mode_data: {
       verdict: autoFitLabel,
       verdict_bucket: autoFitVerdict,
+      visible_prompt_signal_quality: visibleSpecValue,
+      effective_first_prompt_signal_quality: firstChatMode ? "higher_due_to_custom_chat_mode" : visibleSpecValue,
       drift_signals: driftSignals,
       chat_mode_present_for_picker: !!firstChatMode,
       same_model_floor_cost_usd: Number(autoSameModelCost.toFixed(4)),
@@ -894,19 +1025,64 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
       optimistic_cheapest_viable_cost_usd: autoOptimalCost != null ? Number(autoOptimalCost.toFixed(4)) : null,
       optimistic_cheapest_viable_model: cheapestAlt ? cheapestAlt.model : null,
       recommended_estimate_to_quote: autoFitVerdict === "good" ? "optimistic_cheapest_viable" : autoFitVerdict === "borderline" ? "same_model_floor (in-between if a mid-tier alt is realistic)" : "same_model_floor",
+      recommended_estimate_reason: autoFitVerdict === "good"
+        ? "Drift was minimal; Auto's first-call pick likely held up across the session, so the optimistic cheaper-model projection is fair to quote."
+        : autoFitVerdict === "borderline"
+          ? "Some drift detected; Auto may have stayed on the same tier or stepped up mid-session. Quote the floor; mention an in-between number only if a mid-tier alternative is realistic."
+          : "Significant drift detected; if Auto picked a lighter model from the first prompt it would have under-served the later turns. Use the same-model floor as the realistic Auto cost.",
     },
     optimization_opportunities: {
       top_cost_levers: topCostLevers,
     },
     missing_data: [
-      firstChatMode ? "Full custom chat mode prompt text (only name + token weight available)." : null,
-      "Per-call workflow phase classification (no reliable heuristic; analyst can group by hand from per-call breakdown if useful).",
-      "File inventory / artifacts produced (export does not enumerate files touched per tool call).",
-      "Quality and outcome validation (no post-session correction or user-confirmation data).",
-      "Per-call rework / retry detection (would require diff/similarity across calls).",
-      "Skill attachment source (which surface attached each skill -- custom agent vs global profile vs workspace).",
-      "Tool stdout/stderr byte size per individual command (only aggregate tool_results component chars are available).",
-      "Reasoning token counts (Copilot does not report these even when the model emits extended thinking).",
+      firstChatMode ? {
+        field: "custom_agent_full_prompt",
+        status: "not_available",
+        reason: "Telemetry includes only the custom chat mode name and character count.",
+        future_instrumentation: "Store full custom chat mode prompt text when safe. Otherwise store name, hash, character count, and a redacted summary.",
+      } : null,
+      {
+        field: "workflow_phases",
+        status: "not_available",
+        reason: "No reliable phase labels or clustering heuristic is present in the export.",
+        future_instrumentation: "Capture explicit phase markers from the agent or infer them with a documented classifier.",
+      },
+      {
+        field: "files_and_artifacts",
+        status: "not_available",
+        reason: "Tool results are aggregated; the export does not enumerate per-call file inventory or created/renamed/deleted artifacts.",
+        future_instrumentation: "Capture file inventory before/after, file types, sizes, and files touched per tool call.",
+      },
+      {
+        field: "quality_and_outcome",
+        status: "not_available",
+        reason: "No post-session validation, user correction, or acceptance signal is captured.",
+        future_instrumentation: "Capture validation checks, user acceptance, and post-session corrections.",
+      },
+      {
+        field: "was_rework_or_retry",
+        status: "not_available",
+        reason: "Per-call rework / retry detection would require command fingerprinting and file-operation diffing across turns.",
+        future_instrumentation: "Add command fingerprinting and repeated file/action detection.",
+      },
+      {
+        field: "skill_attachment_source",
+        status: "not_available",
+        reason: "Export does not record which surface attached each skill (custom agent vs workspace vs global profile).",
+        future_instrumentation: "Annotate each attached skill with its source surface.",
+      },
+      {
+        field: "per_command_tool_output_size",
+        status: "not_available",
+        reason: "Only aggregate tool_results component chars are available; individual command stdout/stderr sizes are not exposed.",
+        future_instrumentation: "Capture per-command stdout/stderr byte counts and truncation flags.",
+      },
+      {
+        field: "reasoning_token_counts",
+        status: "not_available",
+        reason: "Copilot does not report reasoning token counts even when the model emits extended thinking. Our `thinking_chars` is a character count from the visible thinking stream, not a billed token count.",
+        future_instrumentation: "Surface model-reported reasoning tokens when the platform exposes them.",
+      },
     ].filter(Boolean),
   };
   lines.push("```json");
