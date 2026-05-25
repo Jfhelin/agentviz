@@ -177,13 +177,13 @@ Cost view, Cost Compare, and the cost tooltips read from `theme.cost.*`. The pal
 | `theme.cost.switchBorder` | Banner border |
 | `theme.cost.switchText` | Banner text |
 
-**Event pills** (LLM call / Subagent / Tool labels in the call list):
+**Event pills** (LLM call / Subagent / Tool labels in the call list) -- reuse the chip pattern:
 
-| Token | Use |
-|-------|-----|
-| `theme.cost.pillLlm` | "LLM call" pill (billed roundtrip) |
-| `theme.cost.pillSubagent` | "Subagent" pill (tool that spawns its own LLM call) |
-| `theme.cost.pillTool` | "Tool" pill (client-side, no LLM cost) |
+| Pill | Background | Foreground | Border |
+|------|------------|------------|--------|
+| LLM call | `theme.cost.chipBgAssistant` | `theme.accent.primary` | `accent.primary + 40` alpha |
+| Subagent | `theme.cost.chipBgExtension` | `theme.cost.kindExtension` | `kindExtension + 40` alpha |
+| Tool | `theme.cost.chipBgBuiltin` | `theme.cost.kindBuiltin` | `kindBuiltin + 40` alpha |
 
 Rules:
 

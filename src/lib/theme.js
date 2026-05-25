@@ -165,10 +165,6 @@ var DARK_THEME = {
     switchBg:      "#6475e812",
     switchBorder:  "#6475e830",
     switchText:    "#7585f0",
-    // Event pills (LLM call / Subagent / Tool)
-    pillLlm:       "#6475e8",
-    pillSubagent:  "#f4b340",
-    pillTool:      "#3DA9D4",
   },
 };
 
@@ -269,9 +265,6 @@ var LIGHT_THEME = {
     switchBg:      "#6475e80e",
     switchBorder:  "#6475e828",
     switchText:    "#4a5cd9",
-    pillLlm:       "#6475e8",
-    pillSubagent:  "#ca8a04",
-    pillTool:      "#1e88c4",
   },
 };
 

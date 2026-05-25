@@ -2649,24 +2649,31 @@ export default function CostView(props) {
                       <div style={{ display: "grid", gridTemplateColumns: "18px 78px 1fr", gap: 8, alignItems: "start", width: "100%" }}>
                         <div style={{ color: theme.text.muted, fontSize: theme.fontSize.xs, width: 14, textAlign: "center", marginTop: 3, transition: "transform .15s", transform: open ? "rotate(90deg)" : "none" }}>▶</div>
                         {(function () {
-                          var pillBg, pillText;
+                          var pillBg, pillFg, pillBorder, pillLabel;
                           if (isLLM) {
-                            pillBg = theme.cost.pillLlm;
-                            pillText = "LLM call";
+                            pillBg = theme.cost.chipBgAssistant;
+                            pillFg = theme.accent.primary;
+                            pillBorder = theme.accent.primary + "40";
+                            pillLabel = "LLM call";
                           } else if (ev.subagent) {
-                            pillBg = theme.cost.pillSubagent;
-                            pillText = "Subagent";
+                            pillBg = theme.cost.chipBgExtension;
+                            pillFg = theme.cost.kindExtension;
+                            pillBorder = theme.cost.kindExtension + "40";
+                            pillLabel = "Subagent";
                           } else {
-                            pillBg = theme.cost.pillTool;
-                            pillText = "Tool";
+                            pillBg = theme.cost.chipBgBuiltin;
+                            pillFg = theme.cost.kindBuiltin;
+                            pillBorder = theme.cost.kindBuiltin + "40";
+                            pillLabel = "Tool";
                           }
                           return (
                             <div style={{
-                              fontSize: theme.fontSize.xs, fontWeight: 700, padding: "2px 8px", borderRadius: 3,
+                              fontSize: theme.fontSize.xs, fontWeight: 700, padding: "1px 7px", borderRadius: 3,
                               display: "inline-flex", alignItems: "center", justifyContent: "center",
-                              color: theme.text.primary, marginTop: 1, background: pillBg,
+                              color: pillFg, marginTop: 1, background: pillBg,
+                              border: "1px solid " + pillBorder,
                               textTransform: "uppercase", letterSpacing: 0.4, height: 18, whiteSpace: "nowrap",
-                            }} title={isLLM ? "Roundtrip to the model. Billed." : ev.subagent ? "Tool that spawns its own LLM call internally. Has an estimated cost." : "Client-side tool execution. No LLM cost."}>{pillText}</div>
+                            }} title={isLLM ? "Roundtrip to the model. Billed." : ev.subagent ? "Tool that spawns its own LLM call internally. Has an estimated cost." : "Client-side tool execution. No LLM cost."}>{pillLabel}</div>
                           );
                         })()}
                         <div>

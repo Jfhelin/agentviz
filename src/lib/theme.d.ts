@@ -136,9 +136,6 @@ export interface Theme {
     switchBg: string;
     switchBorder: string;
     switchText: string;
-    pillLlm: string;
-    pillSubagent: string;
-    pillTool: string;
   };
   focus: { ring: string };
   transition: {
