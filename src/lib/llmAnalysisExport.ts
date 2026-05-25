@@ -183,6 +183,52 @@ function detectUnusedTools(prompts: CostAnalysisPrompt[]): {
   };
 }
 
+/**
+ * Detect which attached skills were actually picked up during the session.
+ *
+ * Mechanics: VS Code Copilot ships only `<skill>` metadata (name, short
+ * description, file path) in the system prompt. When the agent decides a
+ * skill is relevant, it calls a file-reading tool with the skill's `file`
+ * path to load the full instructions. So if a skill's `file` path appears
+ * in ANY tool call's `rawArgs` anywhere in the session, that skill was
+ * used. If not, it was carried but never opened — directly attributable
+ * waste the user can remove by disabling the skill.
+ *
+ * Match strategy: substring on the skill's `file` value. The file path in
+ * the system prompt is typically absolute (e.g.
+ * `/Users/.../.copilot/installed-plugins/foo/skills/bar/SKILL.md`); tool
+ * calls may use the same absolute path, a workspace-relative path, or an
+ * expanded variant. Substring is the safest match across these variants
+ * because skill file paths are long and unique enough to avoid collisions.
+ */
+function detectUsedSkills(
+  prompts: CostAnalysisPrompt[],
+  skills: { name: string; file: string }[]
+): Set<string> {
+  const used = new Set<string>();
+  if (skills.length === 0) return used;
+  // Pre-filter skills that have a usable file path.
+  const candidates = skills.filter(s => s.file && s.file.length > 4);
+  if (candidates.length === 0) return used;
+  prompts.forEach(p => p.events.forEach(e => {
+    let argsBlobs: string[] = [];
+    if (e.kind === "llm") {
+      (e.producedToolCalls || []).forEach(tc => {
+        if (tc && tc.rawArgs) argsBlobs.push(tc.rawArgs);
+      });
+    } else if (e.kind === "tool") {
+      if (e.rawArgs) argsBlobs.push(e.rawArgs);
+    }
+    if (argsBlobs.length === 0) return;
+    const joined = argsBlobs.join("\n");
+    candidates.forEach(s => {
+      if (used.has(s.name)) return;
+      if (joined.includes(s.file)) used.add(s.name);
+    });
+  }));
+  return used;
+}
+
 function aggregateSkillCarry(prompts: CostAnalysisPrompt[]): {
   skillCount: number;
   skillTokensPerCall: number;
@@ -190,7 +236,10 @@ function aggregateSkillCarry(prompts: CostAnalysisPrompt[]): {
   callsWithSkills: number;
   /** Per-skill char + token estimate, sorted descending by size. Lets the
    * analyst LLM name specific large skills as savings candidates. */
-  skills: { name: string; tokens: number }[];
+  skills: { name: string; tokens: number; file: string; used: boolean }[];
+  usedCount: number;
+  unusedCount: number;
+  unusedTokensPerCall: number;
 } {
   // Sample the skill list from the first CHAT (non-overhead) LLM call.
   // The very first LLM event in the session is usually an overhead call
@@ -200,28 +249,49 @@ function aggregateSkillCarry(prompts: CostAnalysisPrompt[]): {
   let charsPerCall = 0;
   let count = 0;
   let chatCalls = 0;
-  let skillRows: { name: string; tokens: number }[] = [];
+  let skillRows: { name: string; tokens: number; file: string; used: boolean }[] = [];
   let sampled = false;
+  let sampledSkills: { name: string; file: string; chars: number }[] = [];
   prompts.forEach(p => p.events.forEach(e => {
     if (e.kind !== "llm" || e.category === "overhead") return;
     chatCalls += 1;
     if (!sampled) {
       sampled = true;
-      (e.skills || []).forEach((s: { name: string; chars: number }) => {
+      (e.skills || []).forEach((s: { name: string; chars: number; file?: string }) => {
         charsPerCall += s.chars || 0;
         count += 1;
-        skillRows.push({ name: s.name, tokens: Math.round((s.chars || 0) / 4) });
+        sampledSkills.push({ name: s.name, file: s.file || "", chars: s.chars || 0 });
       });
-      skillRows.sort((a, b) => b.tokens - a.tokens);
     }
   }));
+  const usedSet = detectUsedSkills(prompts, sampledSkills);
+  let unusedChars = 0;
+  sampledSkills.forEach(s => {
+    const used = usedSet.has(s.name);
+    if (!used) unusedChars += s.chars;
+    skillRows.push({
+      name: s.name,
+      tokens: Math.round(s.chars / 4),
+      file: s.file,
+      used,
+    });
+  });
+  // Sort: unused first (so the cost-driver list pops), then by size desc.
+  skillRows.sort((a, b) => {
+    if (a.used !== b.used) return a.used ? 1 : -1;
+    return b.tokens - a.tokens;
+  });
   const tokensPerCall = Math.round(charsPerCall / 4);
+  const unusedTokensPerCall = Math.round(unusedChars / 4);
   return {
     skillCount: count,
     skillTokensPerCall: tokensPerCall,
     totalSkillTokens: tokensPerCall * chatCalls,
     callsWithSkills: chatCalls,
     skills: skillRows,
+    usedCount: usedSet.size,
+    unusedCount: count - usedSet.size,
+    unusedTokensPerCall,
   };
 }
 
@@ -423,6 +493,13 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
   const skillCarryLaterUsd = skillCarry.skillTokensPerCall / 1e6 * chosenCachedRate * Math.max(skillCarry.callsWithSkills - 1, 0);
   const skillCarryUsd = skillCarryFirstCallUsd + skillCarryLaterUsd;
   const skillCarryPctOfSession = totals.cost > 0 ? (skillCarryUsd / totals.cost) * 100 : 0;
+  // Unused skills: same per-call math as carry, but scoped to skills whose
+  // file path never appeared in any tool call's args. Directly attributable
+  // waste — the user can delete these from VS Code's skill config.
+  const unusedSkillFirstUsd = skillCarry.unusedTokensPerCall / 1e6 * chosenInputRate;
+  const unusedSkillLaterUsd = skillCarry.unusedTokensPerCall / 1e6 * chosenCachedRate * Math.max(skillCarry.callsWithSkills - 1, 0);
+  const unusedSkillUsd = unusedSkillFirstUsd + unusedSkillLaterUsd;
+  const unusedSkillPctOfSession = totals.cost > 0 ? (unusedSkillUsd / totals.cost) * 100 : 0;
 
   // Auto mode: VS Code picks ONE model based on the first prompt and applies
   // a 10% discount. Two scenarios: (a) Auto picks the same model the user
@@ -467,14 +544,14 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
   lines.push("5. **What the user could change** — Up to 3 concrete prompt or setup changes. For each: one-line rationale + qualitative size (large / moderate / small). Reference the pre-computed cost-lever block when possible.");
   lines.push("6. **Model fit** — Was " + (chosenModelName ? shortModelName(chosenModelName) : "the chosen model") + " (" + (chosenTier || "unknown") + " tier) right for this task? 2-3 sentences. Reference the alt-model table.");
   lines.push("7. **Auto-mode verdict** — Score 1-5. Reference the pre-computed Auto-mode savings figures below. Cite complexity drift signals.");
-  lines.push("8. **Unused capacity** — Two short paragraphs. (a) Unused tools: cite the pre-computed `% of session cost` figure, name 2-3 specific tools the user could safely disable in VS Code's Configure Tools UI for similar tasks. (b) Carried skills: cite the pre-computed total skill cost share; if any attached skills seem unrelated to the user's actual goal, name them.");
+  lines.push("8. **Unused capacity** — Two short paragraphs. (a) Unused tools: cite the pre-computed `% of session cost` figure, name 2-3 specific tools the user could safely disable in VS Code's Configure Tools UI for similar tasks. (b) Unused skills: cite the pre-computed **Unused skills** figure (`N skills / $X / Y%`) verbatim — that number is detected from the data, not inferred. Name the 2-3 largest unused skills from the System anatomy list as the top removal candidates.");
   lines.push("");
   lines.push("**Hard rules:**");
   lines.push("- Use ONLY the facts below. Quote numbers verbatim.");
   lines.push("- When attributing context growth or output size, name the specific JSON field. Do not speculate.");
   lines.push("- Per-call rows include CHAT calls only — overhead calls (title generation, prompt categorization, telemetry) are summarised separately and should NOT be referenced as user turns.");
   lines.push("- `ctx_components.tool_defs` IS NOT necessarily constant across the session. Copilot Chat dynamically expands the toolset when skills are invoked or new MCP tools are discovered. Cross-check growth against `tools_offered_count` on each row before claiming it.");
-  lines.push("- We CANNOT directly detect which skills were USED during the session — Copilot does not expose a clean 'skill invoked' signal. Use the user's goal and the assistant's tool-call pattern to infer which attached skills are clearly unrelated to the task, and name those as removal candidates.");
+  lines.push("- We DO detect which skills were USED during the session by matching each skill's `file` path against tool call args. The pre-computed cost-lever block lists the unused-skill count, token cost, and per-skill ✓/✗ markers in System anatomy. Cite those numbers directly — do not re-infer skill usage from prompt context.");
   lines.push("- Reasoning-token counts are NOT in this data. Do not comment on reasoning effort.");
   lines.push("- When the data does not support a claim, say 'not determinable from the data'.");
   lines.push("");
@@ -483,7 +560,8 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
   lines.push("## Pre-computed cost levers (cite these in TL;DR + sections 5, 7, 8)");
   lines.push("");
   lines.push("- **Unused tool definitions:** " + unused.unused.length + " tools / ~" + unused.unusedDefTokensTotal.toLocaleString() + " tokens shipped across all calls / **~" + fmtUsd(unusedToolUsd) + " (" + unusedToolPctOfSession.toFixed(1) + "% of session cost)** at chosen-model rates (1 fresh + " + Math.max(unused.callsWithDefs - 1, 0) + " cached). User can disable per-tool in VS Code's Configure Tools UI.");
-  lines.push("- **Skill carry overhead:** " + skillCarry.skillCount + " skills attached / ~" + skillCarry.skillTokensPerCall.toLocaleString() + " tokens per call / **~" + fmtUsd(skillCarryUsd) + " (" + skillCarryPctOfSession.toFixed(1) + "% of session cost)** at chosen-model rates. Removing unrelated skills scales linearly with their char count.");
+  lines.push("- **Skill carry overhead:** " + skillCarry.skillCount + " skills attached (" + skillCarry.usedCount + " used, " + skillCarry.unusedCount + " unused) / ~" + skillCarry.skillTokensPerCall.toLocaleString() + " tokens per call / **~" + fmtUsd(skillCarryUsd) + " (" + skillCarryPctOfSession.toFixed(1) + "% of session cost)** at chosen-model rates.");
+  lines.push("- **Unused skills (directly removable):** " + skillCarry.unusedCount + " skills / ~" + skillCarry.unusedTokensPerCall.toLocaleString() + " tokens per call / **~" + fmtUsd(unusedSkillUsd) + " (" + unusedSkillPctOfSession.toFixed(1) + "% of session cost)** at chosen-model rates (1 fresh + " + Math.max(skillCarry.callsWithSkills - 1, 0) + " cached). Detected by checking whether each attached skill's `file` path appears in any tool call's args anywhere in the session — skills marked unused were carried in every system prompt but never opened.");
   lines.push("- **Auto-mode floor (same model):** Auto applies a flat 10% discount on model rates. If Auto picked the same model, session cost would be ~" + fmtUsd(autoSameModelCost) + " (save ~" + fmtUsd(autoSameModelSavings) + ", 10%). This is the conservative lower-bound estimate.");
   if (autoOptimalCost != null && cheapestAlt && autoOptimalSavings != null && autoOptimalSavings > 0) {
     const altPct = totals.cost > 0 ? (autoOptimalSavings / totals.cost) * 100 : 0;
@@ -542,17 +620,19 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
   lines.push("## System prompt anatomy");
   lines.push("");
   lines.push("- **Custom chat mode:** " + (chatMode ? chatMode.name + " (~" + (chatMode.tokensEst || 0).toLocaleString() + " tok)" : "(none)"));
-  lines.push("- **Attached skills (" + skillCarry.skillCount + " total, ~" + skillCarry.skillTokensPerCall.toLocaleString() + " tok per call):**");
+  lines.push("- **Attached skills (" + skillCarry.skillCount + " total, " + skillCarry.usedCount + " ✓ used / " + skillCarry.unusedCount + " ✗ unused, ~" + skillCarry.skillTokensPerCall.toLocaleString() + " tok per call):**");
   if (skillCarry.skills.length === 0) {
     lines.push("  - (none attached on the first chat call)");
   } else {
-    // Show top 10 by size with a summary line for the rest.
+    // Show top 10 by size (unused first thanks to the sort) with a summary line for the rest.
     const top = skillCarry.skills.slice(0, 10);
     const rest = skillCarry.skills.slice(10);
-    top.forEach(s => lines.push("  - `" + s.name + "` — ~" + s.tokens.toLocaleString() + " tok"));
+    top.forEach(s => lines.push("  - " + (s.used ? "✓" : "✗") + " `" + s.name + "` — ~" + s.tokens.toLocaleString() + " tok"));
     if (rest.length > 0) {
       const restTok = rest.reduce((a, s) => a + s.tokens, 0);
-      lines.push("  - … " + rest.length + " more skills (~" + restTok.toLocaleString() + " tok combined)");
+      const restUnused = rest.filter(s => !s.used).length;
+      const restUnusedTok = rest.filter(s => !s.used).reduce((a, s) => a + s.tokens, 0);
+      lines.push("  - … " + rest.length + " more skills (~" + restTok.toLocaleString() + " tok combined; of those " + restUnused + " unused / ~" + restUnusedTok.toLocaleString() + " tok)");
     }
   }
   lines.push("- **Attached instructions:** " + instructions.length + (instructions.length > 0 ? " (" + instructions.slice(0, 4).join(", ") + (instructions.length > 4 ? ", …" : "") + ")" : ""));

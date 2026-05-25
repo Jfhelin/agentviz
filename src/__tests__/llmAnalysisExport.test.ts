@@ -71,4 +71,39 @@ describe("buildLlmAnalysisPrompt", () => {
     // which depends on the chosen model. Just check the floor bullet is
     // always present.
   });
+
+  it("declares skill-usage detection rather than asking the analyst to infer it", () => {
+    const out = buildLlmAnalysisPrompt(analysis);
+    // The new positive rule must be present; the old guard line must be gone.
+    expect(out).toContain("Unused skills (directly removable)");
+    expect(out).toContain("We DO detect which skills were USED");
+    expect(out).not.toContain("We CANNOT directly detect which skills were USED");
+  });
+
+  it("detects used skills when a skill's file path appears in any tool call's args", () => {
+    // Mutate a copy of the parsed analysis to inject two known skills + one
+    // tool call that references one of them. Easier than building a full
+    // CostAnalysis from scratch.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const cloned: any = JSON.parse(JSON.stringify(analysis));
+    // Find the first non-overhead LLM event and attach our test skills.
+    let injected = false;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    cloned.prompts.forEach((p: any) => p.events.forEach((e: any) => {
+      if (injected || e.kind !== "llm" || e.category === "overhead") return;
+      e.skills = [
+        { name: "used-skill", file: "/abs/path/to/used-skill/SKILL.md", chars: 4000, description: "" },
+        { name: "ghost-skill", file: "/abs/path/to/ghost-skill/SKILL.md", chars: 8000, description: "" },
+      ];
+      e.producedToolCalls = [
+        { name: "read_file", argsSummary: "", rawArgs: '{"path":"/abs/path/to/used-skill/SKILL.md"}' },
+      ];
+      injected = true;
+    }));
+    expect(injected).toBe(true);
+    const out = buildLlmAnalysisPrompt(cloned);
+    expect(out).toContain("✓ `used-skill`");
+    expect(out).toContain("✗ `ghost-skill`");
+    expect(out).toMatch(/2 skills attached \(1 used, 1 unused\)/);
+  });
 });
