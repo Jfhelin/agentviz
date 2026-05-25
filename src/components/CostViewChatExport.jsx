@@ -456,6 +456,7 @@ function StackBar(props) {
 
 function ToolGroups(props) {
   var groups = props.groups || [];
+  var routerNames = props.routerNames || null;
   var [expanded, setExpanded] = useState({});
   // Map parser group `source` → kind
   var grouped = groups.map(function (g) {
@@ -526,6 +527,18 @@ function ToolGroups(props) {
                       style={{ padding: "2px 0", display: "grid", gridTemplateColumns: "1fr auto", gap: 6, fontVariantNumeric: "tabular-nums", cursor: tip ? "help" : "default" }}>
                       <span style={{ color: theme.text.secondary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {t.name}
+                        {routerNames && routerNames.has(t.name) && (
+                          <span
+                            title="Router/grouped tool: this single schema can stand in for many hidden or deferred subcommands. Unless it was invoked with discovery arguments (e.g. learn=true), those subcommands were not expanded in this run."
+                            style={{
+                              display: "inline-block", marginLeft: 6,
+                              fontSize: 9, padding: "0 4px", borderRadius: 8,
+                              background: theme.cost.chipBgMcp, color: KIND_COLORS.mcp,
+                              fontWeight: 700, letterSpacing: 0.4, cursor: "help",
+                              verticalAlign: "middle",
+                            }}
+                          >ROUTER</span>
+                        )}
                         {tip && <span style={{ marginLeft: 6, opacity: 0.55 }}>ⓘ</span>}
                       </span>
                       <span>{fmtT(t.tokens)} tok</span>
@@ -1208,12 +1221,31 @@ function LLMDetail(props) {
         }
         var bodyForBucket = function (k) {
           if (k === "system") return renderSystemAnatomy(ev);
-          if (k === "tool_defs") return (
-            <>
-              <div style={{ color: theme.text.secondary, fontSize: theme.fontSize.sm, marginBottom: 5 }}>{ev.totalTools} tools available, grouped by source</div>
-              <ToolGroups groups={ev.toolGroups} />
-            </>
-          );
+          if (k === "tool_defs") {
+            var shape = ev.toolDefinitionShape;
+            var routerNames = shape && shape.available
+              ? new Set((shape.routerOrGroupedTools || []).map(function (t) { return t.name; }))
+              : null;
+            var summary = ev.totalTools + " model-visible tool definitions sent to the model";
+            if (shape && shape.available && (shape.routerOrGroupedToolCount > 0 || shape.possibleRouterToolCount > 0)) {
+              summary += " (" + shape.directToolCount + " direct, " + shape.routerOrGroupedToolCount + " router/grouped";
+              if (shape.possibleRouterToolCount > 0) summary += ", " + shape.possibleRouterToolCount + " possible router";
+              summary += "). IDE-selected tool count is not in the export -- routers stand in for many hidden subcommands.";
+            } else {
+              summary += ". IDE-selected tool count is not in the export.";
+            }
+            return (
+              <>
+                <div
+                  title="Model-visible tool definitions are the tool schemas actually sent to the model in this request. The IDE may show more selected/enabled tools than were sent. Router/grouped tools can stand in for many hidden or deferred subcommands behind one schema."
+                  style={{ color: theme.text.secondary, fontSize: theme.fontSize.sm, marginBottom: 5, cursor: "help" }}
+                >
+                  {summary}
+                </div>
+                <ToolGroups groups={ev.toolGroups} routerNames={routerNames} />
+              </>
+            );
+          }
           if (k === "history") return (
             <>
               <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, marginBottom: 4 }}>
