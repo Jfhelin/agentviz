@@ -548,10 +548,10 @@ export function buildMcpReachabilityFacts(reach: McpReachabilityAnalysis): Recor
       label: s.label,
       type: s.type ?? null,
       command: s.command ?? null,
-      reason: "no tool definitions matching `mcp_<label-slug>_*` were sent to the model in this session",
+      reason: "no `mcp_<label-slug>_*` tools from this server appeared in any chat request; cause not determined from the export (could be disabled, failed to start, or simply had no tools the IDE chose to send)",
     })),
     extra_on_wire_prefixes: reach.extraInWire,
-    interpretation: "Unused MCP servers cost setup overhead (process memory, startup time, IDE/UX complexity, occasional auth prompts) without contributing any tool the model can see. Recommend disabling them in mcp.json unless they are intentionally kept for ad-hoc invocation outside this session.",
+    interpretation: "The `mcpServers` array lists servers the IDE knew about at export time. Servers with no matching on-the-wire tool produced no model-visible capabilities in this session, but the export does not record whether they were enabled, disabled, crashed, or filtered. Treat as a signal to investigate, not a proven misconfiguration.",
     note: reach.note,
   };
 }
@@ -566,10 +566,10 @@ export function renderMcpReachabilityMarkdown(reach: McpReachabilityAnalysis): s
     out.push("");
     return out;
   }
-  out.push("- Declared MCP servers: **" + reach.declaredCount + "**");
-  out.push("- MCP servers whose tools were visible to the model: **" + reach.visibleCount + "**");
-  out.push("- Configured but invisible (unused): **" + reach.unusedCount + "**");
-  out.push("- Confidence: " + reach.confidence);
+  out.push("- MCP servers listed in the export: **" + reach.declaredCount + "**");
+  out.push("- Servers whose `mcp_*` tools appeared in any chat request: **" + reach.visibleCount + "**");
+  out.push("- Listed but contributed no tool definitions: **" + reach.unusedCount + "**");
+  out.push("- Match confidence: " + reach.confidence + " (label-slug to `mcp_<slug>_*` prefix)");
   out.push("");
   out.push("> " + reach.note);
   out.push("");
@@ -584,7 +584,7 @@ export function renderMcpReachabilityMarkdown(reach: McpReachabilityAnalysis): s
     out.push("");
   }
   if (reach.unused.length > 0) {
-    out.push("**Unused MCP servers (declared but contributed zero tool definitions)**");
+    out.push("**Listed but unused (cause not determined from the export)**");
     out.push("");
     out.push("| Server | Type | Command |");
     out.push("|---|---|---|");

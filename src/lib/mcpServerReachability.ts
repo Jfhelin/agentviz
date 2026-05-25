@@ -74,10 +74,11 @@ export interface McpReachabilityAnalysis {
 }
 
 const NOTE = [
-  "MCP server reachability is computed by matching each declared server's normalized label slug",
+  "MCP server reachability is computed by matching each listed server's normalized label slug",
   "against the `mcp_<slug>_*` prefix of every on-the-wire tool name across all chat requests.",
-  "Servers with no matching on-the-wire tool are reported as unused -- they cost setup overhead",
-  "(process memory, startup time, IDE complexity) without contributing any tool the model can see.",
+  "Servers with no matching tool produced no model-visible capabilities in this session.",
+  "The export does not record whether such a server was disabled, failed to start, or simply",
+  "had no tools the IDE chose to send -- treat the finding as a signal to investigate.",
   "Matching is heuristic because the Copilot Chat export does not carry the server-to-tool mapping.",
 ].join(" ");
 

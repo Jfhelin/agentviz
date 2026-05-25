@@ -448,9 +448,9 @@ describe("buildMcpReachabilityFacts + renderMcpReachabilityMarkdown", () => {
 
     const md = renderMcpReachabilityMarkdown(reach).join("\n");
     expect(md).toContain("### MCP server reachability");
-    expect(md).toContain("Declared MCP servers: **5**");
-    expect(md).toContain("Configured but invisible (unused): **2**");
-    expect(md).toContain("**Unused MCP servers");
+    expect(md).toContain("MCP servers listed in the export: **5**");
+    expect(md).toContain("Listed but contributed no tool definitions: **2**");
+    expect(md).toContain("**Listed but unused");
     expect(md).toContain("**Extra on-wire");
   });
 

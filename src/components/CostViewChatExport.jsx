@@ -2289,10 +2289,10 @@ function McpReachabilityCallout(props) {
     >
       <div style={{ fontWeight: 600, marginBottom: 6, color: warn }}>
         {"\u26A0\uFE0F  "}
-        {reach.unusedCount} of {reach.declaredCount} configured MCP servers contributed no tool definitions to this session
+        {reach.unusedCount} of {reach.declaredCount} MCP servers in the export contributed no tool definitions
       </div>
       <div style={{ color: theme.text.secondary, marginBottom: 6 }}>
-        These servers are declared in your IDE's <code>mcp.json</code> but their tools never appeared in any chat request, so the model could not see or call them. They still cost startup time, process memory, and (for hosted servers) occasional reconnect/auth prompts.
+        No <code>mcp_*</code> tools from these labels appeared in any chat request. They may be disabled, may have failed to start, or simply had no tools the IDE chose to send.
       </div>
       <div style={{ color: theme.text.secondary, marginBottom: 6 }}>
         Unused: {unusedLabels.map(function (label, idx) {
@@ -2305,7 +2305,7 @@ function McpReachabilityCallout(props) {
         })}
       </div>
       <div style={{ color: theme.text.muted, fontSize: theme.fontSize.xs, fontStyle: "italic" }}>
-        Heuristic match (label slug to <code>mcp_&lt;slug&gt;_*</code> tool name). Disable in <code>mcp.json</code> unless intentionally kept for ad-hoc use.
+        Heuristic label-slug match against <code>mcp_&lt;slug&gt;_*</code> tool names.
         {reach.extraInWire && reach.extraInWire.length > 0 ? (
           <span>
             {" "}Also seen on the wire without a matching declared server: {reach.extraInWire.map(function (e) { return "mcp_" + e.slug + "_*"; }).join(", ")}.
