@@ -2041,7 +2041,6 @@ function ExportPromptButton(props) {
   var analysis = props.analysis;
   var sessionLabel = props.sessionLabel;
   var [status, setStatus] = useState("idle"); // idle | copied | error
-  var [hover, setHover] = useState(false);
   function onClick() {
     try {
       var text = buildLlmAnalysisPrompt(analysis, { sessionLabel: sessionLabel });
@@ -2062,11 +2061,9 @@ function ExportPromptButton(props) {
       <button
         type="button"
         onClick={onClick}
-        onMouseEnter={function () { setHover(true); }}
-        onMouseLeave={function () { setHover(false); }}
         title="Copy the session wrapped in analyst instructions. Paste into ChatGPT/Claude/Copilot to get a focused report on efficiency, model fit, and what the user could have done differently."
         style={{
-          background: status === "copied" ? "rgba(34,197,94,0.15)" : (hover ? theme.bg.surface : "transparent"),
+          background: status === "copied" ? "rgba(34,197,94,0.15)" : "transparent",
           border: "1px solid " + (status === "error" ? theme.semantic.error : theme.border.default),
           color: status === "copied" ? theme.semantic.success
             : status === "error" ? theme.semantic.error
@@ -2076,7 +2073,6 @@ function ExportPromptButton(props) {
           cursor: "pointer",
           fontFamily: theme.font.mono,
           fontSize: theme.fontSize.xs,
-          transition: "background 120ms ease, color 120ms ease",
         }}
       >
         {label}
