@@ -569,8 +569,14 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
   const distinctChatModels = new Set(chatEvents.map(e => e.model).filter(Boolean));
   const autoModelSwitched = distinctChatModels.size > 1;
   // Derive a coarse verdict from these signals.
+  // Custom chat mode active on the first chat call (if any). Auto mode's
+  // model picker is assumed (per project convention) to read the chat mode's
+  // system prompt in addition to the user message, so a present chat mode
+  // gives Auto far more complexity signal than the literal user message
+  // alone -- which neutralises the 'short first prompt' drift signal.
+  const firstChatMode = firstChat ? firstChat.chatMode : null;
   const driftSignals: string[] = [];
-  if (firstPromptChars < 200) driftSignals.push("short first prompt (" + firstPromptChars + " chars) gives Auto very little signal");
+  if (firstPromptChars < 200 && !firstChatMode) driftSignals.push("short first prompt (" + firstPromptChars + " chars) gives Auto very little signal");
   if (outputEscalationRatio >= 3 && maxOut > 1500) driftSignals.push("output escalated " + outputEscalationRatio.toFixed(1) + "x by turn " + maxOutTurn + " (" + firstOut.toLocaleString() + " -> " + maxOut.toLocaleString() + " tokens)");
   if (maxToolCalls >= 5 && firstToolCalls <= 1) driftSignals.push("tool-chain depth grew from " + firstToolCalls + " to " + maxToolCalls + " calls per turn");
   if (autoModelSwitched) driftSignals.push("user manually switched models mid-session (" + Array.from(distinctChatModels).map(shortModelName).join(", ") + ")");
@@ -641,9 +647,18 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
   }
   // Auto-mode fit verdict: would Auto's first-prompt pick have served the
   // whole session, or did complexity drift make the first guess wrong?
+  // Project convention: assume Auto's model picker reads the custom chat
+  // mode's system prompt in addition to the user message, so a present
+  // chat mode gives Auto strong complexity signal even if the user prompt
+  // itself is terse. The 'short first prompt' drift signal is suppressed
+  // when a chat mode is attached.
   {
+    const chatModeNote = firstChatMode
+      ? "A custom chat mode (`" + firstChatMode.name + "`, ~" + (firstChatMode.tokensEst || 0).toLocaleString() + " tok) was active on the first chat call. Per project assumption, Auto's model picker reads the chat mode prompt in addition to the user message, so it had explicit task-shape signal even with a terse user prompt."
+      : "No custom chat mode was active, so Auto only saw the literal user message (" + firstPromptChars.toLocaleString() + " chars).";
     const fitLine = "- **Auto-mode fit verdict (pre-computed):** **" + autoFitLabel + "**. "
-      + "Auto picks a model from the first user prompt only (" + firstPromptChars.toLocaleString() + " chars) and reuses it for every subsequent turn. "
+      + chatModeNote + " "
+      + "Auto then reuses that pick for every subsequent turn. "
       + (driftSignals.length === 0
         ? "No complexity-drift signals detected (output size, tool-chain depth, and model choice stayed stable across turns), so Auto's first-prompt pick would have served the whole session. Quote this verdict directly in section 7."
         : "Drift signals detected: " + driftSignals.map(s => "(" + s + ")").join("; ") + ". "
