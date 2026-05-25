@@ -275,7 +275,7 @@ describe("parseClaudeCodeJSONL", function () {
       var result = parseClaudeCodeJSONL(makeSession([ASSISTANT_TEXT]));
       var ev = result.events.find(function (e) { return e.tokenUsage; });
       expect(ev).toBeDefined();
-      expect(ev.tokenUsage.inputTokens).toBe(1200);
+      expect(ev.tokenUsage.inputTokens).toBe(2100);
       expect(ev.tokenUsage.outputTokens).toBe(350);
     });
   });
@@ -396,7 +396,8 @@ describe("parseClaudeCodeJSONL", function () {
       if (result.metadata.tokenUsage) {
         expect(result.metadata.tokenUsage.cacheRead).toBe(600);
         expect(result.metadata.tokenUsage.cacheWrite).toBe(300);
-        expect(result.metadata.tokenUsage.cacheHitRate).toBeCloseTo(600 / ((1200 - 600) + 300 + 600), 6);
+        expect(result.metadata.tokenUsage.inputTokens).toBe(2100);
+        expect(result.metadata.tokenUsage.cacheHitRate).toBeCloseTo(600 / ((2100 - 600 - 300) + 300 + 600), 6);
       }
     });
 
@@ -438,11 +439,11 @@ describe("parseClaudeCodeJSONL", function () {
         },
       };
       var result = parseClaudeCodeJSONL(makeSession([USER_MSG, repeated1, repeated2, repeated3]));
-      expect(result.metadata.tokenUsage.inputTokens).toBe(1000);
+      expect(result.metadata.tokenUsage.inputTokens).toBe(1800);
       expect(result.metadata.tokenUsage.outputTokens).toBe(200);
       expect(result.metadata.tokenUsage.cacheRead).toBe(800);
       expect(result.metadata.tokenUsage.cacheWrite).toBe(0);
-      expect(result.metadata.tokenUsage.cacheHitRate).toBeCloseTo(800 / ((1000 - 800) + 0 + 800), 6);
+      expect(result.metadata.tokenUsage.cacheHitRate).toBeCloseTo(800 / ((1800 - 800) + 0 + 800), 6);
     });
 
     it("reports session duration", function () {

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { filterByTags, collectAllTags, computeVisibleTags, getInitialTagsFromURL } from "../components/InboxView.jsx";
+import { filterByTags, collectAllTags, computeVisibleTags, getInitialTagsFromURL } from "../lib/landingSessions.js";
 
 describe("filterByTags", function () {
   var entries = [

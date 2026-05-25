@@ -73,7 +73,8 @@ export function getModelPrice(modelName) {
 
 /**
  * Estimate cost in USD for a tokenUsage object.
- * tokenUsage: { inputTokens, outputTokens, cacheRead, cacheWrite }
+ * tokenUsage.inputTokens is normalized total input tokens, including cache reads
+ * and cache writes. Cache write tokens are billed in their own bucket.
  * modelName: string (optional, used to look up pricing)
  */
 export function estimateCost(tokenUsage, modelName) {
@@ -82,6 +83,11 @@ export function estimateCost(tokenUsage, modelName) {
   if (!price) return 0; // unknown model -- don't fabricate a number
   var cacheReadRatio  = price.cacheReadRatio  != null ? price.cacheReadRatio  : DEFAULT_CACHE_READ_RATIO;
   var cacheWriteRatio = price.cacheWriteRatio != null ? price.cacheWriteRatio : DEFAULT_CACHE_WRITE_RATIO;
+  // Note: fork's convention is that callers pass `inputTokens` already net of
+  // cacheRead+cacheWrite (see copilotChatExportParser.ts's `fresh = max(0, prompt - cached - cwrite)`).
+  // Upstream's main branch subtracts here instead. Both produce the same number when wired correctly;
+  // do NOT add upstream's `Math.max(inputTokens - cacheRead - cacheWrite, 0)` here without also
+  // updating all fork-side callers, or the cost view will double-subtract cache tokens.
   var inputCost  = (tokenUsage.inputTokens  || 0) / 1e6 * price.input;
   var outputCost = (tokenUsage.outputTokens || 0) / 1e6 * price.output;
   var cacheReadCost  = (tokenUsage.cacheRead  || 0) / 1e6 * price.input * cacheReadRatio;
@@ -115,4 +121,32 @@ export function formatCost(usd) {
   if (usd < 0.01) return "<$0.01";
   if (usd < 1) return "$" + usd.toFixed(3);
   return "$" + usd.toFixed(2);
+}
+
+export function isPremiumRequestUnit(unit) {
+  return unit === "premium_requests";
+}
+
+export function formatPremiumRequests(value) {
+  if (value == null) return "--";
+  var rounded = Math.round(value * 100) / 100;
+  var label = Math.abs(rounded) === 1 ? "PRU" : "PRU";
+  return rounded.toLocaleString(undefined, { maximumFractionDigits: 2 }) + " " + label;
+}
+
+export function formatCostValue(value, unit) {
+  if (isPremiumRequestUnit(unit)) return formatPremiumRequests(value);
+  return formatCost(value);
+}
+
+export function formatSessionCost(metadata) {
+  if (!metadata || metadata.totalCost == null) return null;
+  return formatCostValue(metadata.totalCost, metadata.totalCostUnit);
+}
+
+export function getSessionCostLabel(metadata, estimated) {
+  if (metadata && metadata.totalCost != null) {
+    return isPremiumRequestUnit(metadata.totalCostUnit) ? "Reported PRU" : "Cost";
+  }
+  return estimated ? "Est. Cost" : "Cost";
 }

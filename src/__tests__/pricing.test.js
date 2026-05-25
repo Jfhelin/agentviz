@@ -86,6 +86,14 @@ describe("formatCost", function () {
   });
 });
 
+describe("formatCostValue", function () {
+  it("formats premium request units separately from USD", async function () {
+    var pricing = await import("../lib/pricing.js");
+    expect(pricing.formatCostValue(3, "premium_requests")).toBe("3 PRU");
+    expect(pricing.formatCostValue(0.5, "usd")).toBe("$0.500");
+  });
+});
+
 describe("hasModelPricing", function () {
   it("returns true for known Claude models", function () {
     expect(hasModelPricing("claude-sonnet-4-20250514")).toBe(true);

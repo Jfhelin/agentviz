@@ -17,17 +17,22 @@ describe("cacheMetrics", function () {
     expect(computeCacheHitRate(100, -50, 20)).toBeCloseTo(0.2, 6);
   });
 
+  it("treats cache writes as a separate non-fresh input bucket", function () {
+    expect(computeEffectiveInputTokens(2100, 600, 300)).toBe(1200);
+    expect(computeCacheHitRate(2100, 300, 600)).toBeCloseTo(600 / (1200 + 300 + 600), 6);
+  });
+
   it("summarizes token usage with a shared aggregate helper", function () {
     expect(summarizeTokenUsage([
       { inputTokens: 600, outputTokens: 100, cacheRead: 300, cacheWrite: 0 },
       null,
-      { inputTokens: 400, outputTokens: 50, cacheRead: 200, cacheWrite: 100 },
+      { inputTokens: 500, outputTokens: 50, cacheRead: 200, cacheWrite: 100 },
     ])).toEqual({
-      inputTokens: 1000,
+      inputTokens: 1100,
       outputTokens: 150,
       cacheRead: 500,
       cacheWrite: 100,
-      cacheHitRate: 500 / ((1000 - 500) + 100 + 500),
+      cacheHitRate: 500 / ((1100 - 500 - 100) + 100 + 500),
     });
   });
 
@@ -39,6 +44,6 @@ describe("cacheMetrics", function () {
 
   it("handles large token counts with the shared cache hit rate formula", function () {
     expect(computeEffectiveInputTokens(9000000, 4000000)).toBe(5000000);
-    expect(computeCacheHitRate(9000000, 1000000, 4000000)).toBeCloseTo(0.4, 6);
+    expect(computeCacheHitRate(9000000, 1000000, 4000000)).toBeCloseTo(4000000 / (4000000 + 1000000 + 4000000), 6);
   });
 });

@@ -236,6 +236,7 @@ export function buildSessionLibraryEntry(fileName, result, rawText, previousEntr
     errorCount: metadata.errorCount || 0,
     duration: metadata.duration || 0,
     totalCost: getSessionCost(metadata),
+    totalCostUnit: metadata.totalCostUnit || null,
     premiumRequests: metadata.premiumRequests || null,
     warnings: metadata.warnings || [],
     autonomyMetrics: autonomyMetrics,

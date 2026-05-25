@@ -100,6 +100,42 @@ export function filterLandingEntriesByQuery(entries, query) {
   });
 }
 
+export function filterByTags(entries, activeTags) {
+  if (!activeTags || activeTags.length === 0) return entries;
+  return (entries || []).filter(function (entry) {
+    var entryTags = entry.tags || [];
+    return activeTags.every(function (tag) {
+      return entryTags.indexOf(tag) !== -1;
+    });
+  });
+}
+
+export function collectAllTags(entries) {
+  var tagSet = {};
+  (entries || []).forEach(function (entry) {
+    (entry.tags || []).forEach(function (tag) { tagSet[tag] = true; });
+  });
+  return Object.keys(tagSet).sort();
+}
+
+export function computeVisibleTags(entries, activeTags) {
+  var selectedTags = activeTags || [];
+  var base = selectedTags.length > 0 ? filterByTags(entries, selectedTags) : entries;
+  var coTags = collectAllTags(base);
+  if (selectedTags.length === 0) return coTags;
+
+  var merged = {};
+  coTags.forEach(function (tag) { merged[tag] = true; });
+  selectedTags.forEach(function (tag) { merged[tag] = true; });
+  return Object.keys(merged).sort();
+}
+
+export function getInitialTagsFromURL() {
+  var params = new URLSearchParams(window.location.search);
+  var tags = params.getAll("tag");
+  return tags.length > 0 ? tags : [];
+}
+
 export function getLandingEntryTimestamp(entry) {
   return String(entry && (entry.updatedAt || entry.importedAt) || "");
 }

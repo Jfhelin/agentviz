@@ -4,7 +4,7 @@
 
 **See what your AI agents actually do.**
 
-Drop a Claude Code, VS Code Copilot Chat, Copilot CLI, Copilot prompt export, or ATIF / Harbor session file and explore the agent's reasoning, tool calls, turn flow, output, token spend, and context buildup through replay, tracks, waterfall, graph, stats, and cost views. Or run it from the CLI for a live view that updates as your session unfolds.
+Drop a Claude Code, VS Code Copilot Chat, Copilot CLI, Copilot prompt export, or ATIF / Harbor session file and review the run as a workflow: find the session, triage health, investigate evidence, analyze behavior, compare approaches, and improve the next prompt or configuration. Or run it from the CLI for a live view that updates as your session unfolds.
 
 [![CI](https://github.com/jayparikh/agentviz/actions/workflows/ci.yml/badge.svg)](https://github.com/jayparikh/agentviz/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/agentviz?color=blue&logo=npm)](https://www.npmjs.com/package/agentviz)
@@ -14,9 +14,9 @@ Drop a Claude Code, VS Code Copilot Chat, Copilot CLI, Copilot prompt export, or
 
 <br />
 
-<img src="docs/screenshots/session-hero.png" alt="AGENTVIZ session views" width="800" />
+<img src="docs/screenshots/session-hero.png" alt="AGENTVIZ workflow review" width="800" />
 
-*Move between replay, tracks, waterfall, graph, stats, and cost views to inspect the same session from different angles.*
+*Start in Review, then move through Investigate, Analyze, Compare, and Improve to inspect the same session from every angle.*
 
 </div>
 
@@ -36,6 +36,7 @@ AI coding agents (Claude Code, VS Code Copilot Chat, Copilot CLI, ATIF / Harbor,
 - **Discover sessions** automatically from Claude Code, Copilot CLI, and VS Code Copilot Chat stores
 - **Get AI coaching** on prompt engineering, skills, and MCP setup grounded in best practices
 - **Switch themes** between dark, light, and system-matched modes with one click
+- **Use the default workflow UI**: Find, Review, Investigate, Analyze, Compare, Improve, with Classic UI available as a fallback
 
 ## Quick Start
 
@@ -43,7 +44,7 @@ AI coding agents (Claude Code, VS Code Copilot Chat, Copilot CLI, ATIF / Harbor,
 npx agentviz
 ```
 
-Opens AGENTVIZ in your browser. Drop a `.jsonl` or `.json` session file or click **load a demo session** to try it instantly. Claude Code, Copilot CLI, and VS Code Copilot Chat sessions are auto-discovered.
+Opens AGENTVIZ in your browser. The default workflow UI starts in **Find**, where you can drop a `.jsonl` or `.json` session file or click **load a demo session** to try it instantly. Claude Code, Copilot CLI, and VS Code Copilot Chat sessions are auto-discovered.
 
 ### CLI (live streaming)
 
@@ -146,6 +147,36 @@ When running via the CLI, AGENTVIZ automatically discovers recent Claude Code, C
 
 Each loaded session can get an AI Coach analysis powered by the `@github/copilot-sdk` (gpt-4o). The coach reads your actual project config (`.github/copilot-instructions.md`, skills, MCP servers) and produces actionable recommendations for prompts, skills, and tooling setup. Recommendations can be applied directly with one click.
 
+## Default workflow UI
+
+AGENTVIZ now defaults to the task-oriented workflow shell. The same parser and session model power both the default workflow UI and the Classic UI fallback:
+
+| Zone | Purpose |
+|------|---------|
+| Find | Unified session portfolio with search, filters, layout toggle, tags, import, demo, refresh, and multi-select compare |
+| Review | Health score, summary cards, top tools, and evidence-linked insights |
+| Investigate | Replay evidence stream with contextual Analyze, Compare, Ask, and Coach actions |
+| Analyze | Existing Stats, Tracks, Waterfall, Graph, and Cost views as sub-panels |
+| Compare | Inline comparison using the existing scorecard and tools chart |
+| Improve | Coach recommendations, next-run checklist, and Session Q&A |
+
+The redesign changes the top-level model from visualization tabs to user jobs. Instead of choosing between Replay, Tracks, Waterfall, Graph, Stats, Cost, and Coach up front, you start with a health-oriented Review, follow evidence in Investigate, open deeper Analyze panels only when needed, and turn the run into next-run improvements from Improve.
+
+If you know the Classic UI, the old surfaces still exist:
+
+| Classic UI surface | Default workflow home |
+|--------------------|-----------------------|
+| Replay | Investigate |
+| Tracks | Analyze -> Tracks |
+| Waterfall | Analyze -> Waterfall |
+| Graph | Analyze -> Graph |
+| Stats | Analyze -> Stats |
+| Cost | Analyze -> Cost |
+| Coach | Improve |
+| Compare | Compare, or Find multi-select |
+
+The workflow shell is mounted exclusively by default (`agentviz:v2:enabled`). Click **Classic UI** in the header to use the original replay-first interface, or **Default UI** in Classic UI to return to the workflow shell. Classic UI is a fallback, not a separate parser or data path.
+
 ## Session Comparison
 
 Load two agent traces side by side to compare them head to head. Great for benchmarking Claude Code vs Copilot CLI on the same task, or comparing two different prompting strategies.
@@ -154,6 +185,7 @@ Load two agent traces side by side to compare them head to head. Great for bench
 
 - **Landing screen** -- click "compare two sessions" below the drop zone
 - **Single-session header** -- click **Compare** while viewing any session to add a second trace for comparison
+- **Find zone** -- select two sessions and click **Compare selected**
 - **Compare landing** -- drop Session A and Session B independently; the view opens once both are loaded
 
 ### Scorecard tab
@@ -163,7 +195,7 @@ Side-by-side metrics with delta badges:
 | Metric | Delta color |
 |--------|-------------|
 | Duration | Green = A faster |
-| Cost / PRUs | Green = A cheaper (delta suppressed for cross-agent comparisons since units differ) |
+| Cost / PRUs | Green = A cheaper when units match (delta suppressed for cross-agent comparisons since units differ) |
 | Input / Output tokens | Neutral |
 | Cache reads / writes | Neutral (shown only when cache data present) |
 | Cache hit rate | Neutral (shown only when cache data present) |
@@ -192,23 +224,23 @@ Export is available in two places:
 
 ## Features
 
-### Landing View
+### Find and Review
 
-Drop zone for session files, with a demo session available instantly. When running via the CLI, the landing screen becomes a session browser with a List or Dashboard toggle for auto-discovered Claude Code, Copilot CLI, and VS Code Copilot Chat sessions.
+The default entry point is a session portfolio for import, demo loading, auto-discovered sessions, filters, tags, and multi-select compare. Opening a session lands in Review with health scoring, evidence-linked insights, top tools, and data-readiness checks.
 
 <div align="center">
 <img src="docs/screenshots/landing.png" alt="Landing View" width="800" />
 </div>
 
-### Replay View
+### Investigate
 
-Chronological event stream with a resizable inspector sidebar. Click any event to see full details plus a payload inspector with readable JSON or text, top-level keys, line and character counts, copy support, and expand or collapse controls. The colorful timeline bar at top shows event density and error locations.
+Investigate wraps the chronological replay stream with search, error-only mode, track filters, contextual Analyze/Compare/Improve actions, and a resizable inspector sidebar. Click any event to see full details plus a payload inspector with readable JSON or text, top-level keys, line and character counts, copy support, and expand or collapse controls.
 
 <div align="center">
 <img src="docs/screenshots/replay-view.png" alt="Replay View" width="800" />
 </div>
 
-### Tracks View
+### Analyze: Tracks
 
 DAW-style multi-track lanes for Reasoning, Tool Calls, Context, and Output. **Solo** isolates one track. **Mute** hides it. See at a glance how your agent's time was spent.
 
@@ -216,7 +248,7 @@ DAW-style multi-track lanes for Reasoning, Tool Calls, Context, and Output. **So
 <img src="docs/screenshots/tracks-view.png" alt="Tracks View" width="800" />
 </div>
 
-### Waterfall View
+### Analyze: Waterfall
 
 Gantt-style timeline of every tool call, sorted by start time with nesting for overlapping calls. Hover any bar to see duration and timing. Click to open the full inspector, including inline diffs for file edits and readable input or result payload previews.
 
@@ -224,7 +256,7 @@ Gantt-style timeline of every tool call, sorted by start time with nesting for o
 <img src="docs/screenshots/waterfall-view.png" alt="Waterfall View" width="800" />
 </div>
 
-### Graph View
+### Analyze: Graph
 
 Interactive directed graph of session turns with expandable tool-call structure. When a turn spawns parallel subagents, the graph automatically forks into side-by-side agent branches and rejoins at a diamond join node, visualizing concurrency without any interaction. Double-click any turn to open its internal tool flow, pan and zoom around the graph, and follow playback as active nodes light up and future nodes fade back.
 
@@ -232,7 +264,7 @@ Interactive directed graph of session turns with expandable tool-call structure.
 <img src="docs/screenshots/graph-view.png" alt="Graph View" width="800" />
 </div>
 
-### Stats View
+### Analyze: Stats
 
 Aggregate metrics, event distribution bars, tools used ranking, and a per-turn summary. Includes token counts, estimated USD cost per turn for Claude models, and per-turn cache hit rate summaries when prompt caching data is available. The cache write segment is omitted when it is zero.
 
@@ -242,9 +274,9 @@ A **Tools &amp; Skills** panel surfaces every skill, instruction file, custom ag
 <img src="docs/screenshots/stats-view.png" alt="Stats View" width="800" />
 </div>
 
-### Cost View
+### Analyze: Cost
 
-Per-call token spend, cache read/write usage, context composition, and cumulative cost for sessions with token usage. Copilot prompt exports include prompt context breakdowns so the view can highlight fresh input spikes, cache misses, tool schema growth, and which parts of the prompt are filling the context window.
+Per-call token spend, cache read/write usage, context composition, and cumulative cost for sessions with token usage. Copilot CLI reported request usage is labeled as PRU rather than USD; token-based USD estimates are shown separately when pricing is recognized. Copilot prompt exports include prompt context breakdowns so the view can highlight fresh input spikes, cache misses, tool schema growth, and which parts of the prompt are filling the context window.
 
 Three lenses share the same per-call timeline:
 
@@ -264,9 +296,9 @@ VS Code Copilot Chat exports (`copilot_all_prompts_*.json`) carry the richest da
 
 The **Compare view** gains a dedicated **Cost tab** when both compared sessions are Copilot Chat exports. It produces a side-by-side cost analysis: headline verdict and tone, A/B/delta cards, per-bucket cost waterfall (sorted by absolute delta), a behavioral KPI table (path-noise-resistant metrics like output tokens, primary assistant turns, and unique tool kinds), cache-pollution warnings, run drift (model / tools / system text hash divergence), and rule-driven recommendations. A **Copy summary as markdown** button writes a self-contained reference of the comparison to the clipboard for paste-into-chat sharing.
 
-### Coach View
+### Improve
 
-AI-powered session coaching available directly from any session. The coach reads your autonomy metrics, project config (`.github/copilot-instructions.md`, MCP servers, skills), and session patterns to produce evidence-backed recommendations for prompts, tooling, and workflow. Click **Analyze** to run, then accept or ignore each draft recommendation. Requires the CLI server -- run via `npx agentviz`, `npm start`, or the MCP tool.
+AI-powered session coaching available directly from any session. Improve combines Coach recommendations, a copyable next-run prompt, prompt/skill/MCP-tool/config checklist items, and Session Q&A. The coach reads your autonomy metrics, project config (`.github/copilot-instructions.md`, MCP servers, skills), and session patterns to produce evidence-backed recommendations for prompts, tooling, and workflow. Click **Analyze** to run, then accept or ignore each draft recommendation. Requires the CLI server -- run via `npx agentviz`, `npm start`, or the MCP tool.
 
 <div align="center">
 <img src="docs/screenshots/coach-view.png" alt="Coach View" width="800" />
@@ -279,9 +311,10 @@ AI-powered session coaching available directly from any session. The coach reads
 | **Live Streaming** | CLI mode tails a session file via SSE. View updates in real time as events arrive, including newline-delayed JSONL writes from Claude Code. |
 | **Payload Inspector** | Replay and waterfall inspectors show readable JSON or text previews with key summaries, counts, copy, and expand controls. |
 | **Graph View** | Directed turn-flow graph with fork/join DAG for parallel subagents, expandable tool-call nodes, pan/zoom, and playback-aware highlighting. |
-| **Token and Cost Tracking** | Per-turn and per-call token usage with estimated USD cost for Claude and OpenAI/Copilot models. |
+| **Token and Cost Tracking** | Per-turn and per-call token usage with estimated USD cost for Claude and OpenAI/Copilot models, plus reported PRU usage for Copilot CLI logs. |
 | **Search** | Full-text search across events, tools, and agents. Matches highlighted in real time. |
 | **Command Palette** | `Cmd+K` fuzzy search to jump to any turn, event, or view instantly. |
+| **Workflow Command Palette** | In the default UI, `Cmd+K` searches workflow zones and flow-aware commands such as failed tool calls, cost analysis, compare, and Q&A. |
 | **Error Navigation** | Auto-detects errors from flags and text patterns. Jump with `E` / `Shift+E`. |
 | **Track Filters** | Toggle visibility per track type with filter chips in the header. |
 | **Playback Control** | Play/pause with variable speed (0.5x to 8x). Seek with arrow keys. |
@@ -291,10 +324,10 @@ AI-powered session coaching available directly from any session. The coach reads
 | **HTML Export** | One-click export of any session or comparison to a self-contained shareable `.html` file. |
 | **Inbox Auto-discovery** | Automatically finds recent Claude Code, Copilot CLI, and VS Code Copilot Chat sessions and ranks them by review priority. |
 | **Inbox Refresh** | Rescan session directories with a one-click refresh button. Reconciles evicted content and prunes dead entries. |
-| **File Path Tooltips** | Hover over inbox session rows to see the full file path or reconstructed session location. |
+| **File Path Tooltips** | Hover over inbox or Find session rows to see the full file path or reconstructed session location. Opened sessions loaded from discovery or CLI expose a header path control for copying the source path. |
 | **Static Manifest Mode** | Deploy as a pure static site with `?manifest=URL` pointing to a JSON manifest of sessions. Tag-based filtering, no backend required. |
 | **AI Coach** | Agentic analysis powered by Copilot SDK. Recommends prompts, skills, and MCP config with one-click apply. |
-| **Session Q&A** | Slide-over drawer (`Cmd+Shift+K`) with instant answers for common queries and Copilot SDK model fallback for open-ended questions. |
+| **Session Q&A** | Slide-over drawer (`Cmd+Shift+K` in Classic UI, Improve in the default UI) with instant answers for common queries and Copilot SDK model fallback for open-ended questions. |
 | **Skills and Capability Tracking** | Stats View surfaces every skill, instruction, agent, MCP server, tool, and prompt from the session with lifecycle stage bars, invocation counts, source chips, and expandable event timelines. Filter by category or source. |
 | **Autonomy Metrics** | Measures human response time, idle gaps, and intervention frequency per session. |
 | **Dark / Light / System Theme** | Full dark and light palettes with a one-click switcher in the header. System mode auto-follows OS preference. Preference is persisted across sessions. |
@@ -319,7 +352,7 @@ Open the drawer with `Cmd+Shift+K` (or via the command palette). Questions are r
 
 2. **Model fallback** -- anything the classifier can't match is sent to the Copilot SDK (configurable model, see [Configuration](#configuration)) with full session context for an AI-generated answer.
 
-> **Feature flag:** Session Q&A is experimental. Enable it with `localStorage.setItem('agentviz:flag:qa', 'true')` in the browser console.
+> **Classic UI note:** The Classic UI drawer is still controlled by the `qa` feature flag. The default workflow UI exposes Q&A directly in Improve.
 
 ## Keyboard Shortcuts
 
@@ -334,6 +367,8 @@ Open the drawer with `Cmd+Shift+K` (or via the command palette). Questions are r
 | `Cmd+Shift+K` | Toggle Session Q&A drawer |
 | `Enter` / `Shift+Enter` | Next / Previous search match |
 | `?` | Toggle keyboard shortcuts dialog |
+
+In the default workflow UI, number keys map to workflow zones: `1` Find, `2` Review, `3` Investigate, `4` Analyze, `5` Compare, and `6` Improve. Pressing the old Coach shortcut `7` opens Improve and shows a migration notice.
 
 Modals, drawers, and overlay panels render keyboard hints with a shared `<kbd>` badge treatment so close, navigate, and select affordances read consistently across AGENTVIZ.
 
@@ -384,9 +419,11 @@ Session URLs are resolved relative to the manifest location. Tags appear as filt
 
 ```
 src/
-  App.jsx                # Routing shell: file loading, session switching, compare mode
+  App.jsx                # Default v2 mount + Classic UI fallback, theme wiring, session entry routing
+  AppV2.jsx              # Default workflow shell: Find, Review, Investigate, Analyze, Compare, Improve
   main.jsx               # React entry point
   contexts/
+    SessionProvider.jsx  # Shared session loading, discovery, compare, live, export, and derived state
     PlaybackContext.jsx  # Playback, search, track filtering, and derived state provider
   hooks/
     usePlayback.js       # Play/pause, speed, seek state machine
@@ -400,6 +437,9 @@ src/
     useDiscoveredSessions.js # Auto-discovery via /api/sessions or ?manifest= URL
     useHashRouter.js     # Hash-based routing between inbox and session views
     useAsyncStatus.js    # Async operation state machine (idle/loading/success/error)
+    useBreakpoint.js     # Shared compact/narrow/wide responsive breakpoint hook
+    useFocusTrap.js      # Modal focus trap with Escape close and focus restoration
+    useReducedMotion.js  # Shared prefers-reduced-motion hook for inline/SVG animation guards
   lib/
     parseSession.ts      # Auto-detect format router
     parser.ts            # Claude Code JSONL parser
@@ -424,7 +464,7 @@ src/
     theme.d.ts           # TypeScript declarations for theme.js
     constants.js         # Sample events for demo mode
     replayLayout.js      # Virtualized windowing for large sessions
-    commandPalette.js    # Precomputed fuzzy search index
+    commandPalette.js    # Precomputed fuzzy search index with legacy view and v2 workflow command support
     searchIndex.js       # Precomputed lowercase search cache for event filtering
     diffUtils.js         # Diff detection and Myers line diff algorithm
     waterfall.ts         # Waterfall view helpers: item building, stats, layout
@@ -470,6 +510,7 @@ src/
     Icon.jsx             # Lucide icon wrapper; all icons must be imported AND added to ICON_MAP
     app/                 # Shell: AppHeader, AppLandingState, AppLoadingState, CompareLandingState, CompareShell (lazy-loaded; AppLandingState switches between inbox and dashboard landing modes)
     ui/                  # Shared primitives: BrandWordmark, ShellFrame, ToolbarButton, ToolbarSelect, ExportStatusButton, KeyboardHint
+    v2/                  # Default workflow UI: FlowRail, V2Header, FindPortfolio, ReviewHub, InvestigateView, AnalyzeShell, InlineCompare, ImproveView, LiveSessionBanner
     waterfall/           # Waterfall sub-components: WaterfallChart, WaterfallRow, WaterfallInspector, TimeAxis
 routes/
   sessions.js            # Session discovery, file serving, SSE streaming
@@ -512,12 +553,15 @@ AGENTVIZ can also be launched from Claude Code, VS Code, or Copilot CLI via the 
 ```bash
 npm run dev             # Vite dev server + API backend (auto-started)
 npm run build           # Production build to dist/
-npm test                # Run all tests via Vitest
+npm test                # Run all tests via Vitest with stable worker cap
+npm run test:v2         # Run v2 golden data, UI, and v1 regression coverage
+npm run test:e2e:v2     # Run the Playwright v2 browser smoke test
 npm run test:watch      # Watch mode
 npm run typecheck       # Type-check with tsc --noEmit
 ```
 
 > `npm run dev` starts both the Vite frontend (port 3000) and the API backend (port 4242) automatically. Vite proxies `/api/*` to the backend.
+> `npm run test:e2e:v2` uses a hermetic Vite test server on port 3100. Run `npx playwright install chromium` once before the first browser test run.
 
 ### Design System
 

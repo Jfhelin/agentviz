@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { theme } from "../lib/theme.js";
 import { formatRelativeTime } from "../lib/formatTime.js";
-import { formatCost } from "../lib/pricing.js";
+import { formatCostValue, isPremiumRequestUnit } from "../lib/pricing.js";
 import { formatAutonomyEfficiency } from "../lib/autonomyMetrics.js";
 import {
   LANDING_FORMAT_OPTIONS,
@@ -108,7 +108,7 @@ function SessionCard({ entry, onClick }) {
   var chips = [
     entry.reviewScore != null ? { label: "Needs review", value: entry.reviewScore.toFixed(1) } : null,
     autonomy.autonomyEfficiency != null ? { label: "Autonomy", value: formatAutonomyEfficiency(autonomy.autonomyEfficiency) } : null,
-    entry.totalCost != null ? { label: "Cost", value: formatCost(entry.totalCost) } : null,
+    entry.totalCost != null ? { label: isPremiumRequestUnit(entry.totalCostUnit) ? "PRU" : "Cost", value: formatCostValue(entry.totalCost, entry.totalCostUnit) } : null,
     { label: "Events", value: String(entry.totalEvents || 0) },
     entry.errorCount > 0 ? { label: "Errors", value: String(entry.errorCount), tone: theme.semantic.error } : null,
   ].filter(Boolean);
@@ -242,7 +242,9 @@ export default function DashboardView({ entries, onOpenSession, onRefresh }) {
     var allEntries = entries || [];
     if (allEntries.length === 0) return null;
 
-    var totalCost = analyzedEntries.reduce(function (sum, entry) {
+    var costEntries = analyzedEntries.filter(function (entry) { return entry.totalCost != null; });
+    var costUnits = Array.from(new Set(costEntries.map(function (entry) { return entry.totalCostUnit || "usd"; })));
+    var totalCost = costEntries.reduce(function (sum, entry) {
       return sum + (entry.totalCost || 0);
     }, 0);
     var withAutonomy = analyzedEntries.filter(function (entry) {
@@ -259,7 +261,8 @@ export default function DashboardView({ entries, onOpenSession, onRefresh }) {
       total: allEntries.length,
       analyzed: analyzedEntries.length,
       discovered: allEntries.length - analyzedEntries.length,
-      avgCost: analyzedEntries.length > 0 ? totalCost / analyzedEntries.length : null,
+      avgCost: costEntries.length > 0 && costUnits.length === 1 ? totalCost / costEntries.length : null,
+      avgCostUnit: costUnits.length === 1 ? costUnits[0] : null,
       avgAutonomy: avgAutonomy,
       totalErrors: analyzedEntries.length > 0 ? totalErrors : null,
     };
@@ -308,8 +311,8 @@ export default function DashboardView({ entries, onOpenSession, onRefresh }) {
               sub={stats.discovered > 0 ? stats.analyzed + " analyzed, " + stats.discovered + " discovered" : null}
             />
             <StatCard
-              label="avg cost"
-              value={stats.avgCost != null ? formatCost(stats.avgCost) : "--"}
+              label={isPremiumRequestUnit(stats.avgCostUnit) ? "avg PRU" : "avg cost"}
+              value={stats.avgCost != null ? formatCostValue(stats.avgCost, stats.avgCostUnit) : "--"}
               sub={stats.analyzed === 0 ? "open sessions to analyze" : null}
             />
             <StatCard

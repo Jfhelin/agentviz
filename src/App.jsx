@@ -5,14 +5,8 @@ import {
   readStoredThemePreference,
   syncThemeState,
 } from "./lib/theme.js";
-import { exportSingleSession, exportComparison } from "./lib/exportHtml.js";
 import usePersistentState from "./hooks/usePersistentState.js";
-import useSessionLoader from "./hooks/useSessionLoader.js";
 import useKeyboardShortcuts from "./hooks/useKeyboardShortcuts.js";
-import useLiveStream from "./hooks/useLiveStream.js";
-import useAsyncStatus from "./hooks/useAsyncStatus.js";
-import useDiscoveredSessions from "./hooks/useDiscoveredSessions.js";
-import useHashRouter from "./hooks/useHashRouter.js";
 import lazyImport, { clearChunkReloadFlag } from "./lib/lazyImport.js";
 import Timeline from "./components/Timeline.jsx";
 import ReplayView from "./components/ReplayView.jsx";
@@ -33,14 +27,9 @@ var DebriefView = React.lazy(function () { return lazyImport(function () { retur
 import QADrawer from "./components/QADrawer.jsx";
 import useFeatureFlag from "./hooks/useFeatureFlag.js";
 import useQA from "./hooks/useQA.js";
-import { buildAutonomyMetrics, buildAutonomySummary } from "./lib/autonomyMetrics.js";
-import {
-  loadStoredSessionContent,
-  persistSessionSnapshot,
-  pruneDeadEntries,
-  reconcileSessionLibrary,
-} from "./lib/sessionLibrary.js";
 import { PlaybackProvider, usePlaybackContext } from "./contexts/PlaybackContext.jsx";
+import { SessionProvider, useSessionContext } from "./contexts/SessionProvider.jsx";
+import AppV2 from "./AppV2.jsx";
 
 function renderActiveView(activeView, props) {
   if (activeView === "replay") {
@@ -137,9 +126,9 @@ export default function App() {
   useEffect(function () { clearChunkReloadFlag(); }, []);
   var [view, setView] = usePersistentState("agentviz:view", "replay");
   var [themeModePreference, setThemeModePreference] = usePersistentState("agentviz:theme-mode", readStoredThemePreference);
-  var [libraryEntries, setLibraryEntries] = useState(function () {
-    return reconcileSessionLibrary();
-  });
+  // Fork default: start in V1 so the fork-only Cost view + Cost Compare are visible.
+  // Users can click "Try V2" on the landing page to opt into upstream's v2 shell.
+  var [v2Enabled, setV2Enabled] = usePersistentState("agentviz:v2:enabled", false);
   var [systemThemeMode, setSystemThemeMode] = useState(function () {
     if (typeof window === "undefined" || typeof window.matchMedia !== "function") return "dark";
     return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
@@ -147,106 +136,10 @@ export default function App() {
   var [showPalette, setShowPalette] = useState(false);
   var [showShortcuts, setShowShortcuts] = useState(false);
   var [showFilters, setShowFilters] = useState(false);
-  var [compareLanding, setCompareLanding] = useState(false);
   var [showQA, setShowQA] = useState(false);
-  var [loadError, setLoadError] = useState(null);
   var qaFlag = useFeatureFlag("qa", false);
   var searchInputRef = useRef(null);
   var filtersRef = useRef(null);
-  var sessionLoadCount = useRef(0);
-
-  var discovered = useDiscoveredSessions();
-
-  // Merge discovered sessions with library: library entries (already parsed) take precedence.
-  // Filter discovered to sessions > 5KB (tiny files are Claude internal queue/ops sessions).
-  var allSessions = useMemo(function () {
-    try {
-      var visibleLibraryEntries = libraryEntries.filter(function (entry) {
-        // Hide Copilot CLI continuation-summary handoff sessions -- these are internal artifacts
-        var primaryPrompt = String(entry && entry.primaryPrompt || "").trim();
-        if (
-          entry
-          && entry.format === "copilot-cli"
-          && primaryPrompt.startsWith("Summarize the following conversation for context continuity.")
-        ) {
-          return false;
-        }
-
-        return true;
-      });
-
-      // Build a lookup: sessionId -> discovered session for path enrichment
-      var discoveredBySessionId = {};
-      discovered.sessions.forEach(function (s) {
-        if (s.source !== "manifest" && s.size < 5000) return;
-        if (s.sessionId) discoveredBySessionId[s.sessionId] = s;
-      });
-
-      // Enrich library entries with discoveredPath from discovered/manifest sessions
-      var enrichedLibrary = visibleLibraryEntries.map(function (e) {
-        if (e.discoveredPath) return e; // already has it
-        var match = (e.sessionId && discoveredBySessionId[e.sessionId]);
-        if (match) return Object.assign({}, e, { discoveredPath: match.path });
-        return e;
-      });
-
-      // Only add discovered entries that aren't already in the library.
-      // Use enrichedLibrary (which has discoveredPath set) for accurate dedup.
-      var discoveredOnly = discovered.sessions.filter(function (s) {
-        if (s.source !== "manifest" && s.size < 5000) return false;
-        return !enrichedLibrary.some(function (e) {
-          return e.discoveredPath === s.path || (e.sessionId && e.sessionId === s.sessionId);
-        });
-      }).map(function (s) {
-        return {
-          id: s.id || s.path,
-          file: s.file || s.summary || s.filename,
-          filename: s.filename || s.file,
-          format: s.format,
-          isInsiders: s.isInsiders || false,
-          project: s.project || null,
-          repository: s.repository || null,
-          branch: s.branch || null,
-          discoveredPath: s.path,
-          sessionId: s.sessionId || null,
-          importedAt: s.mtime,
-          updatedAt: s.mtime,
-          size: s.size,
-          tags: s.tags || [],
-          isDiscovered: true,
-          source: s.source || "discovered",
-        };
-      });
-      return enrichedLibrary.concat(discoveredOnly);
-    } catch (e) {
-      console.error("[allSessions] merge error:", e);
-      return visibleLibraryEntries || libraryEntries;
-    }
-  }, [libraryEntries, discovered.sessions]);
-
-  var handleSessionParsed = useCallback(function (result, name, rawText) {
-    var persisted = persistSessionSnapshot(name, result, rawText);
-    setLibraryEntries(persisted.entries);
-  }, []);
-
-  var session = useSessionLoader({ onSessionParsed: handleSessionParsed });
-  var sessionB = useSessionLoader({ autoBootstrap: false, onSessionParsed: handleSessionParsed });
-  var sessionExport = useAsyncStatus();
-  var compareExport = useAsyncStatus();
-
-  useEffect(function () {
-    var compareData = window.__AGENTVIZ_COMPARE__;
-    if (!compareData || !compareData.a || !compareData.b) return;
-    delete window.__AGENTVIZ_COMPARE__;
-    setCompareLanding(true);
-    session.handleFile(compareData.a.text, compareData.a.name);
-    sessionB.handleFile(compareData.b.text, compareData.b.name);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useLiveStream({
-    enabled: session.isLive,
-    onLines: session.appendLines,
-  });
 
   useEffect(function () {
     if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
@@ -296,219 +189,35 @@ export default function App() {
     document.body.style.color = themeTokens.text.primary;
   }, [themeModePreference, systemThemeMode, resolvedThemeMode, themeTokens]);
 
-  var autonomyMetrics = useMemo(function () {
-    return buildAutonomyMetrics(session.events, session.turns, session.metadata);
-  }, [session.events, session.turns, session.metadata]);
-  var debrief = useMemo(function () {
-    return { summary: buildAutonomySummary(autonomyMetrics) };
-  }, [autonomyMetrics]);
-
-  var isValidView = APP_VIEWS.some(function (item) { return item.id === view; });
-  var activeView = isValidView ? view : "replay";
-
-  useEffect(function () {
-    if (!isValidView) setView("replay");
-  }, [isValidView]);
-
-  var handleFile = useCallback(function (text, name) {
-    sessionLoadCount.current += 1;
+  var beforeSessionChange = useCallback(function () {
     setShowPalette(false);
     setShowFilters(false);
-    session.handleFile(text, name);
-  }, [session.handleFile]);
+  }, []);
+  var handleStoredSessionOpen = useCallback(function () {
+    setView("stats");
+  }, [setView]);
 
-  var handleFilePair = useCallback(function (textA, nameA, textB, nameB) {
-    sessionLoadCount.current += 1;
-    setShowPalette(false);
-    setShowFilters(false);
-    setLoadError(null);
-    sessionB.resetSession();
-    setCompareLanding(true);
-    session.handleFile(textA, nameA);
-    sessionB.handleFile(textB, nameB);
-  }, [session.handleFile, sessionB.handleFile, sessionB.resetSession]);
-
-  var openStoredSession = useCallback(function (entry) {
-    if (!entry) return;
-    var sessionPath = entry.discoveredPath || null;
-    var sessionName = entry.file || entry.summary || entry.filename || "events.jsonl";
-
-    function afterLoad(rawText) {
-      setLoadError(null);
-      setView("stats");
-      handleFile(rawText, sessionName);
-      // Patch discoveredPath and tags onto the persisted library entry so that
-      // tag filtering continues to work after the session is in localStorage.
-      var entryTags = entry.tags && entry.tags.length > 0 ? entry.tags : null;
-      if (sessionPath || entryTags) {
-        setLibraryEntries(function (prev) {
-          return prev.map(function (e) {
-            if (e.id !== entry.id) return e;
-            var updates = {};
-            if (!e.discoveredPath && sessionPath) updates.discoveredPath = sessionPath;
-            if (entryTags && (!e.tags || e.tags.length === 0)) updates.tags = entryTags;
-            if (Object.keys(updates).length === 0) return e;
-            return Object.assign({}, e, updates);
-          });
-        });
-      }
-    }
-
-    function onFetchError(err) {
-      console.error("[session] failed to load:", sessionName, err);
-      setLoadError("Failed to load session: " + sessionName);
-    }
-
-    // Manifest or discovered sessions: fetch via the discovered-sessions hook
-    if ((entry.source === "manifest" || entry.isDiscovered) && sessionPath) {
-      var fetchArg = entry.source === "manifest"
-        ? { source: "manifest", path: sessionPath }
-        : sessionPath;
-      discovered.fetchSessionContent(fetchArg).then(afterLoad).catch(onFetchError);
-      return;
-    }
-
-    var rawText = loadStoredSessionContent(entry.id);
-    if (rawText) { afterLoad(rawText); return; }
-    if (sessionPath) {
-      discovered.fetchSessionContent(sessionPath).then(afterLoad).catch(onFetchError);
-      return;
-    }
-
-    // Content was evicted and there's no server path to re-fetch from.
-    // Mark the entry stale so the button disables immediately.
-    setLibraryEntries(function (prev) {
-      return prev.map(function (e) {
-        return e.id === entry.id ? Object.assign({}, e, { hasContent: false }) : e;
-      });
-    });
-  }, [handleFile, setView, setLibraryEntries, discovered.fetchSessionContent]);
-
-  var loadSample = useCallback(function (mode) {
-    sessionLoadCount.current += 1;
-    setShowPalette(false);
-    setShowFilters(false);
-    session.loadSample(mode);
-  }, [session.loadSample]);
-
-  var reset = useCallback(function () {
-    setShowPalette(false);
-    setShowFilters(false);
-    session.resetSession();
-    sessionB.resetSession();
-    setCompareLanding(false);
-  }, [session.resetSession, sessionB.resetSession]);
-
-  // Auto-load multi-agent demo when ?demo=multiagent is in the URL
-  useEffect(function () {
-    var params = new URLSearchParams(window.location.search);
-    if (params.get("demo") === "multiagent") {
-      loadSample("multiagent");
-    }
-  }, [loadSample]);
-
-  useHashRouter({
-    hasSession: Boolean(session.events),
-    onNavigateToLanding: reset,
-  });
-
-  var exitCompare = useCallback(function () {
-    sessionB.resetSession();
-    setCompareLanding(false);
-  }, [sessionB.resetSession]);
-
-  var openCompareSessionInCoach = useCallback(function (loader) {
-    var rawText = loader.getRawText();
-    if (!rawText) return;
-    session.handleFile(rawText, loader.file);
-    sessionB.resetSession();
-    setCompareLanding(false);
-    setView("coach");
-  }, [session.handleFile, sessionB.resetSession, setView]);
-
-  var handleExportSession = useCallback(function () {
-    var rawText = session.getRawText();
-    if (!rawText) return;
-    sessionExport.run(function () {
-      return exportSingleSession(rawText, session.file);
-    });
-  }, [session.getRawText, session.file, sessionExport]);
-
-  var handleExportComparison = useCallback(function () {
-    var rawA = session.getRawText();
-    var rawB = sessionB.getRawText();
-    if (!rawA || !rawB) return;
-    compareExport.run(function () {
-      return exportComparison(rawA, session.file, rawB, sessionB.file);
-    });
-  }, [compareExport, session.getRawText, session.file, sessionB.getRawText, sessionB.file]);
-
-  var compareReady = compareLanding && Boolean(session.events) && Boolean(sessionB.events);
-
-  if (session.loading || (compareLanding && sessionB.loading)) {
-    return <AppLoadingState />;
-  }
-
-  if (compareLanding && !compareReady) {
+  if (v2Enabled) {
     return (
-      <CompareLandingState
-        session={session}
-        sessionB={sessionB}
-        onLoadSessionA={handleFile}
-        onExitCompare={exitCompare}
-      />
-    );
-  }
-
-  if (!session.events) {
-    return (
-      <AppLandingState
-        error={session.error || loadError}
-        onLoad={handleFile}
-        onLoadPair={handleFilePair}
-        onLoadSample={loadSample}
-        onStartCompare={function () { setCompareLanding(true); }}
-        inboxEntries={allSessions}
-        onOpenInboxSession={openStoredSession}
-        onRefresh={function () {
-          var pruned = pruneDeadEntries();
-          setLibraryEntries(pruned);
-          return discovered.refresh();
-        }}
-        manifestError={discovered.manifestError}
-        isManifestMode={discovered.isManifestMode}
-      />
-    );
-  }
-
-  if (compareReady) {
-    return (
-      <React.Suspense fallback={<AppLoadingState />}>
-        <CompareShell
-          sessionA={{ events: session.events, metadata: session.metadata, total: session.total, file: session.file }}
-          sessionB={{ events: sessionB.events, metadata: sessionB.metadata, total: sessionB.total, file: sessionB.file }}
-          onExitCompare={exitCompare}
-          onExportComparison={handleExportComparison}
-          exportState={compareExport.state}
-          exportError={compareExport.error}
-          onOpenSessionA={function () { openCompareSessionInCoach(session); }}
-          onOpenSessionB={function () { openCompareSessionInCoach(sessionB); }}
-        />
-      </React.Suspense>
-    );
-  }
-
-  // Active session view: wrap in PlaybackProvider so children can use usePlaybackContext()
-  return (
-    <PlaybackProvider key={sessionLoadCount.current} session={session}>
-      <AppSessionView
-        session={session}
-        activeView={activeView}
-        setView={setView}
+      <AppV2
         currentThemeMode={themeModePreference}
         onSetThemeMode={setThemeModePreference}
-        autonomyMetrics={autonomyMetrics}
-        debrief={debrief}
+        onExitV2={function () { setV2Enabled(false); }}
+      />
+    );
+  }
+
+
+  return (
+    <SessionProvider
+      onBeforeSessionChange={beforeSessionChange}
+      onStoredSessionOpen={handleStoredSessionOpen}
+    >
+      <AppShell
+        view={view}
+        setView={setView}
+        themeModePreference={themeModePreference}
+        setThemeModePreference={setThemeModePreference}
         showPalette={showPalette}
         setShowPalette={setShowPalette}
         showShortcuts={showShortcuts}
@@ -520,12 +229,115 @@ export default function App() {
         qaFlag={qaFlag}
         searchInputRef={searchInputRef}
         filtersRef={filtersRef}
-        reset={reset}
-        allSessions={allSessions}
-        openStoredSession={openStoredSession}
-        handleExportSession={handleExportSession}
+        onTryV2={function () { setV2Enabled(true); }}
+      />
+    </SessionProvider>
+  );
+}
+
+function AppShell({
+  view, setView, themeModePreference, setThemeModePreference,
+  showPalette, setShowPalette, showShortcuts, setShowShortcuts,
+  showFilters, setShowFilters, showQA, setShowQA, qaFlag,
+  searchInputRef, filtersRef, onTryV2,
+}) {
+  var sessionState = useSessionContext();
+  var session = sessionState.session;
+  var sessionB = sessionState.sessionB;
+  var sessionExport = sessionState.sessionExport;
+  var compareExport = sessionState.compareExport;
+  var discovered = sessionState.discovered;
+
+  var isValidView = APP_VIEWS.some(function (item) { return item.id === view; });
+  var activeView = isValidView ? view : "replay";
+
+  useEffect(function () {
+    if (!isValidView) setView("replay");
+  }, [isValidView]);
+
+  if (session.loading || (sessionState.compareLanding && sessionB.loading)) {
+    return <AppLoadingState />;
+  }
+
+  if (sessionState.compareLanding && !sessionState.compareReady) {
+    return (
+      <CompareLandingState
+        session={session}
+        sessionB={sessionB}
+        onLoadSessionA={sessionState.handleFile}
+        onExitCompare={sessionState.exitCompare}
+      />
+    );
+  }
+
+  if (!session.events) {
+    return (
+      <AppLandingState
+        error={session.error || sessionState.loadError}
+        onLoad={sessionState.handleFile}
+        onLoadPair={sessionState.handleFilePair}
+        onLoadSample={sessionState.loadSample}
+        onStartCompare={function () { sessionState.setCompareLanding(true); }}
+        onTryV2={onTryV2}
+        inboxEntries={sessionState.allSessions}
+        onOpenInboxSession={sessionState.openStoredSession}
+        onRefresh={sessionState.refreshSessions}
+        manifestError={discovered.manifestError}
+        isManifestMode={discovered.isManifestMode}
+      />
+    );
+  }
+
+  if (sessionState.compareReady) {
+    return (
+      <React.Suspense fallback={<AppLoadingState />}>
+        <CompareShell
+          sessionA={{ events: session.events, metadata: session.metadata, total: session.total, file: session.file }}
+          sessionB={{ events: sessionB.events, metadata: sessionB.metadata, total: sessionB.total, file: sessionB.file }}
+          onExitCompare={sessionState.exitCompare}
+          onExportComparison={sessionState.handleExportComparison}
+          exportState={compareExport.state}
+          exportError={compareExport.error}
+          onOpenSessionA={function () {
+            if (sessionState.openCompareSessionInCoach(session)) setView("coach");
+          }}
+          onOpenSessionB={function () {
+            if (sessionState.openCompareSessionInCoach(sessionB)) setView("coach");
+          }}
+        />
+      </React.Suspense>
+    );
+  }
+
+  // Active session view: wrap in PlaybackProvider so children can use usePlaybackContext()
+  return (
+    <PlaybackProvider key={sessionState.sessionLoadKey} session={session}>
+      <AppSessionView
+        session={session}
+        activeView={activeView}
+        setView={setView}
+        currentThemeMode={themeModePreference}
+        onSetThemeMode={setThemeModePreference}
+        autonomyMetrics={sessionState.autonomyMetrics}
+        debrief={sessionState.debrief}
+        showPalette={showPalette}
+        setShowPalette={setShowPalette}
+        showShortcuts={showShortcuts}
+        setShowShortcuts={setShowShortcuts}
+        showFilters={showFilters}
+        setShowFilters={setShowFilters}
+        showQA={showQA}
+        setShowQA={setShowQA}
+        qaFlag={qaFlag}
+        searchInputRef={searchInputRef}
+        filtersRef={filtersRef}
+        reset={sessionState.reset}
+        allSessions={sessionState.allSessions}
+        openStoredSession={sessionState.openStoredSession}
+        handleExportSession={sessionState.handleExportSession}
         sessionExport={sessionExport}
-        setCompareLanding={setCompareLanding}
+        setCompareLanding={sessionState.setCompareLanding}
+        onTryV2={onTryV2}
       />
     </PlaybackProvider>
   );
@@ -539,7 +351,7 @@ function AppSessionView({
   showFilters, setShowFilters, showQA, setShowQA, qaFlag,
   searchInputRef, filtersRef, reset, allSessions, openStoredSession,
   handleExportSession, sessionExport, setCompareLanding,
-  currentThemeMode, onSetThemeMode,
+  currentThemeMode, onSetThemeMode, onTryV2,
 }) {
   var pb = usePlaybackContext();
 
@@ -673,6 +485,7 @@ function AppSessionView({
         recentSessions={allSessions}
         onOpenRecentSession={openStoredSession}
         currentFile={session.file}
+        onTryV2={onTryV2}
       />
 
       <div style={{ padding: "8px 20px 0", flexShrink: 0 }}>

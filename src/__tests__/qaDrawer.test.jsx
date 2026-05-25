@@ -135,7 +135,7 @@ describe("QADrawer", function () {
       <QADrawerWithState open={true} onClose={onClose} sessionData={SESSION_DATA} onSeek={vi.fn()} turns={SESSION_DATA.turns} />
     );
     act(function () {
-      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     });
     expect(onClose).toHaveBeenCalledOnce();
   });

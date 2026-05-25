@@ -19,6 +19,7 @@ export default function useSessionLoader(options) {
   var [metadata, setMetadata] = useState(null);
   var [total, setTotal] = useState(0);
   var [file, setFile] = useState("");
+  var [sourcePath, setSourcePath] = useState(null);
   var [error, setError] = useState(null);
   var [loading, setLoading] = useState(false);
   var [showHero, setShowHero] = useState(false);
@@ -33,13 +34,14 @@ export default function useSessionLoader(options) {
   // newly-loaded file.
   var liveRequestIdRef = useRef(0);
 
-  var applySession = useCallback(function (result, name) {
+  var applySession = useCallback(function (result, name, nextSourcePath) {
     var applied = buildAppliedSession(result, name);
     setEvents(applied.events);
     setTurns(applied.turns);
     setMetadata(applied.metadata);
     setTotal(applied.total);
     setFile(applied.file);
+    setSourcePath(nextSourcePath || null);
     setError(applied.error);
     setShowHero(applied.showHero);
   }, []);
@@ -71,7 +73,7 @@ export default function useSessionLoader(options) {
     liveParserRef.current = createLiveSessionParser(text || "");
   }, [clearLiveNotify]);
 
-  var handleFile = useCallback(function (text, name) {
+  var handleFile = useCallback(function (text, name, nextSourcePath) {
     requestIdRef.current += 1;
     var requestId = requestIdRef.current;
 
@@ -100,7 +102,7 @@ export default function useSessionLoader(options) {
         return;
       }
 
-      applySession(parsed.result, name);
+      applySession(parsed.result, name, nextSourcePath);
       notifySessionParsed(parsed.result, name, text);
     }, 16);
   }, [applySession, notifySessionParsed, resetLiveParser]);
@@ -140,6 +142,7 @@ export default function useSessionLoader(options) {
     setMetadata(isMultiAgent ? MULTIAGENT_SAMPLE_METADATA : SAMPLE_METADATA);
     setTotal(isMultiAgent ? MULTIAGENT_SAMPLE_TOTAL : SAMPLE_TOTAL);
     setFile(isMultiAgent ? "multiagent-demo.jsonl" : "demo-session.jsonl");
+    setSourcePath(null);
     setError(null);
     setLoading(false);
     setIsLive(false);
@@ -160,6 +163,7 @@ export default function useSessionLoader(options) {
     setMetadata(null);
     setTotal(0);
     setFile("");
+    setSourcePath(null);
     setError(null);
     setLoading(false);
     setIsLive(false);
@@ -201,6 +205,7 @@ export default function useSessionLoader(options) {
             setMetadata(parsed.result.metadata);
             setTotal(getSessionTotal(parsed.result.events));
             setFile(meta.filename);
+            setSourcePath(meta.path || null);
             setError(null);
             setShowHero(true);
             notifySessionParsed(parsed.result, meta.filename, text);
@@ -226,6 +231,7 @@ export default function useSessionLoader(options) {
     metadata: metadata,
     total: total,
     file: file,
+    sourcePath: sourcePath,
     error: error,
     loading: loading,
     showHero: showHero,

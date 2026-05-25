@@ -63,6 +63,11 @@ export default defineConfig(function ({ command, mode }) {
     },
     test: {
       pool: 'forks',
+      exclude: [
+        '**/node_modules/**',
+        '**/.git/**',
+        'tests/e2e/**',
+      ],
       alias: {
         // In Node/Vitest, Worker is unavailable; use the self-contained bundle instead
         "elkjs/lib/elk-api.js": path.resolve(__dirname, "node_modules/elkjs/lib/elk.bundled.js"),

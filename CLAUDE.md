@@ -11,9 +11,11 @@ Session replay visualizer for AI agent workflows. Renders Claude Code, VS Code C
 ## Architecture
 ```
 src/
-  App.jsx              # Main orchestrator: file loading, playback, keyboard shortcuts, view routing
+  App.jsx              # Default v2 mount + Classic UI fallback, theme wiring, session entry routing
+  AppV2.jsx            # Default workflow shell: Find, Review, Investigate, Analyze, Compare, Improve
   main.jsx             # React entry point
   contexts/
+    SessionProvider.jsx  # Shared session loading, discovery, compare, live, export, and derived state
     PlaybackContext.jsx  # Playback, search, track filtering, and derived state provider
   hooks/
     usePlayback.js     # Playback state: time, playing, speed, seek, playPause
@@ -27,6 +29,9 @@ src/
     useDiscoveredSessions.js # Auto-discovery of sessions via /api/sessions or ?manifest= URL
     useHashRouter.js   # Hash-based routing between inbox and session views
     useAsyncStatus.js  # Async operation state machine (idle/loading/success/error)
+    useBreakpoint.js   # Shared compact/narrow/wide responsive breakpoint hook
+    useFocusTrap.js    # Modal focus trap with Escape close and focus restoration
+    useReducedMotion.js # Shared prefers-reduced-motion hook for inline/SVG animation guards
   lib/
     theme.js           # Design token system, TRACK_TYPES, AGENT_COLORS
     theme.d.ts         # TypeScript declarations for theme.js
@@ -51,7 +56,7 @@ src/
     qaClassifier.js    # Session Q&A instant answer engine (9 patterns + model context)
     qaAgent.js         # Q&A agent powered by @github/copilot-sdk for model fallback
     replayLayout.js    # Estimated layout + binary search windowing for virtualized replay
-    commandPalette.js  # Precomputed search index with scoring and per-type caps
+    commandPalette.js  # Precomputed search index with scoring, legacy views, and v2 workflow commands
     diffUtils.js       # Diff detection (isFileEditEvent) + Myers line diff algorithm
     waterfall.ts       # Waterfall view helpers: item building, stats, layout, windowing
     graphLayout.js     # Graph view helpers: ELKjs DAG builder, layout runner, position merger
@@ -95,6 +100,7 @@ src/
     Icon.jsx           # Lucide icon wrapper; all icons must be imported AND added to ICON_MAP
     app/               # Shell components: AppHeader, AppLandingState, AppLoadingState, CompareLandingState, CompareShell (AppLandingState switches between inbox and dashboard landing modes)
     ui/                # Shared primitives: BrandWordmark, ShellFrame, ToolbarButton, ToolbarSelect, ExportStatusButton, KeyboardHint
+    v2/                # Default workflow UI: FlowRail, V2Header, FindPortfolio, ReviewHub, InvestigateView, AnalyzeShell, InlineCompare, ImproveView, LiveSessionBanner
     waterfall/         # Waterfall sub-components: WaterfallChart, WaterfallRow, WaterfallInspector, TimeAxis
 routes/
   sessions.js        # Session discovery, file serving, SSE streaming
@@ -133,22 +139,26 @@ Agent types: user, assistant, system
 - `npm start` - Build and launch AGENTVIZ in browser (production)
 - `npm run dev` - Vite dev server + API backend (both auto-started)
 - `npm run build` - Production build to dist/
-- `npm test` - Run 700+ tests via Vitest (parsers, layout, diff, graph, autonomy, QA, regressions, and more)
+- `npm test` - Run 800+ tests via Vitest with a stable worker cap (parsers, layout, diff, graph, autonomy, QA, regressions, and more)
+- `npm run test:v2` - Run v2 golden data, UI, and v1 regression coverage
+- `npm run test:e2e:v2` - Run the Playwright v2 browser smoke test on the hermetic Vite test server
 - `npm run test:watch` - Watch mode for tests
 - `npm run typecheck` - Type-check with tsc --noEmit
 
 `npm run dev` auto-starts the API backend on port 4242.
 Vite proxies `/api/*` to the backend automatically.
+Run `npx playwright install chromium` once before the first browser test run.
 
 ## Conventions
 - No em dashes in any content or comments
 - All styles are inline (no CSS files), all colors reference theme.js tokens
 - Unicode characters used directly or as escape sequences in JS
-- Components receive data as props, no global state management
+- Components receive data as props. Shared contexts are limited to SessionProvider for session orchestration and PlaybackContext for active-session playback/search/filter state
 - Design tokens defined in src/lib/theme.js
 - Product name is always AGENTVIZ (all caps, no spaces)
 - UI/UX design system: see docs/ui-ux-style-guide.md -- all UI changes must conform to it
 - Cache usage summaries omit the cache-write segment when `cacheWrite` is zero
+- The default UI is the v2 workflow shell. Classic UI remains available through the `agentviz:v2:enabled` preference and header toggle.
 
 ## Planned features
 - Bookmarks and annotations (persisted to localStorage)
