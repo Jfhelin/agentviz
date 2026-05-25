@@ -39,6 +39,11 @@ import {
 } from "./cacheAnalysis";
 import { estimateCost } from "./pricing.js";
 import { estimateImageTokens } from "./imageTokenEstimate.js";
+import {
+  analyzeToolDefinitionShape,
+  type ActualToolCall,
+  type ToolDefinitionShapeAnalysis,
+} from "./toolDefinitionShape";
 import type {
   NormalizedEvent,
   ParsedSession,
@@ -862,6 +867,11 @@ export interface CostAnalysisCall {
   visionTokensTotal: number;
   totalTools: number;
   toolGroups: ClassifiedCall["toolGroups"];
+  /** Classification of the model-visible tool definitions on this call as
+   *  direct vs router/grouped vs possible-router vs unknown. Router-usage
+   *  detection uses the tool calls this LLM call produced (next-up
+   *  `toolCall` log entries until the next `request`). */
+  toolDefinitionShape: ToolDefinitionShapeAnalysis;
   historyMsgs: ClassifiedCall["historyMsgs"];
   toolResultMsgs: ClassifiedCall["toolResultMsgs"];
   /** Image attachments referenced by this call. The export gives URL, media
@@ -968,6 +978,10 @@ export interface CostAnalysisPrompt {
 
 export interface CostAnalysis {
   prompts: CostAnalysisPrompt[];
+  /** Session-level shape of model-visible tool definitions, unioned by tool
+   *  name across all primary calls. Router-usage stats are computed from
+   *  every `toolCall` log entry in the session. */
+  toolDefinitionShape: ToolDefinitionShapeAnalysis;
   totals: {
     promptTokens: number;
     output: number;
@@ -1167,6 +1181,11 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
   // Third pass: build the CostAnalysis structure (per-prompt + per-call) and
   // the normal ParsedSession events/turns/metadata.
   const costPrompts: CostAnalysisPrompt[] = [];
+  // Session-level shape inputs: union all model-visible tool definitions by
+  // name across primary requests, and collect every actual `toolCall` log so
+  // router-usage detection covers the whole session.
+  const sessionUniqueTools = new Map<string, unknown>();
+  const sessionActualCalls: ActualToolCall[] = [];
   const events: NormalizedEvent[] = [];
   const turns: SessionTurn[] = [];
   let cumCost = 0;
@@ -1222,6 +1241,13 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
       const log = c.logs[logIdx];
       if (log.kind === "toolCall") {
         const argStr = asString(log.args);
+        // Feed session-level router-usage detection (uses parsed args).
+        let toolCallArgsParsed: Record<string, unknown> | null = null;
+        if (log.args && typeof log.args === "object") toolCallArgsParsed = log.args as Record<string, unknown>;
+        else if (typeof log.args === "string" && log.args.trim().startsWith("{")) {
+          try { toolCallArgsParsed = JSON.parse(log.args) as Record<string, unknown>; } catch { /* ignore */ }
+        }
+        sessionActualCalls.push({ name: log.tool ?? "", args: toolCallArgsParsed });
         const tc: CostAnalysisToolCall = {
           kind: "tool",
           id: log.id ?? `p${pi}-tool-${pTool}`,
@@ -1284,6 +1310,16 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
         continue;
       }
       const usage = callUsage(log);
+      // Union this call's model-visible tool definitions into the session-
+      // level set, keyed by tool name (first occurrence wins). Only primary
+      // calls are interesting for the shape report, but adding overhead calls
+      // is harmless because their tools tend to be a subset.
+      for (const tool of (log.metadata?.tools ?? [])) {
+        const name = (tool as { function?: { name?: string }; name?: string })?.function?.name
+          ?? (tool as { name?: string })?.name
+          ?? "(unnamed)";
+        if (!sessionUniqueTools.has(name)) sessionUniqueTools.set(name, tool);
+      }
       const fresh = Math.max(0, usage.prompt_tokens - usage.cached_tokens - usage.cache_write);
       const out_t = usage.completion_tokens;
       const model = log.metadata?.model ?? "unknown";
@@ -1320,6 +1356,9 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
       // critical for showing "what the model did" when its text response is
       // empty (model emitted only tool_use blocks, no message content).
       const producedToolCalls: { name: string; argsSummary: string; rawArgs: string }[] = [];
+      // Same call set, but with parsed args, used by the router-usage
+      // detection in the tool-definition-shape analysis.
+      const producedActualCalls: ActualToolCall[] = [];
       const reasoningBlocks: { tool: string; text: string }[] = [];
       let toolArgsChars = 0;
       let thinkingChars = 0;
@@ -1332,6 +1371,12 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
             argsSummary: shortArgs(next.args),
             rawArgs: next.args == null ? "" : (typeof next.args === "string" ? next.args : JSON.stringify(next.args)),
           });
+          let parsedArgs: Record<string, unknown> | null = null;
+          if (next.args && typeof next.args === "object") parsedArgs = next.args as Record<string, unknown>;
+          else if (typeof next.args === "string" && next.args.trim().startsWith("{")) {
+            try { parsedArgs = JSON.parse(next.args) as Record<string, unknown>; } catch { /* ignore */ }
+          }
+          producedActualCalls.push({ name: next.tool ?? "", args: parsedArgs });
           const thinkText = next.thinking?.text ?? "";
           if (thinkText) {
             reasoningBlocks.push({ tool: next.tool ?? "", text: thinkText });
@@ -1442,6 +1487,7 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
         visionTokensTotal,
         totalTools: cls.totalTools,
         toolGroups: cls.toolGroups,
+        toolDefinitionShape: analyzeToolDefinitionShape(log.metadata?.tools ?? [], producedActualCalls),
         historyMsgs: cls.historyMsgs,
         toolResultMsgs: cls.toolResultMsgs,
         images: cls.images,
@@ -1532,6 +1578,10 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
   const totalDenom = cumCached + cumFresh + cumCwrite;
   const costAnalysis: CostAnalysis = {
     prompts: costPrompts,
+    toolDefinitionShape: analyzeToolDefinitionShape(
+      Array.from(sessionUniqueTools.values()),
+      sessionActualCalls,
+    ),
     totals: {
       promptTokens: cumPt,
       output: cumOut,
