@@ -199,4 +199,21 @@ describe("buildComparisonLlmPrompt", () => {
     expect(out).toContain("every_call_overhead");
     expect(out).toContain("cache_health: poor");
   });
+
+  it("includes the user goal in the facts so the analyst can judge output quality", () => {
+    const cmp = compareRunsCost(mkRun({}), mkRun({}))!;
+    const out = buildComparisonLlmPrompt(cmp, { nameA: "a", nameB: "b" });
+    expect(out).toContain("User goal");
+    // mkRun uses "do the thing" as the first user prompt for both runs
+    expect(out).toContain("do the thing");
+  });
+
+  it("instructs the analyst to produce an Output quality verdict in the report", () => {
+    const cmp = compareRunsCost(mkRun({}), mkRun({}))!;
+    const out = buildComparisonLlmPrompt(cmp, { nameA: "a", nameB: "b" });
+    expect(out).toContain("### Output quality");
+    expect(out).toMatch(/answered better/);
+    expect(out).toMatch(/Equivalent for the user's goal/);
+    expect(out).toContain("Do not infer quality from cost");
+  });
 });

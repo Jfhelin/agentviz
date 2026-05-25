@@ -91,6 +91,36 @@ export function formatComparisonAsMarkdown(
   lines.push(`**Final answers equivalent:** ${cmp.answersEquivalent ? "yes" : "no"}`);
   lines.push("");
 
+  // User goal — needed for the analyst to judge whether outputs satisfied the request.
+  const goalA = (cmp.userTextA || "").trim();
+  const goalB = (cmp.userTextB || "").trim();
+  if (goalA || goalB) {
+    lines.push("## User goal (from the first user prompt)");
+    lines.push("Use this to judge whether each run's final output actually satisfied the request.");
+    lines.push("");
+    if (goalA && goalB && goalA === goalB) {
+      lines.push("Both runs started from the same prompt:");
+      lines.push("```");
+      lines.push(trimAnswer(goalA));
+      lines.push("```");
+    } else {
+      lines.push(`### A · ${nameA}`);
+      lines.push("```");
+      lines.push(trimAnswer(goalA || "(no first user prompt captured)"));
+      lines.push("```");
+      lines.push("");
+      lines.push(`### B · ${nameB}`);
+      lines.push("```");
+      lines.push(trimAnswer(goalB || "(no first user prompt captured)"));
+      lines.push("```");
+      if (goalA && goalB && goalA !== goalB) {
+        lines.push("");
+        lines.push("> ⚠ The first user prompt differs between runs. Output-quality judgments must account for this — the runs were not asked the same question.");
+      }
+    }
+    lines.push("");
+  }
+
   // Run drift
   lines.push("## Run drift");
   lines.push("Things that should be identical between A and B if the test holds only the variable under study.");
@@ -331,6 +361,37 @@ function buildReportInstructions(planMode: boolean): string {
   lines.push("the second run diverged behaviorally from the first. If the runs");
   lines.push("diverged, say so plainly — divergent runs cannot cleanly attribute");
   lines.push("cost deltas to the technique.");
+  lines.push("");
+  lines.push("### Output quality");
+  lines.push("Judge whether one run's final output actually served the user's goal");
+  lines.push("better than the other. Use the \"User goal\" block above as the");
+  lines.push("standard, and compare each run's final response against it. Lead with");
+  lines.push("one of these verdict prefixes, then 2–4 sentences of justification:");
+  lines.push("");
+  lines.push("- ✅ **<runLabel> answered better** — names which run's output more");
+  lines.push("  directly satisfied the request (correctness, completeness, format,");
+  lines.push("  actionability). Quote a short fragment from each to back the claim.");
+  lines.push("- ≈ **Equivalent for the user's goal** — both runs satisfied the");
+  lines.push("  request to the same useful level even if wording differed. Say so");
+  lines.push("  explicitly so the developer knows the cheaper run is the right pick.");
+  lines.push("- ⚠ **One run is materially worse** — flag missing steps, wrong");
+  lines.push("  answer, truncated output, or refusal. Name the run and the gap.");
+  lines.push("- ❓ **Cannot judge from this comparison** — use this if the user");
+  lines.push("  goal is missing, if both final answers are empty, or if quality");
+  lines.push("  cannot be assessed without ground truth (e.g. code that needs to");
+  lines.push("  be executed to know if it works). Tell the developer what to");
+  lines.push("  capture next time to make this judgable.");
+  lines.push("");
+  lines.push("Rules:");
+  lines.push("- Do not infer quality from cost. A cheaper run is not automatically");
+  lines.push("  worse, and a more expensive run is not automatically better.");
+  lines.push("- If `Final answers equivalent: yes` and the prompts match, default");
+  lines.push("  to ≈ unless a clear quality signal contradicts it.");
+  lines.push("- If the first user prompts differ between runs, lead with that fact");
+  lines.push("  and constrain the judgment accordingly — the runs were not asked");
+  lines.push("  the same question.");
+  lines.push("- Never claim a cheaper model is \"safe\" based on output equivalence");
+  lines.push("  in a single comparison. Frame any such claim as a hypothesis.");
   lines.push("");
   lines.push("### Cost outcome");
   lines.push("One short paragraph. Did the second run save money, cost more, or stay");
