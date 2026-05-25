@@ -21,6 +21,7 @@ describe("buildLlmAnalysisPrompt", () => {
   it("includes all required developer-action report sections by default", () => {
     const out = buildLlmAnalysisPrompt(analysis);
     expect(out).toContain("Bottom line");
+    expect(out).toContain("What happened");
     expect(out).toContain("Fix before next run");
     expect(out).toContain("Cost drivers in plain English");
     expect(out).toContain("What not to over-optimize");
@@ -157,6 +158,12 @@ describe("buildLlmAnalysisPrompt", () => {
     // Developer-facing top-level keys (the source of truth).
     expect(facts).toHaveProperty("session_metadata");
     expect(facts).toHaveProperty("developer_action_summary");
+    expect(facts).toHaveProperty("session_narrative");
+    expect(facts.session_narrative).toHaveProperty("user_objective");
+    expect(facts.session_narrative.user_objective).toHaveProperty("first_user_message");
+    expect(Array.isArray(facts.session_narrative.agent_path_compressed)).toBe(true);
+    expect(Array.isArray(facts.session_narrative.artifacts_created)).toBe(true);
+    expect(facts.session_narrative).toHaveProperty("outcome_signal");
     expect(facts).toHaveProperty("workflow_classification");
     expect(facts).toHaveProperty("developer_efficiency_findings");
     expect(facts).toHaveProperty("developer_levers_detected");

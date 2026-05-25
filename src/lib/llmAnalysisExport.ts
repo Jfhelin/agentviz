@@ -641,7 +641,7 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
   lines.push("");
   lines.push("## Source-of-truth precedence");
   lines.push("");
-  lines.push("The developer-facing JSON keys (`developer_action_summary`, `workflow_classification`, `developer_efficiency_findings`, `developer_levers_detected`, `developer_cost_categories`, `recommended_changes`, `custom_mode_or_agent_analysis`, `ide_tool_configuration_analysis`, `skills_profile_analysis`, `automation_boundary_recommendation`, `model_strategy_recommendation`, `prompt_strategy_recommendation`, `quality_and_validation`, `workflow_phase_analysis`, `agent_loop_efficiency`, `tool_result_size_analysis`, `baseline_comparison`, `experiment_validity`, `control_surface_analysis`, `missing_data`) are the source of truth. The `raw_supporting_telemetry` block is evidence only. If a human-readable supporting section later in this prompt appears to contradict the developer-facing JSON, the JSON wins.");
+  lines.push("The developer-facing JSON keys (`developer_action_summary`, `session_narrative`, `workflow_classification`, `developer_efficiency_findings`, `developer_levers_detected`, `developer_cost_categories`, `recommended_changes`, `custom_mode_or_agent_analysis`, `ide_tool_configuration_analysis`, `skills_profile_analysis`, `automation_boundary_recommendation`, `model_strategy_recommendation`, `prompt_strategy_recommendation`, `quality_and_validation`, `workflow_phase_analysis`, `agent_loop_efficiency`, `tool_result_size_analysis`, `baseline_comparison`, `experiment_validity`, `control_surface_analysis`, `missing_data`) are the source of truth. The `raw_supporting_telemetry` block is evidence only. If a human-readable supporting section later in this prompt appears to contradict the developer-facing JSON, the JSON wins.");
   lines.push("");
   lines.push("## Output format");
   lines.push("");
@@ -652,12 +652,13 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
     lines.push("Start your reply with `# <Workflow name>: Optimization Review` as the very first line (the title IS the H1 -- do not write a separate label). Then use `##` subheadings for the sections below, in this exact order.");
     lines.push("");
     lines.push("1. **Bottom line** -- One short paragraph (3-5 sentences). Explain what kind of workflow this was and the ONE main fix. Use plain developer language. Tone example: \"This was not expensive because of a bad prompt. It was expensive because the agent was running a repeatable file-processing workflow inside the chat loop. The main fix is to move deterministic steps into a script and let the model handle ambiguity and final review.\" Cite `workflow_classification.type` and `workflow_classification.confidence`.");
-    lines.push("2. **Fix before next run** -- Rank the top 3-5 actions by **developer value**, not by schema order or surface symmetry. For each: bold title / 1-line why / fenced ```text snippet (exact text the developer can copy) / expected impact / confidence. Use this priority order unless evidence overrides: (1) script deterministic workflow steps, (2) update custom chat mode or agent instructions, (3) reduce context accumulation, (4) prune unused skills, (5) try Auto or a cheaper model -- only after validation exists.");
-    lines.push("3. **Cost drivers in plain English** -- 3-5 short bullets. Translate telemetry into developer meaning; do NOT lead with raw metric names. Cite supporting numbers in parentheses at the END of each bullet. Examples: \"The agent loop drove cost: 15 chat calls for a workflow that should target 3-5 after scripting.\" \"Context accumulated: history grew from 1,008 to 12,895 chars.\" \"One deliberation spike dominated: turn 7 cost $0.20 / 22% of session.\"");
-    lines.push("4. **What not to over-optimize** -- 1-3 short bullets. Call out low-impact levers explicitly so the developer does not waste attention on them. Use the rule: any lever contributing <5% of session cost is cleanup, not the main fix. Phrase as \"X was real overhead, but only ~Y% of this session -- clean up when convenient, but it is not the main optimization.\"");
-    lines.push("5. **Model guidance** -- 2-4 sentences. Quote the conservative Auto-same-model estimate FIRST. Mention optimistic cheaper-model projections as hypotheses requiring validation. If `quality_and_validation.available == false`, explicitly say a cheaper model is not yet proven safe. If `auto_mode_data` supports Auto as a safe experiment, say so. Cite `model_strategy_recommendation.summary`.");
-    lines.push("6. **Suggested next experiment** -- One concrete next-run setup as a short bulleted list of conditions. Example: \"Run the same task with: deterministic script for inventory/extraction/rename, chat mode limited to ambiguity review, only required tools enabled, Auto mode, validation output capturing accepted/corrected items.\" Tie back to `recommended_changes` items.");
-    lines.push("7. **Evidence** -- Up to 8 compact bullets total. Cite only the numbers that explain the recommendations above. Use field paths sparingly. End with a 1-line caveat summarizing `missing_data` (e.g. \"Quality, per-command tool sizes, and reasoning-token counts are not captured -- model and automation suggestions are hypotheses to validate next run.\").");
+    lines.push("2. **What happened** -- 2-4 sentences grounding the reader in the story of the session before any prescription. Use `session_narrative`: (1) one sentence stating the user objective (quote `user_objective.first_user_message` verbatim if concise, otherwise paraphrase); (2) 1-2 sentences tracing the agent's path using `agent_path_compressed` (collapse into prose; do NOT list every turn); (3) one closing line using `outcome_signal` + key items from `artifacts_created` (if any). Honor `artifacts_caveat` -- frame artifact names as \"appears to have produced\" rather than asserted truth.");
+    lines.push("3. **Fix before next run** -- Rank the top 3-5 actions by **developer value**, not by schema order or surface symmetry. For each: bold title / 1-line why / fenced ```text snippet (exact text the developer can copy) / expected impact / confidence. Use this priority order unless evidence overrides: (1) script deterministic workflow steps, (2) update custom chat mode or agent instructions, (3) reduce context accumulation, (4) prune unused skills, (5) try Auto or a cheaper model -- only after validation exists.");
+    lines.push("4. **Cost drivers in plain English** -- 3-5 short bullets. Translate telemetry into developer meaning; do NOT lead with raw metric names. Cite supporting numbers in parentheses at the END of each bullet. Examples: \"The agent loop drove cost: 15 chat calls for a workflow that should target 3-5 after scripting.\" \"Context accumulated: history grew from 1,008 to 12,895 chars.\" \"One deliberation spike dominated: turn 7 cost $0.20 / 22% of session.\"");
+    lines.push("5. **What not to over-optimize** -- 1-3 short bullets. Call out low-impact levers explicitly so the developer does not waste attention on them. Use the rule: any lever contributing <5% of session cost is cleanup, not the main fix. Phrase as \"X was real overhead, but only ~Y% of this session -- clean up when convenient, but it is not the main optimization.\"");
+    lines.push("6. **Model guidance** -- 2-4 sentences. Quote the conservative Auto-same-model estimate FIRST. Mention optimistic cheaper-model projections as hypotheses requiring validation. If `quality_and_validation.available == false`, explicitly say a cheaper model is not yet proven safe. If `auto_mode_data` supports Auto as a safe experiment, say so. Cite `model_strategy_recommendation.summary`.");
+    lines.push("7. **Suggested next experiment** -- One concrete next-run setup as a short bulleted list of conditions. Example: \"Run the same task with: deterministic script for inventory/extraction/rename, chat mode limited to ambiguity review, only required tools enabled, Auto mode, validation output capturing accepted/corrected items.\" Tie back to `recommended_changes` items.");
+    lines.push("8. **Evidence** -- Up to 8 compact bullets total. Cite only the numbers that explain the recommendations above. Use field paths sparingly. End with a 1-line caveat summarizing `missing_data` (e.g. \"Quality, per-command tool sizes, and reasoning-token counts are not captured -- model and automation suggestions are hypotheses to validate next run.\").");
     lines.push("");
     lines.push("### Decision logic for the default report");
     lines.push("");
@@ -672,7 +673,7 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
     lines.push("");
     lines.push("### Required section names (for downstream parsers)");
     lines.push("");
-    lines.push("Use these exact `##` headings verbatim: `Bottom line`, `Fix before next run`, `Cost drivers in plain English`, `What not to over-optimize`, `Model guidance`, `Suggested next experiment`, `Evidence`.");
+    lines.push("Use these exact `##` headings verbatim: `Bottom line`, `What happened`, `Fix before next run`, `Cost drivers in plain English`, `What not to over-optimize`, `Model guidance`, `Suggested next experiment`, `Evidence`.");
   } else {
     // detailed_audit -- the original 12-section heavy report.
     lines.push("Mode: **detailed_audit**. Aim for under 900 words. Mirror the full JSON schema for an in-depth audit.");
@@ -1838,6 +1839,76 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
     caveat: "Heuristic detection from tool-name + filename patterns. The export does not track script re-use or distinguish authored scripts from regenerated content.",
   };
 
+  // -- Session narrative (raw user objective + compressed agent path) ----
+  // The analyst LLM writes the prose; we just guarantee it has the
+  // structured data. Generic across session kinds: any session has a
+  // user objective and an agent path; the same shape works for coding,
+  // research, debugging, writing, data analysis.
+  const narrativeUserMessages = aggregateUserMessages(prompts);
+  // Compress consecutive same-phase turns from turnPhases into groups.
+  type PathGroup = { turns: string; phase: string; cost_usd: number; tool_calls: number; tool_names: string[]; output_tokens: number; tool_result_chars: number };
+  const pathGroups: PathGroup[] = [];
+  turnPhases.forEach((tp, idx) => {
+    const ev = perTurnEvents[idx];
+    const toolNames = (ev.producedToolCalls || []).map(tc => tc.name);
+    const last = pathGroups[pathGroups.length - 1];
+    const sameAsLast = last && last.phase === tp.primary_phase;
+    if (sameAsLast) {
+      const lastRange = last.turns.includes("-") ? last.turns.split("-")[0] : last.turns;
+      last.turns = lastRange + "-" + String(tp.turn);
+      last.cost_usd = Number((last.cost_usd + tp.cost_usd).toFixed(4));
+      last.tool_calls += tp.tool_calls;
+      toolNames.forEach(n => { if (!last.tool_names.includes(n)) last.tool_names.push(n); });
+      last.output_tokens += tp.output_tokens;
+      last.tool_result_chars += tp.tool_result_chars;
+    } else {
+      pathGroups.push({
+        turns: String(tp.turn),
+        phase: tp.primary_phase,
+        cost_usd: Number(tp.cost_usd.toFixed(4)),
+        tool_calls: tp.tool_calls,
+        tool_names: [...toolNames],
+        output_tokens: tp.output_tokens,
+        tool_result_chars: tp.tool_result_chars,
+      });
+    }
+  });
+  // Artifact ledger: extract file paths from file-editing tool args.
+  const artifactsCreatedSet = new Set<string>();
+  perTurnEvents.forEach(ev => {
+    (ev.producedToolCalls || []).forEach(tc => {
+      if (classifyToolFamily(tc.name) === "file_editing") {
+        const args = tc.argsSummary || "";
+        const pathMatch = args.match(/(?:[\w./~-]+\/)?[\w-]+\.[A-Za-z0-9]+/g);
+        if (pathMatch) pathMatch.slice(0, 3).forEach(p => artifactsCreatedSet.add(p));
+      }
+    });
+  });
+  const artifactsCreated = Array.from(artifactsCreatedSet).slice(0, 20);
+  // Outcome heuristic: did the session end on artifact creation, on review,
+  // or unclear? Useful for the analyst to frame "outcome" without inventing.
+  const lastTurn = turnPhases[turnPhases.length - 1];
+  const outcomeSignal = !lastTurn
+    ? "no chat turns"
+    : lastTurn.primary_phase === "file_or_artifact_creation"
+    ? "session ended on artifact creation; no validation captured"
+    : lastTurn.primary_phase === "final_response" || lastTurn.primary_phase === "review_or_synthesis"
+    ? "session ended on a written response; no validation captured"
+    : "session ended on " + lastTurn.primary_phase + "; outcome quality not captured";
+  const sessionNarrative = {
+    user_objective: {
+      first_user_message: narrativeUserMessages[0]?.text || null,
+      follow_up_messages: narrativeUserMessages.slice(1, 6).map(m => ({ turn: m.turn, text: truncate(m.text, USER_MSG_CHAR_CAP) })),
+      message_count: narrativeUserMessages.length,
+      note: "Use these messages to write a one-sentence `inferred_objective` in the What-happened section. Quote the first message verbatim if it is concise.",
+    },
+    agent_path_compressed: pathGroups,
+    artifacts_created: artifactsCreated,
+    artifacts_caveat: "Heuristic extraction from file-editing tool args. May include paths that were read or referenced rather than created. May miss artifacts whose name is not in the visible args summary.",
+    outcome_signal: outcomeSignal,
+    note_for_analyst: "Write the What-happened section as 2-4 sentences. Frame: (1) the user objective (one sentence), (2) the agent's path in 1-2 sentences using phase + tool clues, (3) the outcome line. Do not list every turn; collapse the compressed path into prose.",
+  };
+
   const facts = {
     // ===================== Developer-facing layer =====================
     session_metadata: {
@@ -1858,6 +1929,7 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
       confidence: "measured",
     },
     developer_action_summary: developerActionSummary,
+    session_narrative: sessionNarrative,
     workflow_classification: {
       type: workflowType,
       confidence: workflowConfidence,
@@ -2223,7 +2295,7 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
   lines.push("");
   lines.push(reportMode === "detailed_audit"
     ? "End of facts. Produce the 12-section detailed audit report now. Remember: write the TL;DR last but place it first; the very first line of your reply is `# <session title>`. Telemetry field paths belong in parentheses as evidence, not as the main prose."
-    : "End of facts. Produce the developer-action report now (7 sections in the order: Bottom line / Fix before next run / Cost drivers in plain English / What not to over-optimize / Model guidance / Suggested next experiment / Evidence). The very first line of your reply is `# <Workflow name>: Optimization Review`. Aim for 500-700 words. Telemetry field paths belong in parentheses as evidence, not as the main prose.");
+    : "End of facts. Produce the developer-action report now (8 sections in the order: Bottom line / What happened / Fix before next run / Cost drivers in plain English / What not to over-optimize / Model guidance / Suggested next experiment / Evidence). The very first line of your reply is `# <Workflow name>: Optimization Review`. Aim for 550-750 words. Telemetry field paths belong in parentheses as evidence, not as the main prose.");
   lines.push("");
   return lines.join("\n");
 }
