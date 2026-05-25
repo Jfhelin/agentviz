@@ -5,7 +5,7 @@
  * Cache read is ~10% of input price; cache write is ~125% of input price (Anthropic).
  * OpenAI cache read is 50% of input; cache write equals input.
  *
- * Last verified: May 2026 against:
+ * Last verified: May 2025 against:
  *   - https://docs.anthropic.com/en/docs/about-claude/models/overview
  *   - https://docs.github.com/en/copilot/.../about-premium-requests (multipliers, separate concept)
  *   - OpenAI public pricing trackers

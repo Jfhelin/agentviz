@@ -41,6 +41,7 @@ src/
     copilotCostParser.ts # parseCopilotPromptsJSON() - Copilot prompt export parser for token/cost analysis
     vscodeSessionParser.ts # parseVSCodeChatJSON() - VS Code Copilot Chat JSON parser
     atifParser.ts       # parseAtifJSON() - ATIF / Harbor trajectory JSON parser (schema_version ATIF-v1.6)
+    copilotChatExportParser.ts # parseCopilotChatExportJSON() - VS Code Copilot Chat export (copilot_all_prompts_*.json) with per-call cost analysis
     liveSessionParser.ts # Incremental live JSONL parser for appended session text
     parseSession.ts    # Auto-detect format router: detectFormat() + parseSession()
     session.ts         # Pure helpers: getSessionTotal, buildFilteredEventEntries, buildTurnStartMap
@@ -60,6 +61,12 @@ src/
     waterfall.ts       # Waterfall view helpers: item building, stats, layout, windowing
     graphLayout.js     # Graph view helpers: ELKjs DAG builder, layout runner, position merger
     costAnalysis.js    # Per-call cost, context, cache-miss, and token aggregation helpers
+    cacheAnalysis.ts   # Per-model cache scoping, recommit math, unexpected-miss diagnosis
+    toolDefinitionShape.ts # Tool-definition classifier: builtin vs MCP, router vs direct, token footprint
+    compareCost.ts     # Two-session cost comparison engine: bucket waterfall, behavioral KPIs, cache pollution
+    llmAnalysisExport.ts # Copy-for-LLM-analysis builder: structured facts + markdown summary for single-session cost
+    exportComparison.ts # Self-contained HTML/JSON export for two-session comparisons (also drives "Copy for LLM" on Compare)
+    mcpServerReachability.ts # Heuristic match of declared mcpServers to mcp_<slug>_* tool names actually sent to the model
     pricing.js         # Claude and OpenAI/Copilot model pricing table and cost estimation
     exportHtml.js      # Self-contained HTML export for single sessions and comparisons
     dataInspector.js   # Payload summary and preview helpers for inspector panels
@@ -78,7 +85,9 @@ src/
     WaterfallView.jsx  # Tool execution waterfall with nesting, inspector sidebar
     GraphView.jsx      # Interactive DAG of turns/tool calls with ELKjs layout, pan/zoom, animations
     StatsView.jsx      # Aggregate metrics, tool ranking, turn summary
-    CostView.jsx       # Token spend, cache, and context-composition analysis
+    CostView.jsx       # Token spend, cache, and context-composition analysis (delegates to CostViewChatExport for Copilot Chat exports)
+    CostViewChatExport.jsx # Cost view for VS Code Copilot Chat exports: 3-column timeline (CTX/NET/BILLED), cache health, MCP reachability, Copy-for-LLM
+    CostCompare.jsx    # Cost tab inside CompareView for two-session Copilot Chat export comparison
     CompareView.jsx    # Side-by-side session comparison: Scorecard + Tools tabs
     CommandPalette.jsx # Cmd+K fuzzy search overlay (events, turns, views)
     DiffViewer.jsx     # Inline unified diff view for file-editing tool calls

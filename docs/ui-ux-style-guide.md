@@ -132,6 +132,59 @@ Cost view, Cost Compare, and the cost tooltips read from `theme.cost.*`. The pal
 | `theme.cost.kindExtension` | Extension-backed tool |
 | `theme.cost.kindBuiltin` | Built-in tool |
 
+**Chip backgrounds** (tinted ~12-15% alpha of the kind/agent color; used for pill chips and label badges):
+
+| Token | Use |
+|-------|-----|
+| `theme.cost.chipBgMcp` | MCP chip background |
+| `theme.cost.chipBgExtension` | Extension chip background; also user-message chip |
+| `theme.cost.chipBgBuiltin` | Built-in chip background |
+| `theme.cost.chipBgAssistant` | Assistant message chip background |
+| `theme.cost.chipBgResult` | Tool-result chip background |
+
+**Unexpected cache miss callout** (error-tinted; used by the cache-health diagnosis panel):
+
+| Token | Use |
+|-------|-----|
+| `theme.cost.missAccent` | Border accent / icon color |
+| `theme.cost.missBg` | Panel background |
+| `theme.cost.missBorder` | Panel border |
+| `theme.cost.missText` | Body text |
+| `theme.cost.missCodeBg` | Code-block background inside the panel |
+| `theme.cost.missCodeBorder` | Code-block border |
+| `theme.cost.missCodeText` | Code-block text |
+
+**Healthy cache state** (success-tinted):
+
+| Token | Use |
+|-------|-----|
+| `theme.cost.okBarTrack` | Track behind the cache-health progress bar |
+| `theme.cost.okBg` | "All good" panel background |
+| `theme.cost.okBorder` | "All good" panel border |
+
+**Cache recommit warning** (amber-tinted; foreground uses `theme.cost.cwrite`):
+
+| Token | Use |
+|-------|-----|
+| `theme.cost.recommitBg` | Panel background |
+| `theme.cost.recommitBorder` | Panel border |
+
+**Run / model switch banner** (info-tinted):
+
+| Token | Use |
+|-------|-----|
+| `theme.cost.switchBg` | Banner background |
+| `theme.cost.switchBorder` | Banner border |
+| `theme.cost.switchText` | Banner text |
+
+**Event pills** (LLM call / Subagent / Tool labels in the call list):
+
+| Token | Use |
+|-------|-----|
+| `theme.cost.pillLlm` | "LLM call" pill (billed roundtrip) |
+| `theme.cost.pillSubagent` | "Subagent" pill (tool that spawns its own LLM call) |
+| `theme.cost.pillTool` | "Tool" pill (client-side, no LLM cost) |
+
 Rules:
 
 - Cost categorical colors are categorical, not sequential -- do not interpolate or alpha-blend across them.

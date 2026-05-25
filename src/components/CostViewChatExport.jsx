@@ -532,7 +532,7 @@ function ToolGroups(props) {
                             title="Router/grouped tool: this single schema can stand in for many hidden or deferred subcommands. Unless it was invoked with discovery arguments (e.g. learn=true), those subcommands were not expanded in this run."
                             style={{
                               display: "inline-block", marginLeft: 6,
-                              fontSize: 9, padding: "0 4px", borderRadius: 8,
+                              fontSize: theme.fontSize.xs, padding: "0 4px", borderRadius: 8,
                               background: theme.cost.chipBgMcp, color: KIND_COLORS.mcp,
                               fontWeight: 700, letterSpacing: 0.4, cursor: "help",
                               verticalAlign: "middle",
@@ -2270,7 +2270,7 @@ function McpReachabilityCallout(props) {
   var reach = props.reachability;
   if (!reach || !reach.available) return null;
   if (!reach.unusedCount || reach.unusedCount === 0) return null;
-  var warn = (theme.semantic && theme.semantic.warning) || "#eab308";
+  var warn = theme.semantic.warning;
   var unusedLabels = reach.unused.map(function (s) { return s.label; });
   var mcpToolCount = reach.mcpToolCount || 0;
   var matchedToolCount = reach.matches.reduce(function (sum, m) { return sum + (m.toolCount || 0); }, 0);
@@ -2651,20 +2651,20 @@ export default function CostView(props) {
                         {(function () {
                           var pillBg, pillText;
                           if (isLLM) {
-                            pillBg = "#4f46e5";
+                            pillBg = theme.cost.pillLlm;
                             pillText = "LLM call";
                           } else if (ev.subagent) {
-                            pillBg = "#b45309";
+                            pillBg = theme.cost.pillSubagent;
                             pillText = "Subagent";
                           } else {
-                            pillBg = "#0f766e";
+                            pillBg = theme.cost.pillTool;
                             pillText = "Tool";
                           }
                           return (
                             <div style={{
                               fontSize: theme.fontSize.xs, fontWeight: 700, padding: "2px 8px", borderRadius: 3,
                               display: "inline-flex", alignItems: "center", justifyContent: "center",
-                              color: "#ffffff", marginTop: 1, background: pillBg,
+                              color: theme.text.primary, marginTop: 1, background: pillBg,
                               textTransform: "uppercase", letterSpacing: 0.4, height: 18, whiteSpace: "nowrap",
                             }} title={isLLM ? "Roundtrip to the model. Billed." : ev.subagent ? "Tool that spawns its own LLM call internally. Has an estimated cost." : "Client-side tool execution. No LLM cost."}>{pillText}</div>
                           );
