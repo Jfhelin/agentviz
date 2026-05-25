@@ -39,7 +39,7 @@ interface GitHubModelInfo {
 // Snapshot of the GitHub Copilot pricing/category reference page used so the
 // LLM can suggest alternatives without leaving the prompt. Sourced from
 // https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing
-// (verified May 2026). All prices are USD per 1M tokens.
+// (verified May 2025). All prices are USD per 1M tokens.
 const GITHUB_MODEL_CATALOG: GitHubModelInfo[] = [
   { name: "GPT-4.1",          vendor: "OpenAI",    category: "Versatile",   inputPerMTok: 2.00, cachedInputPerMTok: 0.50,  outputPerMTok: 8.00 },
   { name: "GPT-5 mini",       vendor: "OpenAI",    category: "Lightweight", inputPerMTok: 0.25, cachedInputPerMTok: 0.025, outputPerMTok: 2.00 },

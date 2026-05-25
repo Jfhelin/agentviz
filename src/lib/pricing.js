@@ -20,7 +20,7 @@ var PRICE_TABLE = [
   { match: "claude-opus-4-7",   input:  5.00, output: 25.00 },
   { match: "claude-opus-4",     input: 15.00, output: 75.00 },
   { match: "claude-sonnet-4",   input:  3.00, output: 15.00 },
-  // Haiku 4.5 raw rates (current generation, May 2026).
+  // Haiku 4.5 raw rates (current generation, May 2025).
   { match: "claude-haiku-4",    input:  1.00, output:  5.00 },
   // Claude 3.5 family
   { match: "claude-3-5-sonnet", input:  3.00, output: 15.00 },
@@ -31,7 +31,7 @@ var PRICE_TABLE = [
   { match: "claude-3-haiku",    input:  0.25, output:  1.25 },
   // OpenAI families. Cache-read is 50% of input, cache-write equals input
   // (OpenAI prompt caching has no write premium, unlike Anthropic).
-  // GPT-5 family (May 2026 public rates).
+  // GPT-5 family (May 2025 public rates).
   { match: "gpt-5-mini",        input:  0.25, output:  2.00, cacheReadRatio: 0.1,  cacheWriteRatio: 1.0 },
   // GPT-4 family.
   { match: "gpt-4.1",           input:  2.00, output:  8.00, cacheReadRatio: 0.25, cacheWriteRatio: 1.0 },

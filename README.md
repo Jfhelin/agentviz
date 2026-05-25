@@ -475,7 +475,7 @@ src/
     exportComparison.ts  # Pure formatter that turns a CostComparison into a paste-friendly markdown blob
     runDisplayName.ts    # Strips noise prefixes from session file names; formats ISO timestamps as YYYY-MM-DD HH:MM
     imageTokenEstimate.js # Per-model image token estimation for chat exports with attached images
-    pricing.js           # Claude, OpenAI/Copilot, and Anthropic model pricing table (May 2026 rates); cost estimation with per-model cache ratios
+    pricing.js           # Claude, OpenAI/Copilot, and Anthropic model pricing table (May 2025 rates); cost estimation with per-model cache ratios
     pricing.d.ts         # TypeScript declarations for pricing.js
     exportHtml.js        # Self-contained HTML export for single sessions and comparisons
     formatTime.d.ts      # TypeScript declarations for formatTime.js

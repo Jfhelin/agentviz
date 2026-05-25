@@ -123,6 +123,7 @@ Cost view, Cost Compare, and the cost tooltips read from `theme.cost.*`. The pal
 | `theme.cost.ctxToolResults` | tool_results |
 | `theme.cost.ctxCurrent` | current prompt |
 | `theme.cost.ctxOutput` | response |
+| `theme.cost.ctxImages` | images / attached media |
 
 **Call-kind chips** (when surfaced):
 
