@@ -1057,7 +1057,7 @@ function extractGeneratedTitle(root: { prompts: RawPrompt[] }): string {
 function summarizeResponse(response: unknown): string {
   if (response == null) return "";
   if (typeof response === "string") {
-    return response.length > 800 ? response.slice(0, 800) + "…" : response;
+    return response.length > 4000 ? response.slice(0, 4000) + "…" : response;
   }
   if (typeof response === "object") {
     const obj = response as Record<string, unknown>;
@@ -1067,7 +1067,7 @@ function summarizeResponse(response: unknown): string {
         .filter((m) => typeof m === "string")
         .join("\n")
         .trim();
-      if (joined) return joined.length > 800 ? joined.slice(0, 800) + "…" : joined;
+      if (joined) return joined.length > 4000 ? joined.slice(0, 4000) + "…" : joined;
       // Empty message array (or array of empty strings) means the model produced
       // no text content this turn (typically because it spent its output budget
       // on a tool call). Don't surface the raw envelope JSON.
@@ -1075,7 +1075,7 @@ function summarizeResponse(response: unknown): string {
     }
     try {
       const json = JSON.stringify(obj);
-      return json.length > 800 ? json.slice(0, 800) + "…" : json;
+      return json.length > 4000 ? json.slice(0, 4000) + "…" : json;
     } catch {
       return "";
     }

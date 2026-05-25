@@ -211,6 +211,26 @@ export interface RunFingerprint {
   filesTouched: string[];   // sorted unique paths from any tool args
   filesEdited: string[];    // sorted unique paths from edit/write/create tools
   toolsInvoked: string[];   // sorted unique tool names actually called
+  /** Per-edit-tool-call artifact details: {path, contentHash, contentChars,
+   *  contentPreview}. Lets the comparison detect whether two runs wrote
+   *  identical bytes to the same file (closest thing to ground-truth quality
+   *  signal we can extract without filesystem snapshots). */
+  editArtifacts: EditArtifact[];
+}
+
+export interface EditArtifact {
+  /** File path the edit targeted. */
+  path: string;
+  /** Tool that did the edit (edit_file, create_file, str_replace, etc.). */
+  tool: string;
+  /** Stable hash of the content that was written. "00000000" when no
+   *  content could be extracted from the tool args (e.g. str-replace tools
+   *  that only ship a diff, not the full new file). */
+  contentHash: string;
+  /** Length in chars of the extracted content. */
+  contentChars: number;
+  /** First N chars of the content for human/LLM inspection. */
+  contentPreview: string;
 }
 
 export interface DriftRow {
@@ -798,6 +818,51 @@ function extractFilePath(rawArgs: string | undefined, argsSummary: string | unde
   return null;
 }
 
+/** Extract the actual written content from an edit-tool call's args. For
+ *  full-file writes (`create_file`, `write_file`) the content is in keys
+ *  like `code`, `content`, `text`. For replacement tools (`str_replace`,
+ *  `insert_edit`) it's in `newString` / `new_string`. Returns null when
+ *  no content key is found (e.g. the tool only shipped a diff). */
+function extractEditContent(rawArgs: string | undefined): string | null {
+  if (!rawArgs) return null;
+  try {
+    const obj = JSON.parse(rawArgs);
+    if (!obj || typeof obj !== "object") return null;
+    const keys = [
+      "code", "content", "text", "fileContent", "file_content",
+      "newString", "new_string", "newText", "new_text",
+      "patch", "diff",
+    ];
+    for (const k of keys) {
+      const v = (obj as Record<string, unknown>)[k];
+      if (typeof v === "string" && v.length > 0) return v;
+    }
+  } catch { /* not JSON */ }
+  return null;
+}
+
+function buildEditArtifact(name: string, path: string, rawArgs: string | undefined): EditArtifact {
+  const content = extractEditContent(rawArgs);
+  const previewMax = 400;
+  if (content == null) {
+    return {
+      path,
+      tool: name,
+      contentHash: "00000000",
+      contentChars: 0,
+      contentPreview: "",
+    };
+  }
+  const normalized = normalizeForHash(content);
+  return {
+    path,
+    tool: name,
+    contentHash: hashStr(normalized),
+    contentChars: content.length,
+    contentPreview: content.length > previewMax ? content.slice(0, previewMax) + "…" : content,
+  };
+}
+
 /** Stable, dependency-free 32-bit FNV-1a string hash. Returns 8-char hex.
  * Sufficient to flag identity vs divergence; not for any security purpose. */
 function hashStr(s: string): string {
@@ -820,7 +885,7 @@ function buildFingerprint(ca: CostAnalysisLike | null | undefined, summary: RunS
     firstUserPrompt: "", firstUserPromptHash: "00000000",
     systemPromptText: "", systemPromptChars: 0, systemPromptHash: "00000000",
     systemPromptHashTrusted: false,
-    filesTouched: [], filesEdited: [], toolsInvoked: [],
+    filesTouched: [], filesEdited: [], toolsInvoked: [], editArtifacts: [],
   };
   if (!ca || !Array.isArray(ca.prompts) || ca.prompts.length === 0) return empty;
 
@@ -875,6 +940,7 @@ function buildFingerprint(ca: CostAnalysisLike | null | undefined, summary: RunS
   const filesTouched = new Set<string>();
   const filesEdited = new Set<string>();
   const toolsInvoked = new Set<string>();
+  const editArtifacts: EditArtifact[] = [];
   for (const p of ca.prompts) {
     for (const ev of p.events || []) {
       if (ev.kind !== "tool") continue;
@@ -883,7 +949,10 @@ function buildFingerprint(ca: CostAnalysisLike | null | undefined, summary: RunS
       const path = extractFilePath(ev.rawArgs, ev.argsSummary);
       if (path) {
         filesTouched.add(path);
-        if (isEditTool(name)) filesEdited.add(path);
+        if (isEditTool(name)) {
+          filesEdited.add(path);
+          editArtifacts.push(buildEditArtifact(name, path, ev.rawArgs));
+        }
       }
     }
   }
@@ -909,6 +978,7 @@ function buildFingerprint(ca: CostAnalysisLike | null | undefined, summary: RunS
     filesTouched: Array.from(filesTouched).sort(),
     filesEdited: Array.from(filesEdited).sort(),
     toolsInvoked: Array.from(toolsInvoked).sort(),
+    editArtifacts,
   };
 }
 

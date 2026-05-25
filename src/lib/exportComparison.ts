@@ -43,6 +43,138 @@ function fmtSignedTok(n: number): string {
   return (n > 0 ? "+" : "") + Math.round(n).toLocaleString();
 }
 
+function fmtSet(items: string[]): string {
+  if (items.length === 0) return "(none)";
+  // Cap at 6 items for table readability
+  if (items.length <= 6) return "{" + items.join(", ") + "}";
+  return "{" + items.slice(0, 6).join(", ") + ", …+" + (items.length - 6) + "}";
+}
+
+function intersect(a: string[], b: string[]): string[] {
+  const sb = new Set(b);
+  return a.filter((x) => sb.has(x));
+}
+
+interface FinalResponseSignals {
+  chars: number;
+  lines: number;
+  numbers: string[];   // distinct numeric tokens (deduped, preserved as strings)
+  paths: string[];     // distinct file-path-looking tokens
+  tables: number;      // count of markdown table blocks
+  bullets: number;     // count of bullet/list lines
+  codeBlocks: number;  // count of ``` fences (full blocks)
+  headings: number;    // count of markdown # heading lines
+}
+
+function extractFinalResponseSignals(text: string | null | undefined): FinalResponseSignals {
+  const s = text || "";
+  const lines = s.split("\n");
+  // Numbers: integers and decimals, ignoring trivial 0/1 if they're noise.
+  // Keep all numbers; let the analyst decide which matter.
+  const numMatches = s.match(/-?\b\d+(?:\.\d+)?\b/g) || [];
+  const numbers = Array.from(new Set(numMatches));
+  // File paths: a slash-containing token with at least one path segment.
+  // Matches absolute paths (/foo/bar), relative (foo/bar.ext), and
+  // backtick-wrapped paths. Strips surrounding backticks/quotes.
+  const pathMatches = s.match(/(?:`[^`\s]+`|\b[A-Za-z0-9_.\-]+\/[A-Za-z0-9_./\-]+|\/[A-Za-z0-9_./\-]+)/g) || [];
+  const paths = Array.from(new Set(
+    pathMatches
+      .map((p) => p.replace(/^[`'"]|[`'".,;:)]$/g, "").trim())
+      .filter((p) => p.includes("/") && p.length >= 3 && p.length <= 200)
+  )).sort();
+  // Format counts
+  const tableLines = lines.filter((l) => /^\s*\|.*\|\s*$/.test(l)).length;
+  // A markdown table requires header + separator + at least one body row,
+  // so count blocks by collapsing consecutive table lines. Simpler proxy:
+  // ceil(tableLines / 3) capped sensibly.
+  const tables = tableLines >= 2 ? Math.max(1, Math.floor(tableLines / 3)) : 0;
+  const bullets = lines.filter((l) => /^\s*[-*+]\s+\S/.test(l)).length;
+  const codeFences = (s.match(/```/g) || []).length;
+  const codeBlocks = Math.floor(codeFences / 2);
+  const headings = lines.filter((l) => /^#{1,6}\s+\S/.test(l)).length;
+  return {
+    chars: s.length,
+    lines: lines.length,
+    numbers,
+    paths,
+    tables,
+    bullets,
+    codeBlocks,
+    headings,
+  };
+}
+
+interface ArtifactDiffRow {
+  path: string;
+  hashA: string;
+  hashB: string;
+  /** "identical" | "differ" | "A-only" | "B-only" | "unknown" (no content extractable) */
+  status: string;
+}
+
+interface ArtifactDiff {
+  rows: ArtifactDiffRow[];
+  allIdentical: boolean;
+  extractable: number;
+  total: number;
+}
+
+function compareEditArtifacts(
+  artA: { path: string; contentHash: string }[],
+  artB: { path: string; contentHash: string }[],
+): ArtifactDiff {
+  // If a file is edited multiple times in one run, take the LAST edit's
+  // hash (that's the final byte state).
+  const mapA = new Map<string, string>();
+  const mapB = new Map<string, string>();
+  for (const a of artA) mapA.set(a.path, a.contentHash);
+  for (const b of artB) mapB.set(b.path, b.contentHash);
+  const allPaths = Array.from(new Set([...mapA.keys(), ...mapB.keys()])).sort();
+  const rows: ArtifactDiffRow[] = [];
+  let allIdentical = allPaths.length > 0;
+  let extractable = 0;
+  for (const path of allPaths) {
+    const hashA = mapA.get(path) || "(absent)";
+    const hashB = mapB.get(path) || "(absent)";
+    let status = "unknown";
+    if (hashA === "(absent)") {
+      status = "B-only";
+      allIdentical = false;
+    } else if (hashB === "(absent)") {
+      status = "A-only";
+      allIdentical = false;
+    } else if (hashA === "00000000" || hashB === "00000000") {
+      status = "unknown (content not in args)";
+      allIdentical = false;
+    } else if (hashA === hashB) {
+      status = "identical";
+      extractable += 1;
+    } else {
+      status = "differ";
+      extractable += 1;
+      allIdentical = false;
+    }
+  }
+  // Second pass to populate rows in the same order (we needed the totals first)
+  for (const path of allPaths) {
+    const hashA = mapA.get(path) || "(absent)";
+    const hashB = mapB.get(path) || "(absent)";
+    let status = "unknown";
+    if (hashA === "(absent)") status = "B-only";
+    else if (hashB === "(absent)") status = "A-only";
+    else if (hashA === "00000000" || hashB === "00000000") status = "unknown (content not in args)";
+    else if (hashA === hashB) status = "identical";
+    else status = "differ";
+    rows.push({ path, hashA, hashB, status });
+  }
+  return {
+    rows,
+    allIdentical,
+    extractable,
+    total: allPaths.length,
+  };
+}
+
 function trimAnswer(s: string, max = 200): string {
   if (!s) return "(empty)";
   const flat = s.replace(/\s+/g, " ").trim();
@@ -403,17 +535,76 @@ export function formatComparisonAsMarkdown(
     lines.push("");
   }
 
-  // Final answer hashes + previews
+  // Final-response signals (Layer 2): deterministic semantic + format
+  // extraction from both finals so the analyst can judge substantive
+  // agreement without re-parsing strings.
+  const signalsA = extractFinalResponseSignals(cmp.finalAnswerA);
+  const signalsB = extractFinalResponseSignals(cmp.finalAnswerB);
+  lines.push("## Final-response signals");
+  lines.push("Deterministic. Extracted from each run's full final response so");
+  lines.push("the analyst can judge substantive agreement, not string equality.");
+  lines.push("");
+  lines.push("| Signal | A | B | Overlap / Notes |");
+  lines.push("|---|---|---|---|");
+  lines.push(`| Char length | ${signalsA.chars} | ${signalsB.chars} | Δ ${signalsB.chars - signalsA.chars} |`);
+  lines.push(`| Line count | ${signalsA.lines} | ${signalsB.lines} | Δ ${signalsB.lines - signalsA.lines} |`);
+  lines.push(`| Numbers mentioned | ${fmtSet(signalsA.numbers)} | ${fmtSet(signalsB.numbers)} | overlap: ${fmtSet(intersect(signalsA.numbers, signalsB.numbers))} |`);
+  lines.push(`| File paths mentioned | ${fmtSet(signalsA.paths)} | ${fmtSet(signalsB.paths)} | overlap: ${fmtSet(intersect(signalsA.paths, signalsB.paths))} |`);
+  lines.push(`| Markdown tables | ${signalsA.tables} | ${signalsB.tables} | |`);
+  lines.push(`| Bullet/list items | ${signalsA.bullets} | ${signalsB.bullets} | |`);
+  lines.push(`| Code blocks | ${signalsA.codeBlocks} | ${signalsB.codeBlocks} | |`);
+  lines.push(`| Headings | ${signalsA.headings} | ${signalsB.headings} | |`);
+  const numOverlap = intersect(signalsA.numbers, signalsB.numbers);
+  const pathOverlap = intersect(signalsA.paths, signalsB.paths);
+  const numAgree = signalsA.numbers.length > 0 && signalsB.numbers.length > 0 &&
+    numOverlap.length === signalsA.numbers.length && numOverlap.length === signalsB.numbers.length;
+  const pathAgree = signalsA.paths.length > 0 && signalsB.paths.length > 0 &&
+    pathOverlap.length === signalsA.paths.length && pathOverlap.length === signalsB.paths.length;
+  lines.push("");
+  lines.push(`- **substantive_numbers_agree:** ${numAgree ? "true" : "false"} (use as a strong hint for quality equivalence on quantitative answers)`);
+  lines.push(`- **referenced_paths_agree:** ${pathAgree ? "true" : "false"} (same artifacts named in both finals)`);
+  lines.push("");
+
+  // Edit artifacts diff (Layer 3): byte-level identity of file-write
+  // contents extracted from edit-tool args. Closest-to-ground-truth
+  // quality signal available without filesystem snapshots.
+  lines.push("## Edit artifacts diff");
+  lines.push("Per file written by edit/create/replace tools. Same content hash");
+  lines.push("on both sides means the runs wrote byte-identical content (after");
+  lines.push("whitespace normalization). Different hashes mean the artifacts");
+  lines.push("differ; absent on one side means only one run wrote that file.");
+  lines.push("Hash `00000000` means the tool args didn't carry the new content");
+  lines.push("(e.g. a diff-only str-replace) so identity can't be judged from");
+  lines.push("the export alone.");
+  lines.push("");
+  const artifactDiff = compareEditArtifacts(cmp.fingerprintA.editArtifacts, cmp.fingerprintB.editArtifacts);
+  if (artifactDiff.rows.length === 0) {
+    lines.push("(no edit-tool calls recorded on either side)");
+  } else {
+    lines.push("| Path | A hash | B hash | Status |");
+    lines.push("|---|---|---|---|");
+    for (const r of artifactDiff.rows) {
+      lines.push(`| \`${r.path}\` | ${r.hashA} | ${r.hashB} | ${r.status} |`);
+    }
+    lines.push("");
+    lines.push(`- **artifacts_identical:** ${artifactDiff.allIdentical ? "true" : "false"} (every edit on both sides has matching content hashes)`);
+    lines.push(`- **artifacts_with_extractable_content:** ${artifactDiff.extractable} / ${artifactDiff.total}`);
+  }
+  lines.push("");
+
+  // Final answer hashes + previews -- Layer 1: ship the FULL final response
+  // (parser caps at 4000 chars) instead of a 200-char preview, so the
+  // analyst LLM can judge quality from real content.
   lines.push("## Final responses");
   lines.push("");
   lines.push(`### A · ${nameA}`);
   lines.push("```");
-  lines.push(trimAnswer(cmp.finalAnswerA));
+  lines.push(cmp.finalAnswerA || "(empty)");
   lines.push("```");
   lines.push("");
   lines.push(`### B · ${nameB}`);
   lines.push("```");
-  lines.push(trimAnswer(cmp.finalAnswerB));
+  lines.push(cmp.finalAnswerB || "(empty)");
   lines.push("```");
   lines.push("");
 
@@ -649,18 +840,25 @@ function buildReportInstructions(planMode: boolean): string {
   lines.push("  `same_final_answer: false` — that is a string check, not a");
   lines.push("  quality verdict.");
   lines.push("");
-  lines.push("When picking the verdict, extract these lightweight signals from");
-  lines.push("the final-response previews before deciding:");
+  lines.push("When picking the verdict, use these deterministic blocks from");
+  lines.push("the facts:");
   lines.push("");
-  lines.push("1. **Substantive agreement** — do both finals report the same");
-  lines.push("   numbers, counts, file paths, named artifacts, or named");
-  lines.push("   entities? If yes, lean toward ≈ or ⚠ (usability profile),");
-  lines.push("   not ❓.");
-  lines.push("2. **Format/shape divergence** — count tables, bullets, code");
-  lines.push("   blocks, file-path mentions in each preview. Describe *how*");
-  lines.push("   the formats differ.");
-  lines.push("3. **Coverage** — does each final mention every artifact the run");
-  lines.push("   actually produced (cross-check against `same_files_edited`)?");
+  lines.push("1. **Final-response signals block** (REQUIRED — leads the verdict).");
+  lines.push("   Quote `substantive_numbers_agree` and `referenced_paths_agree`.");
+  lines.push("   If both are true, default to ≈ or ⚠ usability-profile — NOT");
+  lines.push("   ❓ Cannot judge. The runs agree on the substantive content;");
+  lines.push("   any wording difference is format, not correctness.");
+  lines.push("2. **Edit artifacts diff block** (when present).");
+  lines.push("   `artifacts_identical: true` is the strongest non-LLM quality");
+  lines.push("   equivalence signal we can produce. Quote it. If true, the");
+  lines.push("   verdict should be ≈ or ⚠ usability-profile.");
+  lines.push("   `artifacts_identical: false` with `status: differ` rows means");
+  lines.push("   the runs wrote different bytes — flag which files differ.");
+  lines.push("3. **Final responses block** — the full text of both finals is");
+  lines.push("   shipped (up to 4000 chars each). Read it. Quote specific");
+  lines.push("   fragments to support each verdict.");
+  lines.push("4. **Format counts** (tables, bullets, code blocks, headings) —");
+  lines.push("   use to describe usability profile divergence concretely.");
   lines.push("");
   lines.push("Hard rules:");
   lines.push("- Do not infer quality from cost.");
@@ -676,9 +874,28 @@ function buildReportInstructions(planMode: boolean): string {
   lines.push("### Artifact outcome");
   lines.push("This section is required.");
   lines.push("Compare the actual task outputs, not only the final chat text.");
-  lines.push("Use the Behavior diff `same_files_edited` and `same_files_referenced`");
-  lines.push("flags. When those agree, say \"both runs touched the same files\".");
-  lines.push("When they don't, list which files were only in one run.");
+  lines.push("");
+  lines.push("**Lead with the Edit artifacts diff block** (when present). It");
+  lines.push("ships per-file content hashes for every edit-tool call on both");
+  lines.push("sides. The flags to quote verbatim:");
+  lines.push("");
+  lines.push("- `artifacts_identical: true` — every file written has matching");
+  lines.push("  content hashes on both sides. This is the strongest available");
+  lines.push("  ground-truth signal: the runs produced byte-identical");
+  lines.push("  artifacts. Say so plainly and stop hedging on artifact");
+  lines.push("  equivalence.");
+  lines.push("- `artifacts_identical: false` — at least one file differs, is");
+  lines.push("  one-sided, or has unextractable content. List the divergent");
+  lines.push("  files with their status (differ / A-only / B-only / unknown).");
+  lines.push("- `artifacts_with_extractable_content: N / M` — when N < M,");
+  lines.push("  some edits used diff-style tools (str_replace) where the");
+  lines.push("  export doesn't carry the full new file content; flag those");
+  lines.push("  as un-judgeable here.");
+  lines.push("");
+  lines.push("Then use the Behavior diff `same_files_edited` and");
+  lines.push("`same_files_referenced` flags. When those agree, say \"both runs");
+  lines.push("touched the same files\". When they don't, list which files were");
+  lines.push("only in one run.");
   lines.push("");
   lines.push("**Path-anomaly check.** If files-referenced differ, inspect the");
   lines.push("path strings before treating the difference as real:");
@@ -693,11 +910,12 @@ function buildReportInstructions(planMode: boolean): string {
   lines.push("  wrong directory.");
   lines.push("");
   lines.push("Add one plain-English implication, e.g.:");
-  lines.push("> This suggests both runs probably performed the same core task,");
-  lines.push("> but the comparison cannot prove the file contents were identical.");
+  lines.push("> Both runs wrote byte-identical artifacts to the same files;");
+  lines.push("> the only material difference is what the agent said in chat.");
   lines.push("");
-  lines.push("Then add this caveat verbatim if the comparison block does not");
-  lines.push("include a richer artifact diff:");
+  lines.push("If the Edit artifacts diff block had no rows (no edits");
+  lines.push("recorded), or every row was \"unknown (content not in args)\",");
+  lines.push("add this caveat verbatim:");
   lines.push("");
   lines.push("> Artifact equivalence cannot be fully verified from this comparison.");
   lines.push("> Files-touched lists are derived from tool arguments, not filesystem");

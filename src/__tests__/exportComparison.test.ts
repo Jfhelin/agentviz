@@ -52,7 +52,82 @@ describe("formatComparisonAsMarkdown", () => {
     expect(md).toContain("## Headline cost KPIs");
     expect(md).toContain("## Behavioral KPIs");
     expect(md).toContain("## Per-bucket cost delta");
+    expect(md).toContain("## Final-response signals");
+    expect(md).toContain("## Edit artifacts diff");
     expect(md).toContain("## Final responses");
+  });
+
+  it("ships the FULL final response (not a 200-char preview) in the facts block", () => {
+    // Build a run whose final response is well over 200 chars
+    const longResponse = "Done. ".repeat(80) + "End.";
+    expect(longResponse.length).toBeGreaterThan(450);
+    const runA = mkRun({});
+    runA.prompts[0].events[0].responsePreview = longResponse;
+    const runB = mkRun({});
+    runB.prompts[0].events[0].responsePreview = longResponse;
+    const cmp = compareRunsCost(runA, runB)!;
+    const md = formatComparisonAsMarkdown(cmp, { nameA: "a", nameB: "b" });
+    expect(md).toContain(longResponse);
+  });
+
+  it("extracts deterministic final-response signals (numbers, paths, format counts)", () => {
+    const runA = mkRun({});
+    runA.prompts[0].events[0].responsePreview =
+      "Done. **Processed:** 9 receipts (1 skipped).\nOutput: `/tmp/expense-summary.md`\nValidation: `/tmp/expense-summary.validation.json`";
+    const runB = mkRun({});
+    runB.prompts[0].events[0].responsePreview =
+      "Done. 9 receipts processed (1 skipped — wrong trip).\n| Original | New |\n|---|---|\n| a.jpg | b.jpg |\nOutput: `/tmp/expense-summary.md`";
+    const cmp = compareRunsCost(runA, runB)!;
+    const md = formatComparisonAsMarkdown(cmp, { nameA: "a", nameB: "b" });
+    expect(md).toContain("Numbers mentioned");
+    // Both finals mention "9" and "1" so overlap should include both
+    expect(md).toMatch(/overlap:.*9.*1|overlap:.*1.*9/);
+    expect(md).toContain("File paths mentioned");
+    // expense-summary.md is in both
+    expect(md).toContain("expense-summary.md");
+    // B has a markdown table, A doesn't
+    expect(md).toContain("Markdown tables");
+    expect(md).toContain("substantive_numbers_agree");
+    expect(md).toContain("referenced_paths_agree");
+  });
+
+  it("reports identical content hashes for byte-identical edits and 'differ' otherwise", () => {
+    const sameContent = "console.log('hello');\nexport const x = 1;\n";
+    const otherContent = "console.log('different');\n";
+    const runA = mkRun({ toolCalls: [] });
+    runA.prompts[0].events.push({
+      name: "edit_file", model: "", cost: 0, output: 0, cached: 0, fresh: 0, cacheWrite: 0,
+      promptTokens: 0,
+      rawArgs: JSON.stringify({ filePath: "/work/a.ts", code: sameContent }),
+      argsSummary: "edit_file /work/a.ts", kind: "tool",
+    });
+    runA.prompts[0].events.push({
+      name: "edit_file", model: "", cost: 0, output: 0, cached: 0, fresh: 0, cacheWrite: 0,
+      promptTokens: 0,
+      rawArgs: JSON.stringify({ filePath: "/work/b.ts", code: sameContent }),
+      argsSummary: "edit_file /work/b.ts", kind: "tool",
+    });
+    const runB = mkRun({ toolCalls: [] });
+    runB.prompts[0].events.push({
+      name: "edit_file", model: "", cost: 0, output: 0, cached: 0, fresh: 0, cacheWrite: 0,
+      promptTokens: 0,
+      rawArgs: JSON.stringify({ filePath: "/work/a.ts", code: sameContent }),
+      argsSummary: "edit_file /work/a.ts", kind: "tool",
+    });
+    runB.prompts[0].events.push({
+      name: "edit_file", model: "", cost: 0, output: 0, cached: 0, fresh: 0, cacheWrite: 0,
+      promptTokens: 0,
+      rawArgs: JSON.stringify({ filePath: "/work/b.ts", code: otherContent }),
+      argsSummary: "edit_file /work/b.ts", kind: "tool",
+    });
+    const cmp = compareRunsCost(runA, runB)!;
+    const md = formatComparisonAsMarkdown(cmp, { nameA: "a", nameB: "b" });
+    expect(md).toContain("/work/a.ts");
+    expect(md).toContain("/work/b.ts");
+    expect(md).toContain("identical");
+    expect(md).toContain("differ");
+    expect(md).toContain("artifacts_identical:** false");
+    expect(md).toContain("artifacts_with_extractable_content");
   });
 
   it("includes the technique label when provided", () => {
@@ -78,14 +153,14 @@ describe("formatComparisonAsMarkdown", () => {
     expect(md).toContain("Total output tokens");
   });
 
-  it("trims long final answers to a preview", () => {
+  it("ships long final answers in full (no aggressive trim) so the analyst can judge quality", () => {
     const longAnswer = "x".repeat(500);
     const runWithLong: any = mkRun({});
     runWithLong.prompts[0].events[0].responsePreview = longAnswer;
     const cmp = compareRunsCost(runWithLong, mkRun({}))!;
     const md = formatComparisonAsMarkdown(cmp, { nameA: "a", nameB: "b" });
-    // Should be trimmed (200 chars + ellipsis), not the full 500.
-    expect(md).toContain("…");
+    // Full 500-char content must be present (Layer 1: no trim in facts block)
+    expect(md).toContain(longAnswer);
   });
 });
 
@@ -229,6 +304,19 @@ describe("buildComparisonLlmPrompt", () => {
     expect(out).toContain("Different usefulness profile");
     // New: must judge meaning, not string equality
     expect(out).toMatch(/Judge[\s\S]*?meaning[\s\S]*?not string equality/i);
+  });
+
+  it("instructs the analyst to lead Output quality and Artifact outcome with the deterministic blocks", () => {
+    const cmp = compareRunsCost(mkRun({}), mkRun({}))!;
+    const out = buildComparisonLlmPrompt(cmp, { nameA: "a", nameB: "b" });
+    // Output quality must reference Final-response signals + Edit artifacts diff
+    expect(out).toContain("Final-response signals block");
+    expect(out).toContain("substantive_numbers_agree");
+    expect(out).toContain("referenced_paths_agree");
+    expect(out).toContain("Edit artifacts diff block");
+    expect(out).toContain("artifacts_identical");
+    // Artifact outcome must lead with the diff block
+    expect(out).toMatch(/Lead with the Edit artifacts diff block/);
   });
 
   it("includes the What changed scannable table and Core story hello-world framing", () => {
