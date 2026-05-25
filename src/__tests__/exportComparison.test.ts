@@ -160,6 +160,54 @@ describe("formatComparisonAsMarkdown", () => {
     expect(md).toContain("change-request");
   });
 
+  it("surfaces edit-count mismatch as a coverage/thoroughness signal", () => {
+    // Simulate the real test case: same file edited 3 times in A vs 2 times in B.
+    // (Test scaled down — the principle is identical for 12 vs 8.)
+    const oldS1 = "// TODO 1"; const newS1 = "// Done 1";
+    const oldS2 = "// TODO 2"; const newS2 = "// Done 2";
+    const oldS3 = "// TODO 3"; const newS3 = "// Done 3";
+    const runA = mkRun({ toolCalls: [] });
+    for (const [o, n] of [[oldS1, newS1], [oldS2, newS2], [oldS3, newS3]] as const) {
+      runA.prompts[0].events.push({
+        name: "replace_string_in_file", model: "", cost: 0, output: 0, cached: 0, fresh: 0, cacheWrite: 0,
+        promptTokens: 0,
+        rawArgs: JSON.stringify({ filePath: "/work/doc.md", oldString: o, newString: n }),
+        argsSummary: "replace_string_in_file /work/doc.md", kind: "tool",
+      });
+    }
+    const runB = mkRun({ toolCalls: [] });
+    for (const [o, n] of [[oldS1, newS1], [oldS2, newS2]] as const) {
+      runB.prompts[0].events.push({
+        name: "replace_string_in_file", model: "", cost: 0, output: 0, cached: 0, fresh: 0, cacheWrite: 0,
+        promptTokens: 0,
+        rawArgs: JSON.stringify({ filePath: "/work/doc.md", oldString: o, newString: n }),
+        argsSummary: "replace_string_in_file /work/doc.md", kind: "tool",
+      });
+    }
+    const cmp = compareRunsCost(runA, runB)!;
+    const md = formatComparisonAsMarkdown(cmp, { nameA: "a", nameB: "b" });
+    // Per-row counts visible
+    expect(md).toMatch(/\| 3 \| 2 \|/);
+    // Top-level totals visible
+    expect(md).toContain("total_edit_calls:** A=3, B=2");
+    // Mismatch list emitted with the coverage hint
+    expect(md).toContain("paths_with_edit_count_mismatch");
+    expect(md).toContain("/work/doc.md");
+    expect(md).toContain("coverage/thoroughness signal");
+  });
+
+  it("instructs the analyst to use depth-of-change for coverage-shaped tasks", () => {
+    const cmp = compareRunsCost(mkRun({}), mkRun({}))!;
+    const out = buildComparisonLlmPrompt(cmp, { nameA: "a", nameB: "b" });
+    expect(out).toContain("Depth-of-change signals");
+    expect(out).toContain("paths_with_edit_count_mismatch");
+    expect(out).toContain("coverage/thoroughness signal");
+    // The "12 vs 8" worked example must appear so the analyst recognizes the shape
+    expect(out).toContain("12 vs 8");
+    // And the explicit anti-rule for "one function" / "this bug"-shaped tasks
+    expect(out).toContain("churn, not coverage");
+  });
+
   it("treats different newString on the same partial-replace as 'differ'", () => {
     const oldS = "const VERSION = '1.0.0';";
     const runA = mkRun({ toolCalls: [] });

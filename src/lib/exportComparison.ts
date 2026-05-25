@@ -114,6 +114,15 @@ interface ArtifactDiffRow {
    *  Tells the analyst whether "identical" means end-state-bytes-match or
    *  same-change-request-text. */
   editKind: string;
+  /** Number of edit-tool calls that touched this path on A / B. Highlights
+   *  depth-of-change differences (e.g. "A made 12 edits here, B made 8"). */
+  editCountA: number;
+  editCountB: number;
+  /** Total bytes of new content written to this path on A / B (sum of
+   *  contentChars across all calls). Highlights bytes-of-change differences
+   *  even when the final-state hashes happen to match. */
+  bytesWrittenA: number;
+  bytesWrittenB: number;
 }
 
 interface ArtifactDiff {
@@ -126,31 +135,54 @@ interface ArtifactDiff {
   fullWriteCount: number;
   partialReplaceCount: number;
   patchCount: number;
+  /** Files where edit COUNT differs between A and B (e.g. "12 edits vs 8"). */
+  countMismatchPaths: string[];
 }
 
 function compareEditArtifacts(
-  artA: { path: string; contentHash: string; editKind?: string }[],
-  artB: { path: string; contentHash: string; editKind?: string }[],
+  artA: { path: string; contentHash: string; editKind?: string; contentChars?: number }[],
+  artB: { path: string; contentHash: string; editKind?: string; contentChars?: number }[],
 ): ArtifactDiff {
-  // If a file is edited multiple times in one run, take the LAST edit's
-  // hash (that's the final byte state for full-write; for partial-replace
-  // it's the last change-request — the analyst is told about this caveat
-  // via editKind).
-  const mapA = new Map<string, { hash: string; kind: string }>();
-  const mapB = new Map<string, { hash: string; kind: string }>();
-  for (const a of artA) mapA.set(a.path, { hash: a.contentHash, kind: a.editKind || "unknown" });
-  for (const b of artB) mapB.set(b.path, { hash: b.contentHash, kind: b.editKind || "unknown" });
-  const allPaths = Array.from(new Set([...mapA.keys(), ...mapB.keys()])).sort();
+  // Per-path aggregation: keep the LAST hash (final byte state for
+  // full-write; last change-request for partial-replace) but also track
+  // call count and total bytes written so the analyst can see depth-of-
+  // change differences even when the final hashes happen to match.
+  type AggEntry = { hash: string; kind: string; count: number; bytes: number };
+  const aggA = new Map<string, AggEntry>();
+  const aggB = new Map<string, AggEntry>();
+  const accumulate = (m: Map<string, AggEntry>, items: typeof artA): void => {
+    for (const it of items) {
+      const cur = m.get(it.path);
+      if (cur) {
+        cur.hash = it.contentHash;
+        cur.kind = it.editKind || cur.kind || "unknown";
+        cur.count += 1;
+        cur.bytes += it.contentChars || 0;
+      } else {
+        m.set(it.path, {
+          hash: it.contentHash,
+          kind: it.editKind || "unknown",
+          count: 1,
+          bytes: it.contentChars || 0,
+        });
+      }
+    }
+  };
+  accumulate(aggA, artA);
+  accumulate(aggB, artB);
+
+  const allPaths = Array.from(new Set([...aggA.keys(), ...aggB.keys()])).sort();
   const rows: ArtifactDiffRow[] = [];
   let allIdentical = allPaths.length > 0;
   let extractable = 0;
   let fullWriteCount = 0;
   let partialReplaceCount = 0;
   let patchCount = 0;
+  const countMismatchPaths: string[] = [];
 
   for (const path of allPaths) {
-    const a = mapA.get(path);
-    const b = mapB.get(path);
+    const a = aggA.get(path);
+    const b = aggB.get(path);
     const hashA = a?.hash || "(absent)";
     const hashB = b?.hash || "(absent)";
     let status = "unknown";
@@ -171,14 +203,22 @@ function compareEditArtifacts(
       extractable += 1;
       allIdentical = false;
     }
-    // Combined edit-kind label: if both sides agree, use that; otherwise "mixed".
     const kinds = new Set<string>();
     if (a) kinds.add(a.kind);
     if (b) kinds.add(b.kind);
     let editKind = "unknown";
     if (kinds.size === 1) editKind = Array.from(kinds)[0];
     else if (kinds.size > 1) editKind = "mixed (" + Array.from(kinds).sort().join("/") + ")";
-    rows.push({ path, hashA, hashB, status, editKind });
+
+    const editCountA = a?.count || 0;
+    const editCountB = b?.count || 0;
+    const bytesWrittenA = a?.bytes || 0;
+    const bytesWrittenB = b?.bytes || 0;
+    if (editCountA > 0 && editCountB > 0 && editCountA !== editCountB) {
+      countMismatchPaths.push(path);
+    }
+
+    rows.push({ path, hashA, hashB, status, editKind, editCountA, editCountB, bytesWrittenA, bytesWrittenB });
 
     if (editKind.startsWith("full-write")) fullWriteCount += 1;
     else if (editKind.startsWith("partial-replace")) partialReplaceCount += 1;
@@ -192,6 +232,7 @@ function compareEditArtifacts(
     fullWriteCount,
     partialReplaceCount,
     patchCount,
+    countMismatchPaths,
   };
 }
 
@@ -610,15 +651,33 @@ export function formatComparisonAsMarkdown(
   if (artifactDiff.rows.length === 0) {
     lines.push("(no edit-tool calls recorded on either side)");
   } else {
-    lines.push("| Path | Kind | A hash | B hash | Status |");
-    lines.push("|---|---|---|---|---|");
+    lines.push("| Path | Kind | A edits | B edits | A bytes | B bytes | A hash | B hash | Status |");
+    lines.push("|---|---|---:|---:|---:|---:|---|---|---|");
     for (const r of artifactDiff.rows) {
-      lines.push(`| \`${r.path}\` | ${r.editKind} | ${r.hashA} | ${r.hashB} | ${r.status} |`);
+      const fmtCount = (n: number): string => n === 0 ? "—" : String(n);
+      const fmtBytes = (n: number): string => n === 0 ? "—" : String(n);
+      lines.push(`| \`${r.path}\` | ${r.editKind} | ${fmtCount(r.editCountA)} | ${fmtCount(r.editCountB)} | ${fmtBytes(r.bytesWrittenA)} | ${fmtBytes(r.bytesWrittenB)} | ${r.hashA} | ${r.hashB} | ${r.status} |`);
     }
     lines.push("");
     lines.push(`- **artifacts_identical:** ${artifactDiff.allIdentical ? "true" : "false"} (every edit on both sides has matching content hashes)`);
     lines.push(`- **artifacts_with_extractable_content:** ${artifactDiff.extractable} / ${artifactDiff.total}`);
     lines.push(`- **edit_kind_counts:** full-write ${artifactDiff.fullWriteCount}, partial-replace ${artifactDiff.partialReplaceCount}, patch ${artifactDiff.patchCount}`);
+
+    // Depth-of-change signal — distinct from end-state equality.
+    // Catches the case "Run A made 12 edits to README.md, Run B made 8"
+    // which can indicate one run did a more thorough job even when the
+    // final hashes happen to match.
+    const totalEditsA = artifactDiff.rows.reduce((s, r) => s + r.editCountA, 0);
+    const totalEditsB = artifactDiff.rows.reduce((s, r) => s + r.editCountB, 0);
+    const totalBytesA = artifactDiff.rows.reduce((s, r) => s + r.bytesWrittenA, 0);
+    const totalBytesB = artifactDiff.rows.reduce((s, r) => s + r.bytesWrittenB, 0);
+    lines.push(`- **total_edit_calls:** A=${totalEditsA}, B=${totalEditsB}` + (totalEditsA !== totalEditsB ? ` (Δ ${totalEditsB - totalEditsA >= 0 ? "+" : ""}${totalEditsB - totalEditsA})` : ""));
+    lines.push(`- **total_bytes_written:** A=${totalBytesA}, B=${totalBytesB}` + (totalBytesA !== totalBytesB ? ` (Δ ${totalBytesB - totalBytesA >= 0 ? "+" : ""}${totalBytesB - totalBytesA})` : ""));
+    if (artifactDiff.countMismatchPaths.length > 0) {
+      const sample = artifactDiff.countMismatchPaths.slice(0, 5).map((p) => "`" + p + "`").join(", ");
+      const more = artifactDiff.countMismatchPaths.length > 5 ? ` (and ${artifactDiff.countMismatchPaths.length - 5} more)` : "";
+      lines.push(`- **paths_with_edit_count_mismatch:** ${artifactDiff.countMismatchPaths.length} (${sample}${more}) — one run made more edits to the same file. Often a coverage/thoroughness signal: more edits to the same documentation file usually means more locations updated.`);
+    }
     if (artifactDiff.partialReplaceCount > 0 || artifactDiff.patchCount > 0) {
       lines.push("- ⚠ Some rows are partial-replace or patch — \"identical\" there means same change-request, not guaranteed-identical end-state.");
     }
@@ -887,10 +946,23 @@ function buildReportInstructions(planMode: boolean): string {
   lines.push("   verdict should be ≈ or ⚠ usability-profile.");
   lines.push("   `artifacts_identical: false` with `status: differ` rows means");
   lines.push("   the runs wrote different bytes — flag which files differ.");
-  lines.push("3. **Final responses block** — the full text of both finals is");
+  lines.push("3. **Depth-of-change signals** in the Edit artifacts diff:");
+  lines.push("   `total_edit_calls`, `total_bytes_written`, and especially");
+  lines.push("   `paths_with_edit_count_mismatch`. If one run made significantly");
+  lines.push("   more edits to the same file (e.g. 12 vs 8 partial-replace");
+  lines.push("   calls to one doc), that is a **coverage/thoroughness signal**:");
+  lines.push("   the higher-count run likely updated more locations. When the");
+  lines.push("   user's goal was \"add documentation\", \"update all callers\",");
+  lines.push("   \"fix every occurrence\" or similar coverage-shaped tasks, lean");
+  lines.push("   toward ✅ for the run with more edits and call out the gap");
+  lines.push("   explicitly (e.g. \"A made 12 edits across foo.md; B made 8 —");
+  lines.push("   B likely missed 4 locations\"). Do NOT use this rule when the");
+  lines.push("   task is shaped like \"add ONE function\" or \"fix THIS bug\" —");
+  lines.push("   there, more edits to the same file is churn, not coverage.");
+  lines.push("4. **Final responses block** — the full text of both finals is");
   lines.push("   shipped (up to 4000 chars each). Read it. Quote specific");
   lines.push("   fragments to support each verdict.");
-  lines.push("4. **Format counts** (tables, bullets, code blocks, headings) —");
+  lines.push("5. **Format counts** (tables, bullets, code blocks, headings) —");
   lines.push("   use to describe usability profile divergence concretely.");
   lines.push("");
   lines.push("Hard rules:");
