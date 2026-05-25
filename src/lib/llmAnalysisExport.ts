@@ -426,6 +426,10 @@ export interface BuildOptions {
   /** Surfaces the developer cannot modify (e.g. ["model_selector", "ide_tools"]).
    * Recommendations on these surfaces are demoted to external/fixed overhead. */
   outOfScopeSurfaces?: string[];
+  /** Default `developer_action_report` produces a lighter ~600-word
+   * developer-focused report. `detailed_audit` keeps the heavier
+   * 12-section schema-shaped report for in-depth audits. */
+  reportMode?: "developer_action_report" | "detailed_audit";
 }
 
 export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOptions = {}): string {
@@ -641,22 +645,55 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
   lines.push("");
   lines.push("## Output format");
   lines.push("");
-  lines.push("Start your reply with `# <session title>` as the very first line (the title IS the H1 -- do not write 'Session title' as a separate label). Then use `##` subheadings for the sections below. Keep the whole report under 900 words.");
-  lines.push("");
-  lines.push("Sections, in this order:");
-  lines.push("");
-  lines.push("1. **TL;DR** (~5 lines, write LAST but place FIRST). Use `developer_action_summary.primary_message` plus the top 3 of `developer_action_summary.top_developer_levers` as bullets. Include $ or % where the lever evidence has it.");
-  lines.push("2. **Developer takeaway** -- 2-3 sentences in plain developer language. Explain the lesson, not the metrics. Cite `workflow_classification.type` and `workflow_classification.confidence`. Example tone: \"This was not a normal chat-answer session. It behaved like a small file-processing pipeline. The biggest improvement is not a longer prompt; it is a narrower chat mode plus deterministic scripting for repeatable steps.\"");
-  lines.push("3. **Main efficiency levers** -- Iterate `developer_levers_detected` entries where `available == true` and `priority != \"low\"`, ordered by `developer_action_summary.top_developer_levers`. For each: bold lever name / one-line `recommended_action` / 1-2 evidence bullets / priority. Stop at 5 levers.");
-  lines.push("4. **What made this session expensive** -- Group cost by developer-facing cause using only the `developer_cost_categories` keys that are present (setup_overhead, workflow_execution, decision_overhead, context_accumulation, model_choice). Each bullet: one-line summary + 1-2 supporting numbers in parentheses + the relevant developer lever.");
-  lines.push("5. **What was probably unavoidable** -- 1-2 sentences. Separate avoidable waste from real task complexity. Only claim something is unavoidable if facts support it (mixed file types, first-run exploration, image inspection, irreversible operations). If you cannot tell, say so.");
-  lines.push("6. **Recommended changes** -- Iterate `recommended_changes`. Group by `surface` (chat mode -> Configure Tools -> skills -> repo script -> repo instructions -> inline prompt -> model). For each: bold `title` + 1-line `why` + fenced ```text block with `snippet` + impact + confidence. Skip items where `confidence == \"low\"` unless they are the only signal for that surface.");
-  lines.push("7. **Automation boundary** -- Use `automation_boundary_recommendation`. Two short lists: what should become deterministic code/script (`should_script`), what should remain model-driven (`should_remain_model_driven`). Mention `should_require_human_confirmation` if present. Skip this section entirely if `automation_boundary_recommendation == null` or its `confidence == \"low\"`.");
-  lines.push("8. **Tool and skill profile cleanup** -- Use `ide_tool_configuration_analysis` and `skills_profile_analysis`. List the families to disable (with `disable_by_family[*].family` headings) and the top 3-5 skills to remove first (from `skills_profile_analysis.recommended_action` / `largest_unused_skills`). Note the caveat that `skill_attachment_source` is not recorded.");
-  lines.push("9. **Model and Auto-mode guidance** -- Use `model_strategy_recommendation` and `raw_supporting_telemetry.auto_mode_data`. One paragraph. Cite the Auto-mode `verdict` and quote the cost from `recommended_estimate_to_quote`. **Do not claim a cheaper model is definitely sufficient** if `quality_and_validation.available == false` or any `raw_supporting_telemetry.model_fit_data.alt_model_projections[*].realistic_for_full_task == \"not_determinable_from_data\"`.");
-  lines.push("10. **Inline prompt guidance** -- Use `prompt_strategy_recommendation` and `developer_levers_detected.inline_prompt`. 1-3 sentences. If `inline_prompt.priority == \"low\"`, say the inline prompt should provide only session-specific scope, not full workflow instructions. Quote `prompt_strategy_recommendation.example_inline_prompt`.");
-  lines.push("11. **Data confidence and missing data** -- List `missing_data` entries. For each, quote `why_it_matters_for_developer_report` so the reader understands what the report cannot prove.");
-  lines.push("12. **Suggestions for improving future telemetry** -- Up to 5 bullets. For each item in `missing_data`, summarize `future_instrumentation` in one short sentence.");
+  const reportMode = opts.reportMode || "developer_action_report";
+  if (reportMode === "developer_action_report") {
+    lines.push("Mode: **developer_action_report** (default). Aim for 500-700 words. Organize around developer actionability, not the JSON schema.");
+    lines.push("");
+    lines.push("Start your reply with `# <Workflow name>: Optimization Review` as the very first line (the title IS the H1 -- do not write a separate label). Then use `##` subheadings for the sections below, in this exact order.");
+    lines.push("");
+    lines.push("1. **Bottom line** -- One short paragraph (3-5 sentences). Explain what kind of workflow this was and the ONE main fix. Use plain developer language. Tone example: \"This was not expensive because of a bad prompt. It was expensive because the agent was running a repeatable file-processing workflow inside the chat loop. The main fix is to move deterministic steps into a script and let the model handle ambiguity and final review.\" Cite `workflow_classification.type` and `workflow_classification.confidence`.");
+    lines.push("2. **Fix before next run** -- Rank the top 3-5 actions by **developer value**, not by schema order or surface symmetry. For each: bold title / 1-line why / fenced ```text snippet (exact text the developer can copy) / expected impact / confidence. Use this priority order unless evidence overrides: (1) script deterministic workflow steps, (2) update custom chat mode or agent instructions, (3) reduce context accumulation, (4) prune unused skills, (5) try Auto or a cheaper model -- only after validation exists.");
+    lines.push("3. **Cost drivers in plain English** -- 3-5 short bullets. Translate telemetry into developer meaning; do NOT lead with raw metric names. Cite supporting numbers in parentheses at the END of each bullet. Examples: \"The agent loop drove cost: 15 chat calls for a workflow that should target 3-5 after scripting.\" \"Context accumulated: history grew from 1,008 to 12,895 chars.\" \"One deliberation spike dominated: turn 7 cost $0.20 / 22% of session.\"");
+    lines.push("4. **What not to over-optimize** -- 1-3 short bullets. Call out low-impact levers explicitly so the developer does not waste attention on them. Use the rule: any lever contributing <5% of session cost is cleanup, not the main fix. Phrase as \"X was real overhead, but only ~Y% of this session -- clean up when convenient, but it is not the main optimization.\"");
+    lines.push("5. **Model guidance** -- 2-4 sentences. Quote the conservative Auto-same-model estimate FIRST. Mention optimistic cheaper-model projections as hypotheses requiring validation. If `quality_and_validation.available == false`, explicitly say a cheaper model is not yet proven safe. If `auto_mode_data` supports Auto as a safe experiment, say so. Cite `model_strategy_recommendation.summary`.");
+    lines.push("6. **Suggested next experiment** -- One concrete next-run setup as a short bulleted list of conditions. Example: \"Run the same task with: deterministic script for inventory/extraction/rename, chat mode limited to ambiguity review, only required tools enabled, Auto mode, validation output capturing accepted/corrected items.\" Tie back to `recommended_changes` items.");
+    lines.push("7. **Evidence** -- Up to 8 compact bullets total. Cite only the numbers that explain the recommendations above. Use field paths sparingly. End with a 1-line caveat summarizing `missing_data` (e.g. \"Quality, per-command tool sizes, and reasoning-token counts are not captured -- model and automation suggestions are hypotheses to validate next run.\").");
+    lines.push("");
+    lines.push("### Decision logic for the default report");
+    lines.push("");
+    lines.push("- If `workflow_classification.type` indicates repeatable work, lead Bottom line with **workflow shape** and Fix-before-next-run with **automation boundary** -- not with tools or skills.");
+    lines.push("- If `session_metadata.custom_chat_mode_used` or `custom_agent_used` is true, treat the chat mode / agent as the **main control surface**. Do NOT make the inline prompt the primary fix in that case.");
+    lines.push("- If `agent_loop_efficiency.call_shape_assessment` is `many_model_turns_for_repeatable_workflow`, `terminal_heavy_orchestration`, or `hidden_deliberation_spike`, name that specific shape in Bottom line.");
+    lines.push("- If `tool_result_size_analysis.bloat_assessment` is `moderate` or `high`, include a Fix-before-next-run item about compact intermediate artifacts.");
+    lines.push("- For tool / skill cleanup: if the lever's percent-of-session is <5%, demote it to **What not to over-optimize**; if >=5%, include it in Fix-before-next-run AFTER workflow-shape items.");
+    lines.push("- If `quality_and_validation.available == false`, all cheaper-model and aggressive-automation suggestions are framed as experiments. Never as conclusions.");
+    lines.push("- If `experiment_validity.available == true` and any `valid_for_*` is false, lead Bottom line with the validity warning before any optimization claim.");
+    lines.push("- If `baseline_comparison.available == true`, replace Bottom line's tone with current-vs-baseline framing (improved / regressed / unchanged / external).");
+    lines.push("");
+    lines.push("### Required section names (for downstream parsers)");
+    lines.push("");
+    lines.push("Use these exact `##` headings verbatim: `Bottom line`, `Fix before next run`, `Cost drivers in plain English`, `What not to over-optimize`, `Model guidance`, `Suggested next experiment`, `Evidence`.");
+  } else {
+    // detailed_audit -- the original 12-section heavy report.
+    lines.push("Mode: **detailed_audit**. Aim for under 900 words. Mirror the full JSON schema for an in-depth audit.");
+    lines.push("");
+    lines.push("Start your reply with `# <session title>` as the very first line (the title IS the H1 -- do not write 'Session title' as a separate label). Then use `##` subheadings for the sections below.");
+    lines.push("");
+    lines.push("Sections, in this order:");
+    lines.push("");
+    lines.push("1. **TL;DR** (~5 lines, write LAST but place FIRST). Use `developer_action_summary.primary_message` plus the top 3 of `developer_action_summary.top_developer_levers` as bullets. Include $ or % where the lever evidence has it.");
+    lines.push("2. **Developer takeaway** -- 2-3 sentences in plain developer language. Explain the lesson, not the metrics. Cite `workflow_classification.type` and `workflow_classification.confidence`.");
+    lines.push("3. **Main efficiency levers** -- Iterate `developer_levers_detected` entries where `available == true` and `priority != \"low\"`, ordered by `developer_action_summary.top_developer_levers`. For each: bold lever name / one-line `recommended_action` / 1-2 evidence bullets / priority. Stop at 5 levers.");
+    lines.push("4. **What made this session expensive** -- Group cost by developer-facing cause using only the `developer_cost_categories` keys that are present. Each bullet: one-line summary + 1-2 supporting numbers in parentheses + the relevant developer lever.");
+    lines.push("5. **What was probably unavoidable** -- 1-2 sentences. Separate avoidable waste from real task complexity.");
+    lines.push("6. **Recommended changes** -- Iterate `recommended_changes`. Group by `surface`. For each: bold `title` + 1-line `why` + fenced ```text block with `snippet` + impact + confidence. Skip `confidence == \"low\"` unless it is the only signal for that surface.");
+    lines.push("7. **Automation boundary** -- Use `automation_boundary_recommendation`. Two short lists: `should_script`, `should_remain_model_driven`. Skip if null or `confidence == \"low\"`.");
+    lines.push("8. **Tool and skill profile cleanup** -- Use `ide_tool_configuration_analysis` and `skills_profile_analysis`. List families to disable + top 3-5 skills to remove. Note the `skill_attachment_source` caveat.");
+    lines.push("9. **Model and Auto-mode guidance** -- Use `model_strategy_recommendation` + `raw_supporting_telemetry.auto_mode_data`. **Do not claim a cheaper model is definitely sufficient** if `quality_and_validation.available == false` or any `realistic_for_full_task == \"not_determinable_from_data\"`.");
+    lines.push("10. **Inline prompt guidance** -- Use `prompt_strategy_recommendation` + `developer_levers_detected.inline_prompt`. Quote `example_inline_prompt`.");
+    lines.push("11. **Data confidence and missing data** -- List `missing_data` entries with `why_it_matters_for_developer_report`.");
+    lines.push("12. **Suggestions for improving future telemetry** -- Up to 5 bullets summarizing `future_instrumentation`.");
+  }
   lines.push("");
   lines.push("## Cross-cutting analyst guidance");
   lines.push("");
@@ -2184,7 +2221,9 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
   lines.push("");
   lines.push("---");
   lines.push("");
-  lines.push("End of facts. Produce the 12-section developer-facing report now. Remember: write the TL;DR last but place it first; the very first line of your reply is `# <session title>`. Telemetry field paths belong in parentheses as evidence, not as the main prose.");
+  lines.push(reportMode === "detailed_audit"
+    ? "End of facts. Produce the 12-section detailed audit report now. Remember: write the TL;DR last but place it first; the very first line of your reply is `# <session title>`. Telemetry field paths belong in parentheses as evidence, not as the main prose."
+    : "End of facts. Produce the developer-action report now (7 sections in the order: Bottom line / Fix before next run / Cost drivers in plain English / What not to over-optimize / Model guidance / Suggested next experiment / Evidence). The very first line of your reply is `# <Workflow name>: Optimization Review`. Aim for 500-700 words. Telemetry field paths belong in parentheses as evidence, not as the main prose.");
   lines.push("");
   return lines.join("\n");
 }

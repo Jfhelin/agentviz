@@ -18,13 +18,24 @@ describe("buildLlmAnalysisPrompt", () => {
     expect(out.length).toBeGreaterThan(500);
   });
 
-  it("includes all required report sections", () => {
+  it("includes all required developer-action report sections by default", () => {
     const out = buildLlmAnalysisPrompt(analysis);
+    expect(out).toContain("Bottom line");
+    expect(out).toContain("Fix before next run");
+    expect(out).toContain("Cost drivers in plain English");
+    expect(out).toContain("What not to over-optimize");
+    expect(out).toContain("Model guidance");
+    expect(out).toContain("Suggested next experiment");
+    expect(out).toContain("Evidence");
+    expect(out).toContain("developer_action_report");
+  });
+
+  it("falls back to the detailed_audit 12-section format on request", () => {
+    const out = buildLlmAnalysisPrompt(analysis, { reportMode: "detailed_audit" });
     expect(out).toContain("TL;DR");
     expect(out).toContain("Developer takeaway");
     expect(out).toContain("Main efficiency levers");
     expect(out).toContain("What made this session expensive");
-    expect(out).toContain("What was probably unavoidable");
     expect(out).toContain("Recommended changes");
     expect(out).toContain("Automation boundary");
     expect(out).toContain("Tool and skill profile cleanup");
