@@ -88,6 +88,7 @@ function buildMetadataUsageCalls(metadata) {
   var calls = [];
   var cumulativeCost = 0;
   var reportedCost = metadata && metadata.totalCost != null ? metadata.totalCost : null;
+  var reportedCostUnit = reportedCost != null ? metadata.totalCostUnit || "usd" : "usd";
   var estimatedCosts = modelNames.map(function (model) {
     var usage = useModelBreakdown && usageByModel && usageByModel[model] ? usageByModel[model] : metadata.tokenUsage;
     return estimateCost(usage, model);
@@ -115,6 +116,8 @@ function buildMetadataUsageCalls(metadata) {
       cacheWriteTokens: usage.cacheWrite || 0,
       outputTokens: usage.outputTokens || 0,
       cost: callCost,
+      costUnit: reportedCost != null ? reportedCostUnit : "usd",
+      estimatedUsdCost: estimatedCosts[i],
       cumulativeCost: cumulativeCost,
       contextBreakdown: getBreakdown(null, usage),
       netNewTokens: usage.inputTokens || 0,
@@ -149,6 +152,8 @@ export function buildCostAnalysis(events, metadata) {
   var sourceEvents = events || [];
   var calls = [];
   var totalCost = 0;
+  var totalCostUnit = "usd";
+  var estimatedUsdCost = 0;
   var totals = { inputTokens: 0, outputTokens: 0, cacheRead: 0, cacheWrite: 0 };
   var previousByModel = {};
   var cacheMisses = [];
@@ -165,7 +170,9 @@ export function buildCostAnalysis(events, metadata) {
     var cacheWriteTokens = usage.cacheWrite || 0;
     var outputTokens = usage.outputTokens || 0;
     var callCost = estimateCost(usage, model);
+    var estimatedCost = callCost;
     totalCost += callCost;
+    estimatedUsdCost += estimatedCost;
     totals.inputTokens += usage.inputTokens || 0;
     totals.outputTokens += outputTokens;
     totals.cacheRead += cachedInputTokens;
@@ -193,6 +200,8 @@ export function buildCostAnalysis(events, metadata) {
       cacheWriteTokens: cacheWriteTokens,
       outputTokens: outputTokens,
       cost: callCost,
+      costUnit: "usd",
+      estimatedUsdCost: estimatedCost,
       cumulativeCost: totalCost,
       contextBreakdown: contextBreakdown,
       netNewTokens: netNewTokens,
@@ -235,9 +244,11 @@ export function buildCostAnalysis(events, metadata) {
   var metadataUsage = metadata && metadata.tokenUsage;
   if (!totalsCoverMetadata(totals, metadataUsage)) {
     calls = buildMetadataUsageCalls(metadata || {});
+    totalCostUnit = metadata && metadata.totalCost != null ? metadata.totalCostUnit || "usd" : "usd";
     totalCost = metadata && metadata.totalCost != null
       ? metadata.totalCost
       : calls.reduce(function (sum, call) { return sum + call.cost; }, 0);
+    estimatedUsdCost = calls.reduce(function (sum, call) { return sum + (call.estimatedUsdCost || (call.costUnit === "usd" ? call.cost : 0)); }, 0);
     totals = { inputTokens: 0, outputTokens: 0, cacheRead: 0, cacheWrite: 0 };
     peakContext = 0;
     cacheMisses = [];
@@ -262,6 +273,9 @@ export function buildCostAnalysis(events, metadata) {
       cacheWrite: totals.cacheWrite,
       freshInputTokens: computeEffectiveInputTokens(totals.inputTokens, totals.cacheRead, totals.cacheWrite),
       cost: totalCost,
+      costUnit: totalCostUnit,
+      estimatedUsdCost: estimatedUsdCost,
+      premiumRequests: metadata && metadata.premiumRequests != null ? metadata.premiumRequests : null,
       cacheHitRate: cacheHitRate,
       peakContext: peakContext,
     },

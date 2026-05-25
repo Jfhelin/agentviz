@@ -1,6 +1,6 @@
 import { theme, alpha } from "../../lib/theme.js";
 import { formatDurationLong } from "../../lib/formatTime.js";
-import { formatCost } from "../../lib/pricing.js";
+import { formatCost, formatSessionCost, getSessionCostLabel } from "../../lib/pricing.js";
 import {
   getNeedsReviewScore,
   getSessionCost,
@@ -117,9 +117,9 @@ function buildDataReadiness(metadata, summary) {
     },
     {
       label: "Cost data",
-      value: hasCost ? formatCost(summary.cost) : "not available",
+      value: hasCost ? (metadata.totalCost != null ? formatSessionCost(metadata) : formatCost(summary.cost)) : "not available",
       tone: hasCost ? theme.semantic.success : theme.text.dim,
-      detail: hasCost ? "Cost is reported or estimated from recognized model pricing." : "No reported cost and no recognized model pricing is available.",
+      detail: hasCost ? "Cost or premium-request usage is reported, or estimated from recognized model pricing." : "No reported cost and no recognized model pricing is available.",
     },
   ];
 }
@@ -397,9 +397,10 @@ export default function ReviewHub({ session, autonomyMetrics, onNavigate }) {
 
   var summary = buildReviewSummary(session, autonomyMetrics);
   var insights = buildReviewInsights(session, autonomyMetrics);
+  var metadata = session.metadata || {};
   var healthColor = getHealthColor(summary.score);
   var healthFactors = buildHealthFactors(summary, autonomyMetrics);
-  var dataReadiness = buildDataReadiness(session.metadata || {}, summary);
+  var dataReadiness = buildDataReadiness(metadata, summary);
 
   return (
     <main style={{
@@ -455,7 +456,7 @@ export default function ReviewHub({ session, autonomyMetrics, onNavigate }) {
           <SummaryCard label="Tool calls" value={summary.totalToolCalls} color={theme.track.tool_call} />
           <SummaryCard label="Errors" value={summary.errorCount} color={summary.errorCount ? theme.semantic.error : theme.text.primary} />
           <SummaryCard label="Duration" value={formatDurationLong(summary.duration)} color={theme.track.context} />
-          <SummaryCard label="Cost" value={summary.cost != null ? formatCost(summary.cost) : "--"} color={summary.cost != null ? theme.semantic.success : theme.text.primary} />
+          <SummaryCard label={metadata.totalCost != null ? getSessionCostLabel(metadata) : "Cost"} value={summary.cost != null ? (metadata.totalCost != null ? formatSessionCost(metadata) : formatCost(summary.cost)) : "--"} color={summary.cost != null ? theme.semantic.success : theme.text.primary} />
           <SummaryCard label="Autonomy" value={summary.autonomyEfficiency != null ? formatAutonomyEfficiency(summary.autonomyEfficiency) : "--"} />
           <SummaryCard label="Interventions" value={summary.interventions} />
         </div>

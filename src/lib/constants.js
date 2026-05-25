@@ -36,7 +36,22 @@ export const SAMPLE_METADATA = {
   duration: 38,
   models: { "claude-sonnet-4-20250514": 3 },
   primaryModel: "claude-sonnet-4-20250514",
-  tokenUsage: null,
+  tokenUsage: {
+    inputTokens: 42800,
+    outputTokens: 3100,
+    cacheRead: 27600,
+    cacheWrite: 6800,
+    cacheHitRate: 0.6448598130841121,
+  },
+  modelTokenUsage: {
+    "claude-sonnet-4-20250514": {
+      inputTokens: 42800,
+      outputTokens: 3100,
+      cacheRead: 27600,
+      cacheWrite: 6800,
+      cacheHitRate: 0.6448598130841121,
+    },
+  },
   format: "claude-code",
 };
 

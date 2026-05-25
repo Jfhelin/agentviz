@@ -101,3 +101,31 @@ export function formatCost(usd) {
   if (usd < 1) return "$" + usd.toFixed(3);
   return "$" + usd.toFixed(2);
 }
+
+export function isPremiumRequestUnit(unit) {
+  return unit === "premium_requests";
+}
+
+export function formatPremiumRequests(value) {
+  if (value == null) return "--";
+  var rounded = Math.round(value * 100) / 100;
+  var label = Math.abs(rounded) === 1 ? "PRU" : "PRU";
+  return rounded.toLocaleString(undefined, { maximumFractionDigits: 2 }) + " " + label;
+}
+
+export function formatCostValue(value, unit) {
+  if (isPremiumRequestUnit(unit)) return formatPremiumRequests(value);
+  return formatCost(value);
+}
+
+export function formatSessionCost(metadata) {
+  if (!metadata || metadata.totalCost == null) return null;
+  return formatCostValue(metadata.totalCost, metadata.totalCostUnit);
+}
+
+export function getSessionCostLabel(metadata, estimated) {
+  if (metadata && metadata.totalCost != null) {
+    return isPremiumRequestUnit(metadata.totalCostUnit) ? "Reported PRU" : "Cost";
+  }
+  return estimated ? "Est. Cost" : "Cost";
+}

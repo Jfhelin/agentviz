@@ -11,7 +11,7 @@ import StatsView from "../StatsView.jsx";
 import ToolbarButton from "../ui/ToolbarButton.jsx";
 import { V2ZoneHeader } from "./V2ShellPrimitives.jsx";
 import { buildCostAnalysis, formatTokens } from "../../lib/costAnalysis.js";
-import { formatCost } from "../../lib/pricing.js";
+import { formatCostValue } from "../../lib/pricing.js";
 
 var GraphView = React.lazy(function () { return lazyImport(function () { return import("../GraphView.jsx"); }); });
 var CostView = React.lazy(function () { return lazyImport(function () { return import("../CostView.jsx"); }); });
@@ -117,7 +117,7 @@ function getAnalyzeSummary(session, pb) {
     { label: "Events", value: events.length },
     { label: "Tools", value: metadata.totalToolCalls || events.filter(function (event) { return event.track === "tool_call"; }).length },
     { label: "Tokens", value: metadata.tokenUsage ? formatTokens(metadata.tokenUsage.inputTokens || 0) + " in" : "--" },
-    { label: "Cost", value: cost.totals && cost.totals.cost > 0 ? formatCost(cost.totals.cost) : "--" },
+    { label: cost.totals && cost.totals.costUnit === "premium_requests" ? "PRU" : "Cost", value: cost.totals && cost.totals.cost > 0 ? formatCostValue(cost.totals.cost, cost.totals.costUnit) : "--" },
   ];
 }
 

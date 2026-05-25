@@ -569,6 +569,7 @@ function buildMetadata(
   let totalCacheReadTokens = 0;
   let totalCacheWriteTokens = 0;
   let totalCost: number | null = null;
+  let totalCostUnit: "premium_requests" | null = null;
   let modelTokenUsage: Record<string, { inputTokens: number; outputTokens: number; cacheRead: number; cacheWrite: number; cacheHitRate?: number }> | null = null;
 
   if (sessionShutdown && sessionShutdown.modelMetrics) {
@@ -597,6 +598,7 @@ function buildMetadata(
       }
       if (metric.requests) {
         totalCost += metric.requests.cost || 0;
+        totalCostUnit = "premium_requests";
       }
       if (!models[model]) models[model] = metric.requests ? metric.requests.count : 0;
     }
@@ -654,6 +656,7 @@ function buildMetadata(
     premiumRequests: sessionShutdown ? sessionShutdown.totalPremiumRequests : null,
     totalApiDurationMs: sessionShutdown ? sessionShutdown.totalApiDurationMs : null,
     totalCost,
+    totalCostUnit,
     modelTokenUsage,
   };
 }

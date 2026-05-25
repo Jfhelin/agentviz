@@ -480,7 +480,7 @@ describe("App browser regressions", function () {
       ["Tracks", "Tracks"],
       ["Waterfall", "Waterfall Stats"],
       ["Stats", "Autonomy Metrics"],
-      ["Cost", "No token cost data found"],
+      ["Cost", "Token spend & context buildup"],
       ["Coach", "Session coaching:"],
     ];
 

@@ -27,6 +27,7 @@ describe("v2 golden data correctness", function () {
     expect(metadata.errorCount).toBe(expected.metadata.errorCount);
     expect(metadata.duration).toBe(expected.metadata.duration);
     expect(metadata.totalCost).toBe(expected.metadata.totalCost);
+    expect(metadata.totalCostUnit).toBe(expected.metadata.totalCostUnit);
     expect(metadata.premiumRequests).toBe(expected.metadata.premiumRequests);
     expect(metadata.codeChanges).toEqual(expected.metadata.codeChanges);
     expect(metadata.tokenUsage).toEqual(expected.metadata.tokenUsage);

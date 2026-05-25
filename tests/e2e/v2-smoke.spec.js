@@ -77,7 +77,7 @@ test("v2 Review and Investigate route to evidence", async function ({ page }) {
 
   await expect(page.getByText("81", { exact: true })).toBeVisible();
   await expect(page.getByText("Needs review", { exact: true })).toBeVisible();
-  await expect(page.getByText("$3.00", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("3 PRU", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("9%", { exact: true }).first()).toBeVisible();
 
   await page.getByRole("button", { name: /Investigate/ }).click();
@@ -98,7 +98,7 @@ test("v2 Analyze Cost and command palette routing work", async function ({ page 
   await expect(page.getByText("Analysis panels", { exact: true })).toBeVisible();
   await page.getByRole("tab", { name: "Cost" }).click();
   await expect(page).toHaveURL(/#\/v2\/analyze\/cost$/);
-  await expect(page.getByText("Total spend")).toBeVisible();
+  await expect(page.getByText("Reported PRU")).toBeVisible();
 
   await page.keyboard.press("Control+K");
   await page.getByPlaceholder("Search workflow, events, turns...").fill("review");

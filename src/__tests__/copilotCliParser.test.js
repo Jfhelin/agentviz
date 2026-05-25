@@ -438,6 +438,7 @@ describe("metadata", function () {
 
   it("computes total cost", function () {
     expect(meta.totalCost).toBe(1);
+    expect(meta.totalCostUnit).toBe("premium_requests");
   });
 
   it("provides per-model token breakdown", function () {

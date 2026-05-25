@@ -14,7 +14,7 @@ import { getTopTools } from "./autonomyMetrics.js";
 
 import { formatDuration, formatDurationLong, truncateText } from "./formatTime.js";
 import { getSessionCost } from "./autonomyMetrics.js";
-import { formatCost } from "./pricing.js";
+import { formatCost, formatSessionCost, getSessionCostLabel } from "./pricing.js";
 
 // ── Keyword patterns ────────────────────────────────────────────────────────
 
@@ -177,8 +177,8 @@ function answerCost(data) {
   var cost = getSessionCost(data.metadata);
   var lines = [];
   if (cost != null) {
-    var label = data.metadata.totalCost != null ? "Cost" : "Estimated cost";
-    lines.push(label + ": **" + formatCost(cost) + "**\n");
+    var label = data.metadata.totalCost != null ? getSessionCostLabel(data.metadata) : "Estimated cost";
+    lines.push(label + ": **" + (data.metadata.totalCost != null ? formatSessionCost(data.metadata) : formatCost(cost)) + "**\n");
   } else {
     lines.push("Cost data not available for this session.\n");
   }
@@ -232,8 +232,8 @@ function answerSummary(data) {
 
   var sessionCost = getSessionCost(meta);
   if (sessionCost != null) {
-    var costLabel = meta.totalCost != null ? "Cost" : "Estimated cost";
-    lines.push("- " + costLabel + ": " + formatCost(sessionCost));
+    var costLabel = meta.totalCost != null ? getSessionCostLabel(meta) : "Estimated cost";
+    lines.push("- " + costLabel + ": " + (meta.totalCost != null ? formatSessionCost(meta) : formatCost(sessionCost)));
   }
 
   if (tools.length > 0) {

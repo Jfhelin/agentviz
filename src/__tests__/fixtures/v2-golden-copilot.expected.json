@@ -11,7 +11,8 @@
     "totalToolCalls": 5,
     "errorCount": 0,
     "duration": 122.51,
-    "totalCost": 3,
+  "totalCost": 3,
+  "totalCostUnit": "premium_requests",
     "premiumRequests": 3,
     "codeChanges": {
       "linesAdded": 5,
@@ -90,7 +91,7 @@
   "ui": {
     "reviewScoreText": "81",
     "reviewLabelText": "Needs review",
-    "costText": "$3.00",
+  "costText": "3 PRU",
     "autonomyText": "9%",
     "investigateEventText": "Can you add a hello world function to utils.js?",
     "compareTitle": "golden-a.jsonl vs golden-b.jsonl",

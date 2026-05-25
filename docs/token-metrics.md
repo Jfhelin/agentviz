@@ -100,6 +100,8 @@ Some newer Copilot CLI shutdown records also include `tokenDetails` buckets:
 
 These map to fresh input, cache read, cache write, and output respectively. When only `tokenDetails` is available, AGENTVIZ treats normalized input as `input + cache_read + cache_write`.
 
+Copilot CLI `requests.cost` is not treated as USD. AGENTVIZ stores it as reported premium request usage (`totalCostUnit: "premium_requests"`) and renders it as PRU. Token-priced USD estimates are shown separately when model pricing is recognized, because premium request overage pricing depends on the user's GitHub Copilot plan and monthly allowance.
+
 ## Copilot prompt export JSON
 
 Copilot prompt exports use OpenAI-style response usage fields.
@@ -173,3 +175,5 @@ The Cost view uses compact labels:
 | out | `outputTokens` |
 
 If a source does not report cache writes, the UI omits the `write` segment.
+
+For Copilot CLI sessions, reported premium request usage is labeled as PRU rather than `$`. For example, a shutdown record with `requests.cost: 3` and `totalPremiumRequests: 3` is displayed as `3 PRU`, with any token-based USD estimate shown as a separate estimate.

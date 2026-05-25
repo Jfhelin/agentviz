@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import { theme, alpha } from "../../lib/theme.js";
 import { formatRelativeTime } from "../../lib/formatTime.js";
-import { formatCost } from "../../lib/pricing.js";
+import { formatCostValue, isPremiumRequestUnit } from "../../lib/pricing.js";
 import { formatAutonomyEfficiency } from "../../lib/autonomyMetrics.js";
 import {
   LANDING_FORMAT_OPTIONS,
@@ -47,7 +47,9 @@ export function buildPortfolioStats(entries) {
   var all = entries || [];
   var analyzed = all.filter(function (entry) { return !entry.isDiscovered; });
   var discovered = all.length - analyzed.length;
-  var totalCost = analyzed.reduce(function (sum, entry) { return sum + (entry.totalCost || 0); }, 0);
+  var costEntries = analyzed.filter(function (entry) { return entry.totalCost != null; });
+  var costUnits = Array.from(new Set(costEntries.map(function (entry) { return entry.totalCostUnit || "usd"; })));
+  var totalCost = costEntries.reduce(function (sum, entry) { return sum + (entry.totalCost || 0); }, 0);
   var totalErrors = analyzed.reduce(function (sum, entry) { return sum + (entry.errorCount || 0); }, 0);
   var reviewable = analyzed.filter(function (entry) { return entry.reviewScore != null; });
   var avgReviewScore = reviewable.length > 0
@@ -58,7 +60,8 @@ export function buildPortfolioStats(entries) {
     total: all.length,
     analyzed: analyzed.length,
     discovered: discovered,
-    avgCost: analyzed.length > 0 ? totalCost / analyzed.length : null,
+    avgCost: costEntries.length > 0 && costUnits.length === 1 ? totalCost / costEntries.length : null,
+    avgCostUnit: costUnits.length === 1 ? costUnits[0] : null,
     totalErrors: analyzed.length > 0 ? totalErrors : null,
     avgReviewScore: avgReviewScore,
   };
@@ -127,7 +130,7 @@ function PortfolioCard({ entry, layout, selected, onToggleSelected, onOpen }) {
   var metrics = [
     entry.reviewScore != null ? { label: "Review", value: entry.reviewScore.toFixed(1) } : null,
     autonomy.autonomyEfficiency != null ? { label: "Autonomy", value: formatAutonomyEfficiency(autonomy.autonomyEfficiency) } : null,
-    entry.totalCost != null ? { label: "Cost", value: formatCost(entry.totalCost) } : null,
+    entry.totalCost != null ? { label: isPremiumRequestUnit(entry.totalCostUnit) ? "PRU" : "Cost", value: formatCostValue(entry.totalCost, entry.totalCostUnit) } : null,
     entry.errorCount > 0 ? { label: "Errors", value: String(entry.errorCount), tone: theme.semantic.error } : null,
     entry.totalEvents ? { label: "Events", value: String(entry.totalEvents) } : null,
   ].filter(Boolean);
@@ -383,7 +386,7 @@ export default function FindPortfolio({
       }}>
         <Stat label="sessions" value={stats.total} sub={stats.discovered > 0 ? stats.analyzed + " analyzed, " + stats.discovered + " discovered" : null} />
         <Stat label="avg review" value={stats.avgReviewScore != null ? stats.avgReviewScore.toFixed(1) : "--"} />
-        <Stat label="avg cost" value={stats.avgCost != null ? formatCost(stats.avgCost) : "--"} />
+        <Stat label={isPremiumRequestUnit(stats.avgCostUnit) ? "avg PRU" : "avg cost"} value={stats.avgCost != null ? formatCostValue(stats.avgCost, stats.avgCostUnit) : "--"} />
         <Stat label="errors" value={stats.totalErrors != null ? stats.totalErrors : "--"} />
       </section>
 
