@@ -407,13 +407,7 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
   lines.push("");
   lines.push("## GitHub Copilot model pricing reference");
   lines.push("");
-  lines.push("Source: https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing (per 1M tokens, USD).");
-  lines.push("");
-  lines.push("| model | vendor | category | input | cached | cache write | output |");
-  lines.push("|---|---|---|---|---|---|---|");
-  GITHUB_MODEL_CATALOG.forEach(m => {
-    lines.push("| " + m.name + " | " + m.vendor + " | " + m.category + " | $" + m.inputPerMTok.toFixed(2) + " | $" + m.cachedInputPerMTok.toFixed(3) + " | " + (m.cacheWritePerMTok != null ? "$" + m.cacheWritePerMTok.toFixed(2) : "—") + " | $" + m.outputPerMTok.toFixed(2) + " |");
-  });
+  lines.push("For category tiers (Lightweight / Versatile / Powerful) and current per-token rates of any model not in the alt-projection table above, consult: https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing");
   lines.push("");
   lines.push("## System prompt anatomy");
   lines.push("");

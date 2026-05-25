@@ -43,12 +43,10 @@ describe("buildLlmAnalysisPrompt", () => {
     expect(out).toMatch(/"cost_usd":/);
   });
 
-  it("includes a GitHub model pricing reference table", () => {
+  it("points the analyst at the GitHub pricing reference URL", () => {
     const out = buildLlmAnalysisPrompt(analysis);
-    expect(out).toContain("GitHub Copilot model pricing reference");
-    expect(out).toContain("Lightweight");
-    expect(out).toContain("Versatile");
-    expect(out).toContain("Powerful");
+    expect(out).toContain("docs.github.com");
+    expect(out).toContain("copilot-billing/models-and-pricing");
   });
 
   it("includes the user's prompt text in full", () => {
