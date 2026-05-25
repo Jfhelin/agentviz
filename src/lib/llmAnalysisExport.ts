@@ -606,7 +606,7 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
   lines.push("2. **What the user wanted** — 1-2 sentences, in the user's own framing.");
   lines.push("3. **How it played out** — 3-4 bullets max. Note any backtracking or pivots.");
   lines.push("4. **Where the money went** — Focus on cost. For each notable cost driver, name the specific data field (e.g. `ctx_components.tool_results grew from 12k to 28k between turns 8 and 10`) and translate it into a savings opportunity. Skip purely narrative observations. 3-5 bullets.");
-  lines.push("5. **What the user could change** — Up to 3 concrete prompt or setup changes. For each: one-line rationale + qualitative size (large / moderate / small). Reference the pre-computed cost-lever block when possible.");
+  lines.push("5. **What the user could change** — Up to 3 concrete prompt or setup changes. For each suggestion provide: (a) a one-line rationale citing the relevant cost-lever or composition data, (b) qualitative size (large / moderate / small), (c) a **venue tag** in square brackets from the venue guide below, and (d) a copy-pasteable **snippet** in a fenced code block showing the exact text to add. Example: '[inline prompt] Add: \\`Reply with only the renamed filenames, no explanation.\\` -- would cap visible_reply, large impact.'");
   lines.push("6. **Model fit** — Was " + (chosenModelName ? shortModelName(chosenModelName) : "the chosen model") + " (" + (chosenTier || "unknown") + " tier) right for this task? 2-3 sentences. Reference the alt-model table.");
   lines.push("7. **Auto-mode verdict** — One line: cite the pre-computed **Auto-mode fit verdict** (Good / Borderline / Poor fit) and the named drift signals verbatim, then quote the realistic cost figure the verdict points you at (floor for Poor, floor or in-between for Borderline, optimistic for Good).");
   lines.push("8. **Unused capacity** — Two short paragraphs. (a) Unused tools: cite the pre-computed `% of session cost` figure, name 2-3 specific tools the user could safely disable in VS Code's Configure Tools UI for similar tasks. (b) Unused skills: cite the pre-computed **Unused skills** figure (`N skills / $X / Y%`) verbatim — that number is detected from the data, not inferred. Name the 2-3 largest unused skills from the System anatomy list as the top removal candidates.");
@@ -619,6 +619,13 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
   lines.push("- We DO detect which skills were USED during the session by matching each skill's `file` path against tool call args. The pre-computed cost-lever block lists the unused-skill count, token cost, and per-skill ✓/✗ markers in System anatomy. Cite those numbers directly — do not re-infer skill usage from prompt context.");
   lines.push("- Reasoning-token counts are NOT in this data. Do not comment on reasoning effort.");
   lines.push("- When the data does not support a claim, say 'not determinable from the data'.");
+  lines.push("");
+  lines.push("**Venue guide for section 5 suggestions (choose the right home for each fix):**");
+  lines.push("- `[inline prompt]` -- one-off fix the user types into the next prompt. Good for output-shape constraints (\"reply in <=5 bullets\", \"output only the filename\") and for narrowing scope on this specific task.");
+  lines.push("- `[AGENTS.md]` or `[.github/copilot-instructions.md]` -- repo-level instructions auto-attached to every chat in this workspace. Good for project-wide conventions (file naming, tool preferences, output format defaults).");
+  lines.push("- `[custom skill: SKILL.md]` -- a packaged capability the agent loads on demand. Good when the same multi-step workflow recurs across sessions (e.g. \"receipt processing\": OCR -> extract -> rename per schema).");
+  lines.push("- `[custom chat mode: .chatmode.md]` -- a scoped persona with its own system prompt and tool whitelist. Good when an entire kind of session benefits from a restricted toolset and stricter output rules.");
+  lines.push("- `[VS Code setting: Configure Tools]` -- disable individual tools the user does not need for similar tasks. Cheapest fix when the cost-lever block flags unused tools or skills.");
   lines.push("");
   lines.push("---");
   lines.push("");
@@ -647,6 +654,46 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
   }
   if (totals.unexpectedMissCount > 0) {
     lines.push("- **Unexpected cache misses:** " + totals.unexpectedMissCount + " calls / wasted **~" + fmtUsd(totals.unexpectedMissCost) + " (" + (totals.cost > 0 ? (totals.unexpectedMissCost / totals.cost * 100).toFixed(1) : "0") + "% of session cost)**. See per-call rows with `unexpected_cache_miss: true`.");
+  }
+  // Top expensive call composition: surface the WHY (dominant output slice
+  // + tools called) for the single most expensive call. Lets the analyst
+  // explain the cost cause in plain language ("agent wrote a verbose
+  // intermediate artifact", "agent deliberated heavily") instead of
+  // re-deriving it from raw per-call rows.
+  {
+    let top: (CostAnalysisCall & { kind: "llm" }) | null = null;
+    let topTurn = 0;
+    let t = 0;
+    chatEvents.forEach((e) => {
+      t += 1;
+      if (!top || (e.cost || 0) > (top.cost || 0)) { top = e; topTurn = t; }
+    });
+    if (top !== null) {
+      // Re-narrow inside the block so the inferred CostAnalysisCall fields
+      // are visible to TypeScript without the outer let-binding nullability.
+      const topCall = top as CostAnalysisCall & { kind: "llm" };
+      const vis = topCall.visibleResponseChars || 0;
+      const think = topCall.thinkingChars || 0;
+      const toolArgs = topCall.toolArgsChars || 0;
+      const total = vis + think + toolArgs;
+      const dominant = total > 0
+        ? (think >= vis && think >= toolArgs
+          ? { name: "thinking", pct: Math.round(think * 100 / total), interp: "deliberation-heavy: model spent most of its output budget on internal reasoning. Hard to address at the prompt level on most models; on models where reasoning effort is configurable, lower the effort. On models with hidden thinking (Anthropic extended thinking), instruct the model to think briefly or skip extended thinking for routine subtasks." }
+          : vis >= toolArgs
+          ? { name: "visible_reply", pct: Math.round(vis * 100 / total), interp: "verbose prose response: the model wrote a long human-readable message. Direct prompt-level fix candidate -- add an explicit output-shape constraint (e.g. 'reply in <=5 bullets', 'output only the final filename, no explanation')." }
+          : { name: "tool_args", pct: Math.round(toolArgs * 100 / total), interp: "the model constructed very large tool inputs (likely pasting long content into a tool call). Look for a tool with a smaller-input alternative, or have the agent reference files by path instead of inlining their contents." })
+        : { name: "(unknown)", pct: 0, interp: "no output breakdown available." };
+      // What tools did the call actually invoke next? Helps pinpoint
+      // whether the cost was the response itself or downstream work.
+      const toolNames = (topCall.producedToolCalls || []).map(tc => tc.name);
+      const toolCounts = new Map<string, number>();
+      toolNames.forEach(n => toolCounts.set(n, (toolCounts.get(n) || 0) + 1));
+      const toolSummary = toolCounts.size > 0
+        ? Array.from(toolCounts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([n, c]) => "`" + n + "`" + (c > 1 ? " x" + c : "")).join(", ")
+        : "no tool calls (response only)";
+      const topPct = totals.cost > 0 ? (topCall.cost / totals.cost) * 100 : 0;
+      lines.push("- **Top expensive call composition:** Turn " + topTurn + " cost **" + fmtUsd(topCall.cost) + " (" + topPct.toFixed(0) + "% of session)**, output " + topCall.output.toLocaleString() + " tokens. Output dominated by `" + dominant.name + "` (~" + dominant.pct + "% of output chars) -- " + dominant.interp + " Tools called next: " + toolSummary + ".");
+    }
   }
   lines.push("");
   lines.push("---");

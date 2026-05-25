@@ -115,4 +115,18 @@ describe("buildLlmAnalysisPrompt", () => {
     // Sec 7 instructions must reference the pre-computed verdict.
     expect(out).toMatch(/cite the pre-computed \*\*Auto-mode fit verdict\*\*/);
   });
+
+  it("emits a top-expensive-call composition bullet with cause interpretation and venue guide", () => {
+    const out = buildLlmAnalysisPrompt(analysis);
+    expect(out).toContain("Top expensive call composition");
+    // Composition must identify the dominant output slice as one of the
+    // three buckets and include an interpretation hint.
+    expect(out).toMatch(/Output dominated by `(thinking|visible_reply|tool_args|\(unknown\))`/);
+    // Section 5 must require venue tagging.
+    expect(out).toContain("venue tag");
+    expect(out).toContain("Venue guide for section 5 suggestions");
+    expect(out).toContain("[inline prompt]");
+    expect(out).toContain("[AGENTS.md]");
+    expect(out).toContain("[custom skill: SKILL.md]");
+  });
 });
