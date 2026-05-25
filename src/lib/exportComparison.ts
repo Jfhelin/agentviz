@@ -43,6 +43,282 @@ function fmtSignedTok(n: number): string {
   return (n > 0 ? "+" : "") + Math.round(n).toLocaleString();
 }
 
+// -----------------------------------------------------------------------------
+// Experiment intent inference (§3 of the developer-facing spec).
+//
+// Given the drift signals + run names, guess what the user was probably
+// A/B testing. The analyst LLM uses this to anchor "what should have
+// changed" against "what actually changed". We are deliberately weak and
+// label confidence so the LLM doesn't over-trust the guess.
+// -----------------------------------------------------------------------------
+
+type InferredVariable =
+  | "model"
+  | "system_prompt"
+  | "tool_config"
+  | "prompt_strategy"
+  | "none_detected"
+  | "unknown";
+
+interface ExperimentIntent {
+  variable: InferredVariable;
+  confidence: "high" | "medium" | "low";
+  basis: string[];
+  sharedScenarioLabel: string | null;
+  differentialLabelA: string | null;
+  differentialLabelB: string | null;
+}
+
+/** Strip common file extensions and the trailing-number iteration suffix
+ *  (e.g. "_v2", "2", "-3") so we can compare the "stem" of run names. */
+function stripIterSuffix(s: string): { stem: string; suffix: string } {
+  let stem = s.replace(/\.(?:json|md|log)$/i, "");
+  const m = stem.match(/^(.*?)(?:[_-]?v?\d+)?$/);
+  if (m && m[1] && m[1].length >= 3 && m[1].length < stem.length) {
+    return { stem: m[1], suffix: stem.slice(m[1].length) };
+  }
+  return { stem, suffix: "" };
+}
+
+/** Longest common prefix between two strings (case-insensitive). */
+function longestCommonPrefix(a: string, b: string): string {
+  const la = a.toLowerCase(); const lb = b.toLowerCase();
+  let i = 0;
+  while (i < la.length && i < lb.length && la[i] === lb[i]) i++;
+  return a.slice(0, i);
+}
+
+function inferExperimentIntent(cmp: CostComparison, nameA: string, nameB: string): ExperimentIntent {
+  const basis: string[] = [];
+  const fa = cmp.fingerprintA;
+  const fb = cmp.fingerprintB;
+
+  // Name parsing: shared prefix + differential suffix.
+  // Handle the common "iteration" case where one name is a strict prefix of
+  // the other (e.g. "ExpRun_agentupdate" vs "ExpRun_agentupdate2"). The naive
+  // LCP would leave diffA empty; instead, back off to the longer shared stem
+  // by stripping a trailing iteration suffix (digits or v\d+) from the
+  // longer name before computing the shared scenario label.
+  let prefix = longestCommonPrefix(nameA, nameB).replace(/[_\-\s.]+$/, "");
+  if (prefix.length === nameA.length || prefix.length === nameB.length) {
+    const longer = nameA.length >= nameB.length ? nameA : nameB;
+    const shorter = nameA.length < nameB.length ? nameA : nameB;
+    const m = longer.slice(shorter.length).match(/^([_\-\s.]*v?\d+)/);
+    if (m) {
+      // Shared scenario = shorter (minus any trailing separator), iteration
+      // marker is the digits/v\d+ on the longer side, base is "(base)".
+      prefix = shorter.replace(/[_\-\s.]+$/, "");
+    }
+  }
+  let diffA: string | null = nameA.length > prefix.length
+    ? nameA.slice(prefix.length).replace(/^[_\-\s.]+/, "")
+    : null;
+  let diffB: string | null = nameB.length > prefix.length
+    ? nameB.slice(prefix.length).replace(/^[_\-\s.]+/, "")
+    : null;
+  // If one side ended up empty (strict-prefix iteration case), surface it
+  // as "(base)" so the export still records the comparison.
+  if (diffA === null && diffB) diffA = "(base)";
+  if (diffB === null && diffA) diffB = "(base)";
+  const sharedScenarioLabel = prefix.length >= 3 ? prefix : null;
+
+  // Precedence-ordered detection.
+  let variable: InferredVariable = "unknown";
+  let confidence: "high" | "medium" | "low" = "low";
+
+  const modelsDiffer = fa.primaryModel !== fb.primaryModel && !!fa.primaryModel && !!fb.primaryModel;
+  const sysCharDelta = Math.abs((fa.systemPromptChars || 0) - (fb.systemPromptChars || 0));
+  const sysHashDiffer = !!fa.systemPromptHash && !!fb.systemPromptHash && fa.systemPromptHash !== fb.systemPromptHash;
+  const promptDiffer = (fa.firstUserPromptHash || "") !== (fb.firstUserPromptHash || "") && !!fa.firstUserPromptHash && !!fb.firstUserPromptHash;
+  const toolSetDelta = Math.abs(fa.toolsInvoked.length - fb.toolsInvoked.length);
+  const toolSetSame = fa.toolsInvoked.length === fb.toolsInvoked.length &&
+    fa.toolsInvoked.every((t, i) => t === fb.toolsInvoked[i]);
+
+  if (modelsDiffer) {
+    variable = "model";
+    confidence = "high";
+    basis.push(`primary_model differs: A=${fa.primaryModel}, B=${fb.primaryModel}`);
+  } else if (sysHashDiffer && sysCharDelta >= 20) {
+    variable = "system_prompt";
+    confidence = sysCharDelta >= 200 ? "high" : "medium";
+    basis.push(`system_prompt hashes differ (char delta ${sysCharDelta})`);
+    if (!toolSetSame) basis.push("invoked tool sets also differ — could be a side-effect of the prompt change");
+  } else if (!toolSetSame && toolSetDelta >= 2) {
+    variable = "tool_config";
+    confidence = "low";
+    basis.push(`invoked-tool sets differ by ${toolSetDelta} (note: tools INVOKED is a behavioral signal, not a config signal — tools AVAILABLE may have been identical)`);
+  } else if (promptDiffer) {
+    variable = "prompt_strategy";
+    confidence = "medium";
+    basis.push("first user prompts differ between runs");
+  } else if (
+    !modelsDiffer && !sysHashDiffer && !promptDiffer && toolSetSame &&
+    Math.abs(cmp.b.totalCost - cmp.a.totalCost) / Math.max(cmp.a.totalCost, 1e-9) < 0.02
+  ) {
+    variable = "none_detected";
+    confidence = "high";
+    basis.push("no drift detected on model, system prompt, prompt, or invoked tools; cost within 2%");
+  } else {
+    basis.push("no single variable dominates the observable drift");
+  }
+
+  // Boost confidence when the run-name suffix (e.g. "_agentupdate" vs
+  // "_agentupdate2") looks like a deliberate iteration on the inferred axis.
+  if (variable !== "unknown" && variable !== "none_detected" && diffA && diffB) {
+    const stemA = stripIterSuffix(diffA).stem;
+    const stemB = stripIterSuffix(diffB).stem;
+    if (stemA === stemB && stemA.length >= 3) {
+      basis.push(`run-name suffixes look like iterations on the same axis ("${diffA}" vs "${diffB}")`);
+      if (confidence === "low") confidence = "medium";
+    }
+  }
+
+  return {
+    variable,
+    confidence,
+    basis,
+    sharedScenarioLabel,
+    differentialLabelA: diffA,
+    differentialLabelB: diffB,
+  };
+}
+
+interface TheoryEntry {
+  costMechanism: string;
+  qualityMechanism: string;
+  whatToCheckFirst: string;
+}
+
+const THEORY_MAP: Record<InferredVariable, TheoryEntry> = {
+  model: {
+    costMechanism: "Different rate cards. Per-token input AND output prices change; cache discount ratios may also change. Cost delta scales with the volume of tokens at each rate, not the number of calls.",
+    qualityMechanism: "Capability, reasoning style, tool-use behavior, and latency may all shift. Cheaper models often need more turns; stronger models often produce more concise answers.",
+    whatToCheckFirst: "Look at $/input-token and $/output-token deltas, not just total cost. A 'cheaper' model that took 50% more turns may have cost more overall.",
+  },
+  system_prompt: {
+    costMechanism: "Fixed per-call input overhead. Every LLM call carries the system prompt, so cost delta ≈ (system_prompt_token_delta × LLM_call_count × input_rate). If call shape is identical, the delta is almost purely this fixed tax.",
+    qualityMechanism: "Better instructions may reduce wrong turns, tool calls, or clarifications. Over-specified instructions may add noise without improving outcomes. Compare call shape + final-response quality.",
+    whatToCheckFirst: "Did the bigger prompt actually change behavior (fewer LLM calls, fewer tool calls, better answer), or did it just pay more for the same call shape?",
+  },
+  tool_config: {
+    costMechanism: "Tool registration overhead is paid every call (tool_defs bucket). Tools INVOKED is a downstream behavior signal — the model may have had the same tools available but chose different ones. Without 'tools available' data, attribution is weak.",
+    qualityMechanism: "More tools = more capability but also more decision overhead and prompt bloat. Fewer tools may force workarounds.",
+    whatToCheckFirst: "Look at the tool_defs bucket delta and the distinct-tools count. Note that available != invoked.",
+  },
+  prompt_strategy: {
+    costMechanism: "Changes the 'current' bucket (user message) and may amplify through history/tool_results if the new phrasing triggers different agent paths.",
+    qualityMechanism: "Better-framed prompts often reduce clarification turns and produce more directly usable output. Compare first-call output vs total work done.",
+    whatToCheckFirst: "Did rephrasing change the call shape (fewer turns, fewer tool calls) or just the wording of the final answer?",
+  },
+  none_detected: {
+    costMechanism: "No structural change detected. Any cost delta within ±2% is statistical noise (token-counter quantization, cache state, model side variance).",
+    qualityMechanism: "Without a tested variable, treat the runs as a noise floor measurement — useful to know your A/B baseline variance.",
+    whatToCheckFirst: "Confirm with the user what they actually intended to change. The runs look effectively identical from the export's perspective.",
+  },
+  unknown: {
+    costMechanism: "Multiple drift axes — cannot isolate a single cost mechanism without user input on the intended variable.",
+    qualityMechanism: "Mixed drift makes quality attribution unsafe. Any verdict will mix multiple effects.",
+    whatToCheckFirst: "Ask the user what they intended to test, then re-run with all other axes held constant.",
+  },
+};
+
+// -----------------------------------------------------------------------------
+// Developer levers affected (§16 of the spec).
+//
+// Translates the drift signals into the optimization levers the developer
+// can actually pull. Each lever is "implicated" when the underlying drift
+// signal fired — meaning this run pair provides evidence about that lever.
+// -----------------------------------------------------------------------------
+
+interface LeverRow {
+  lever: string;
+  implicated: boolean;
+  evidence: string;
+  implication: string;
+}
+
+function buildDeveloperLevers(cmp: CostComparison, intent: ExperimentIntent): LeverRow[] {
+  const fa = cmp.fingerprintA;
+  const fb = cmp.fingerprintB;
+  const modelsDiffer = fa.primaryModel !== fb.primaryModel && !!fa.primaryModel && !!fb.primaryModel;
+  const sysHashDiffer = !!fa.systemPromptHash && !!fb.systemPromptHash && fa.systemPromptHash !== fb.systemPromptHash;
+  const promptDiffer = (fa.firstUserPromptHash || "") !== (fb.firstUserPromptHash || "");
+  const toolSetSame = fa.toolsInvoked.length === fb.toolsInvoked.length &&
+    fa.toolsInvoked.every((t, i) => t === fb.toolsInvoked[i]);
+  const callShapeDiffer = !cmp.sameShape;
+  const filesEditedSame = fa.filesEdited.length === fb.filesEdited.length &&
+    fa.filesEdited.every((f, i) => f === fb.filesEdited[i]);
+
+  const rows: LeverRow[] = [
+    {
+      lever: "Custom instructions / system prompt",
+      implicated: sysHashDiffer,
+      evidence: sysHashDiffer
+        ? `System-prompt hashes differ (chars A=${fa.systemPromptChars}, B=${fb.systemPromptChars})`
+        : "System-prompt hashes match",
+      implication: sysHashDiffer
+        ? "Fixed per-call overhead changed. Cost delta scales with LLM call count."
+        : "This run pair does not support conclusions about instructions.",
+    },
+    {
+      lever: "Model choice",
+      implicated: modelsDiffer,
+      evidence: modelsDiffer
+        ? `Different primary model: A=${fa.primaryModel}, B=${fb.primaryModel}`
+        : `Same primary model on both sides (${fa.primaryModel || "n/a"})`,
+      implication: modelsDiffer
+        ? "Rate-card and capability change. Compare $/token at input AND output, not just totals."
+        : "This run pair does not support conclusions about model selection.",
+    },
+    {
+      lever: "Tool availability vs tool usage",
+      implicated: !toolSetSame,
+      evidence: toolSetSame
+        ? `Same ${fa.toolsInvoked.length} distinct tools invoked on both sides`
+        : `Distinct invoked tools differ (A=${fa.toolsInvoked.length}, B=${fb.toolsInvoked.length})`,
+      implication: toolSetSame
+        ? "This run pair does not support conclusions about IDE tool configuration."
+        : "Tools INVOKED differ — but available tools may have been identical. Treat as behavioral, not config.",
+    },
+    {
+      lever: "Prompt strategy",
+      implicated: promptDiffer,
+      evidence: promptDiffer
+        ? "First user prompts differ between runs"
+        : "Same first user prompt on both sides",
+      implication: promptDiffer
+        ? "The runs were not asked the same question — any verdict mixes prompt and config effects."
+        : "Both runs received the same prompt — fair config-only comparison on this axis.",
+    },
+    {
+      lever: "Workflow shape (LLM/tool call count)",
+      implicated: callShapeDiffer,
+      evidence: callShapeDiffer
+        ? "Call shape differs (different LLM or tool call counts)"
+        : "Same call shape on both sides",
+      implication: callShapeDiffer
+        ? "Configuration change altered how much work the agent did — the variable affected behavior, not just overhead."
+        : "Configuration change was pure overhead — same work, different cost.",
+    },
+    {
+      lever: "Artifact / output format",
+      implicated: !filesEditedSame,
+      evidence: filesEditedSame
+        ? `Same ${fa.filesEdited.length} files edited on both sides`
+        : `Different files edited (A=${fa.filesEdited.length}, B=${fb.filesEdited.length})`,
+      implication: filesEditedSame
+        ? "Both runs targeted the same artifacts — quality is judgeable by content."
+        : "Runs touched different files — artifact-quality comparison is bounded.",
+    },
+  ];
+  // Always pull the inferred variable to the top by re-sorting implicated-first
+  return rows.sort((a, b) => {
+    if (a.implicated !== b.implicated) return a.implicated ? -1 : 1;
+    // Stable: keep insertion order otherwise
+    return 0;
+  });
+}
+
 function fmtSet(items: string[]): string {
   if (items.length === 0) return "(none)";
   // Cap at 6 items for table readability
@@ -392,6 +668,56 @@ export function formatComparisonAsMarkdown(
     }
     lines.push("");
   }
+
+  // Experiment intent + Theoretical expectation + Developer levers —
+  // interpretation scaffolding that anchors "what should have changed"
+  // against "what actually changed". Inferred deterministically from
+  // drift + run-name pattern; confidence is labeled so the analyst LLM
+  // does not over-trust the guess.
+  const intent = inferExperimentIntent(cmp, nameA, nameB);
+  lines.push("## Experiment intent (inferred)");
+  lines.push("Deterministic guess at what the user was probably A/B-testing.");
+  lines.push("Confidence is labeled — the analyst should NOT treat this as ground");
+  lines.push("truth, but as a hypothesis to compare against the observed result.");
+  lines.push("");
+  if (intent.sharedScenarioLabel) {
+    lines.push(`- **shared_scenario_label:** \`${intent.sharedScenarioLabel}\``);
+  }
+  if (intent.differentialLabelA && intent.differentialLabelB) {
+    lines.push(`- **differential_label_a:** \`${intent.differentialLabelA}\``);
+    lines.push(`- **differential_label_b:** \`${intent.differentialLabelB}\``);
+  }
+  lines.push(`- **inferred_variable_under_test:** \`${intent.variable}\``);
+  lines.push(`- **inference_confidence:** ${intent.confidence}`);
+  lines.push("- **inference_basis:**");
+  for (const b of intent.basis) {
+    lines.push(`  - ${b}`);
+  }
+  lines.push("");
+
+  const theory = THEORY_MAP[intent.variable];
+  lines.push("## Theoretical expectation");
+  lines.push(`Rule-based "what should have changed" for tested variable = \`${intent.variable}\`.`);
+  lines.push("Use this to write the Hypothesis-vs-observed framing in the report.");
+  lines.push("");
+  lines.push(`- **expected_cost_mechanism:** ${theory.costMechanism}`);
+  lines.push(`- **expected_quality_mechanism:** ${theory.qualityMechanism}`);
+  lines.push(`- **what_to_check_first:** ${theory.whatToCheckFirst}`);
+  lines.push("");
+
+  lines.push("## Developer levers affected");
+  lines.push("Which optimization levers this run pair provides evidence about.");
+  lines.push("\"Implicated\" means the corresponding configuration axis drifted");
+  lines.push("between A and B; non-implicated levers were held constant and");
+  lines.push("cannot be evaluated from this comparison.");
+  lines.push("");
+  const levers = buildDeveloperLevers(cmp, intent);
+  lines.push("| Lever | Implicated? | Evidence | Developer implication |");
+  lines.push("|---|---|---|---|");
+  for (const r of levers) {
+    lines.push(`| ${r.lever} | ${r.implicated ? "✓ yes" : "—"} | ${r.evidence} | ${r.implication} |`);
+  }
+  lines.push("");
 
   // Run drift
   lines.push("## Run drift");
@@ -857,6 +1183,23 @@ function buildReportInstructions(planMode: boolean): string {
   lines.push("confidence level. Mention contamination/uncertainty ONCE here — do");
   lines.push("not repeat the same caveat in every later section.");
   lines.push("");
+  lines.push("**Hypothesis-vs-observed framing.** Use the two new deterministic");
+  lines.push("blocks in the facts:");
+  lines.push("- **Experiment intent (inferred)** gives you `inferred_variable_");
+  lines.push("  under_test` (model / system_prompt / tool_config / prompt_strategy /");
+  lines.push("  none_detected / unknown) with confidence + basis. Quote the");
+  lines.push("  variable and confidence in this section.");
+  lines.push("- **Theoretical expectation** gives you the rule-based \"what should");
+  lines.push("  have changed if this variable was the cause\" — `expected_cost_");
+  lines.push("  mechanism` and `expected_quality_mechanism`. Lead the summary");
+  lines.push("  with one sentence on what we expected to see.");
+  lines.push("Then later sections (Cost outcome, Behavior comparison) can frame");
+  lines.push("themselves as \"observed matches/contradicts expectation\".");
+  lines.push("If `inferred_variable_under_test = none_detected`, lead with that —");
+  lines.push("the runs look effectively identical and the test is a noise-floor");
+  lines.push("measurement, not a meaningful A/B. If `unknown`, say so and");
+  lines.push("recommend the user clarify the tested axis.");
+  lines.push("");
 
   lines.push("### What changed");
   lines.push("Compact markdown table summarizing the comparison axes in plain");
@@ -1158,6 +1501,13 @@ function buildReportInstructions(planMode: boolean): string {
   lines.push("- \"Unproven.\" — outputs or artifacts differ but quality was not");
   lines.push("  validated; cannot judge the tradeoff yet.");
   lines.push("- \"Not applicable.\" — cost delta is within noise.");
+  lines.push("");
+  lines.push("**Cross-reference the Developer levers affected table** when");
+  lines.push("writing the decision rule. Concrete actions should target");
+  lines.push("levers marked \"✓ yes\" (implicated) — those are the only axes");
+  lines.push("this run pair gives evidence about. Do NOT recommend changes to");
+  lines.push("levers marked \"—\" (not implicated); call that out as \"this");
+  lines.push("comparison does not provide evidence about <lever>\".");
   lines.push("");
   lines.push("Decision-rule example (do not copy verbatim — use real labels):");
   lines.push("> **Unproven.** Treat the more expensive run as a candidate only");

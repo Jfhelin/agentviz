@@ -512,4 +512,56 @@ describe("buildComparisonLlmPrompt", () => {
     expect(out).toContain("Always include \"Was the extra cost worth it?\"");
     expect(out).toContain("attribution_confidence");
   });
+
+  it("infers variable_under_test = model when primary models differ", () => {
+    const cmp = compareRunsCost(mkRun({ model: "claude-sonnet-4.5" }), mkRun({ model: "claude-opus-4.7" }))!;
+    const md = buildComparisonLlmPrompt(cmp, { nameA: "run-a", nameB: "run-b" });
+    expect(md).toContain("## Experiment intent (inferred)");
+    expect(md).toContain("inferred_variable_under_test:** `model`");
+    expect(md).toContain("inference_confidence:** high");
+    expect(md).toContain("primary_model differs");
+    expect(md).toContain("## Theoretical expectation");
+    expect(md).toContain("expected_cost_mechanism");
+    expect(md).toContain("Different rate cards");
+  });
+
+  it("infers variable_under_test = none_detected when nothing meaningful drifts", () => {
+    const cmp = compareRunsCost(mkRun({}), mkRun({}))!;
+    const md = buildComparisonLlmPrompt(cmp, { nameA: "run-a", nameB: "run-b" });
+    expect(md).toContain("inferred_variable_under_test:** `none_detected`");
+    expect(md).toContain("noise floor measurement");
+  });
+
+  it("extracts shared scenario label and differential suffixes from run names", () => {
+    const cmp = compareRunsCost(mkRun({ model: "claude-sonnet-4.5" }), mkRun({ model: "claude-opus-4.7" }))!;
+    const md = buildComparisonLlmPrompt(cmp, {
+      nameA: "ExpenseReportMunich3_agentupdate",
+      nameB: "ExpenseReportMunich3_agentupdate2",
+    });
+    expect(md).toContain("shared_scenario_label:");
+    expect(md).toContain("ExpenseReportMunich3");
+    expect(md).toContain("differential_label_a:");
+    expect(md).toContain("agentupdate");
+    expect(md).toContain("differential_label_b:");
+  });
+
+  it("renders Developer levers affected table with implicated flags", () => {
+    const cmp = compareRunsCost(mkRun({ model: "claude-sonnet-4.5" }), mkRun({ model: "claude-opus-4.7" }))!;
+    const md = buildComparisonLlmPrompt(cmp, { nameA: "a", nameB: "b" });
+    expect(md).toContain("## Developer levers affected");
+    expect(md).toContain("| Lever | Implicated? | Evidence | Developer implication |");
+    expect(md).toContain("Model choice");
+    expect(md).toContain("✓ yes");
+    expect(md).toContain("Different primary model");
+    expect(md).toContain("Custom instructions / system prompt");
+  });
+
+  it("instructs the analyst to use hypothesis-vs-observed framing and reference Developer levers", () => {
+    const cmp = compareRunsCost(mkRun({}), mkRun({}))!;
+    const md = buildComparisonLlmPrompt(cmp, { nameA: "a", nameB: "b" });
+    expect(md).toContain("Hypothesis-vs-observed framing");
+    expect(md).toContain("inferred_variable_under_test");
+    expect(md).toContain("Developer levers affected table");
+    expect(md).toContain("implicated");
+  });
 });
