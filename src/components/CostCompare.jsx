@@ -977,7 +977,89 @@ function CopyButton({ label, copiedLabel, title, build, accent }) {
   );
 }
 
-function ExportButtons({ cmp, nameA, nameB }) {
+function ExperimentPlanInput({ value, onChange, expanded, onToggle }) {
+  const isPlan = value && /hypothesis:|expected effect:|a\/b test handoff/i.test(value);
+  const summary = expanded
+    ? null
+    : value
+      ? (isPlan ? "✓ Experiment plan attached — will trigger verification" : "✓ Hypothesis attached")
+      : "Add an experiment plan from your prior single-session analysis (optional)";
+  return (
+    <div style={{
+      marginTop: 12,
+      border: "1px solid " + theme.border.default,
+      borderRadius: theme.radius.md,
+      background: theme.bg.surface,
+    }}>
+      <button
+        onClick={onToggle}
+        title="Paste the 'A/B test handoff' block from the single-session LLM analysis report so the comparison can verify whether each planned change actually landed."
+        style={{
+          width: "100%",
+          background: "transparent",
+          border: "none",
+          color: value ? theme.semantic.success : theme.text.secondary,
+          fontFamily: theme.font.mono,
+          fontSize: theme.fontSize.xs,
+          padding: "8px 12px",
+          textAlign: "left",
+          cursor: "pointer",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+        }}
+      >
+        <span>{expanded ? "▾ Experiment plan input" : "▸ " + summary}</span>
+        {value && !expanded && (
+          <span style={{ color: theme.text.dim, fontSize: theme.fontSize.xs }}>
+            {value.length} chars
+          </span>
+        )}
+      </button>
+      {expanded && (
+        <div style={{ padding: "0 12px 12px 12px" }}>
+          <div style={{
+            fontSize: theme.fontSize.xs,
+            color: theme.text.muted,
+            lineHeight: 1.5,
+            marginBottom: 8,
+          }}>
+            Paste the <code style={{ color: theme.text.primary }}>A/B test handoff</code> block from the
+            single-session LLM analysis (last fenced block in "Suggested next experiment").
+            When provided, the Compare LLM analysis adds a <code style={{ color: theme.text.primary }}>Did the
+            planned change land?</code> section that verifies each item against the diff.
+            A short single-line hypothesis works too.
+          </div>
+          <textarea
+            value={value || ""}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder={"Hypothesis: <one sentence>\nExpected effect: <which buckets shift>\nSetup A (baseline): <model, mode, tools>\nSetup B (experiment): <what differs>\nValidation: <how you confirm the answer is still good>\nRisk: <what could regress>"}
+            rows={7}
+            style={{
+              width: "100%",
+              background: theme.bg.base,
+              border: "1px solid " + theme.border.default,
+              borderRadius: theme.radius.sm,
+              color: theme.text.primary,
+              fontFamily: theme.font.mono,
+              fontSize: theme.fontSize.xs,
+              lineHeight: 1.5,
+              padding: 8,
+              resize: "vertical",
+              boxSizing: "border-box",
+            }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ExportButtons({ cmp, nameA, nameB, experimentPlan }) {
+  const plan = experimentPlan && experimentPlan.trim() ? experimentPlan.trim() : undefined;
+  const llmTitle = plan
+    ? "Copy the comparison wrapped in analyst instructions, including your experiment plan. The analyst will verify each plan item against the diff."
+    : "Copy the comparison wrapped in analyst instructions. Paste into ChatGPT/Claude/Copilot to get a focused report on what changed, what caused it, warnings, and what to validate next.";
   return (
     <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end", gap: 8 }}>
       <CopyButton
@@ -987,10 +1069,10 @@ function ExportButtons({ cmp, nameA, nameB }) {
         build={() => formatComparisonAsMarkdown(cmp, { nameA, nameB })}
       />
       <CopyButton
-        label="Copy for LLM analysis"
+        label={plan ? "Copy for LLM analysis (with plan)" : "Copy for LLM analysis"}
         copiedLabel="Analysis prompt copied"
-        title="Copy the comparison wrapped in analyst instructions. Paste into ChatGPT/Claude/Copilot to get a focused report on what changed, what caused it, warnings, and what to validate next."
-        build={() => buildComparisonLlmPrompt(cmp, { nameA, nameB })}
+        title={llmTitle}
+        build={() => buildComparisonLlmPrompt(cmp, { nameA, nameB, techniqueUnderTest: plan })}
         accent={theme.accent.primary}
       />
     </div>
@@ -1004,6 +1086,9 @@ export default function CostCompare({ sessionA, sessionB, fileA, fileB }) {
 
   const nameA = prettifyRunName(fileA || (sessionA && sessionA.file));
   const nameB = prettifyRunName(fileB || (sessionB && sessionB.file));
+
+  const [experimentPlan, setExperimentPlan] = useState("");
+  const [planExpanded, setPlanExpanded] = useState(false);
 
   if (!costA || !costB) {
     const missing = [];
@@ -1039,7 +1124,13 @@ export default function CostCompare({ sessionA, sessionB, fileA, fileB }) {
         summaryA={cmp.a} summaryB={cmp.b}
       />
 
-      <ExportButtons cmp={cmp} nameA={nameA} nameB={nameB} />
+      <ExperimentPlanInput
+        value={experimentPlan}
+        onChange={setExperimentPlan}
+        expanded={planExpanded}
+        onToggle={() => setPlanExpanded((v) => !v)}
+      />
+      <ExportButtons cmp={cmp} nameA={nameA} nameB={nameB} experimentPlan={experimentPlan} />
 
       <div style={{ marginTop: 16 }}>
         <VerdictBanner verdict={cmp.verdict} />

@@ -160,4 +160,43 @@ describe("buildComparisonLlmPrompt", () => {
     // Quoted example uses the real names, not "A spent fewer than B".
     expect(out).toContain("baseline spent fewer tokens on tool definitions than experiment");
   });
+
+  it("triggers the 'Did the planned change land?' section when a multi-line plan is provided", () => {
+    const cmp = compareRunsCost(mkRun({}), mkRun({}))!;
+    const plan = [
+      "Hypothesis: trimming tool defs shaves ~15% off every-call overhead.",
+      "Expected effect: tool_defs bucket shrinks; history unchanged.",
+      "Setup A (baseline): all skills enabled.",
+      "Setup B (experiment): skills.json pruned to 3.",
+      "Validation: same task list, same final summary.",
+      "Risk: dropped skill causes a fallback search loop.",
+    ].join("\n");
+    const out = buildComparisonLlmPrompt(cmp, {
+      nameA: "baseline",
+      nameB: "pruned",
+      techniqueUnderTest: plan,
+    });
+    expect(out).toContain("Experiment plan from the prior single-session analysis");
+    expect(out).toContain("Did the planned change land?");
+    expect(out).toContain("Hypothesis: trimming tool defs");
+  });
+
+  it("does NOT trigger the verification section for a single-line hypothesis", () => {
+    const cmp = compareRunsCost(mkRun({}), mkRun({}))!;
+    const out = buildComparisonLlmPrompt(cmp, {
+      nameA: "baseline",
+      nameB: "experiment",
+      techniqueUnderTest: "B disables tool definitions",
+    });
+    expect(out).toContain("Technique under test");
+    expect(out).not.toContain("Did the planned change land?");
+  });
+
+  it("always includes the shared-vocabulary appendix that aligns with single-session analysis", () => {
+    const cmp = compareRunsCost(mkRun({}), mkRun({}))!;
+    const out = buildComparisonLlmPrompt(cmp, { nameA: "a", nameB: "b" });
+    expect(out).toContain("Shared vocabulary (matches the single-session LLM analysis)");
+    expect(out).toContain("every_call_overhead");
+    expect(out).toContain("cache_health: poor");
+  });
 });

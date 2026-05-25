@@ -223,6 +223,29 @@ export interface LlmCompareOptions extends FormatOptions {
   techniqueUnderTest?: string;
 }
 
+// Plan-shaped input is multi-line and typically contains structured
+// labels like "Hypothesis:", "Expected effect:", "Setup A", "Setup B".
+// If we see at least two of these markers, treat the input as a full
+// A/B test handoff plan and ask the analyst to verify each item.
+function looksLikePlan(text: string | undefined): boolean {
+  if (!text) return false;
+  const t = text.toLowerCase();
+  const markers = [
+    "hypothesis:",
+    "expected effect:",
+    "setup a",
+    "setup b",
+    "validation:",
+    "a/b test handoff",
+  ];
+  let hits = 0;
+  for (const m of markers) {
+    if (t.includes(m)) hits++;
+    if (hits >= 2) return true;
+  }
+  return false;
+}
+
 function buildComparePromptHeader(
   nameA: string,
   nameB: string,
@@ -230,6 +253,7 @@ function buildComparePromptHeader(
   sharedContext: string | null,
   explicitTechnique: string | undefined,
 ): string {
+  const planMode = looksLikePlan(explicitTechnique);
   const lines: string[] = [];
   lines.push("# Cost Compare analysis prompt");
   lines.push("");
@@ -252,7 +276,20 @@ function buildComparePromptHeader(
   lines.push("\"A spent fewer tokens than B\".**");
   lines.push("");
 
-  if (explicitTechnique) {
+  if (explicitTechnique && planMode) {
+    lines.push("## Experiment plan from the prior single-session analysis");
+    lines.push("");
+    lines.push("The developer ran a single-session analysis on a previous run, got an");
+    lines.push("A/B test handoff block, implemented the experiment, and pasted that");
+    lines.push("plan here. Your job is to **verify the plan against the diff**:");
+    lines.push("which items landed, which had the expected effect, which had side");
+    lines.push("effects, which are not detectable in the diff.");
+    lines.push("");
+    lines.push("```text");
+    lines.push(explicitTechnique.trim());
+    lines.push("```");
+    lines.push("");
+  } else if (explicitTechnique) {
     lines.push("## Technique under test (provided)");
     lines.push("");
     lines.push(explicitTechnique.trim());
@@ -279,86 +316,130 @@ function buildComparePromptHeader(
   return lines.join("\n");
 }
 
-const COMPARE_REPORT_INSTRUCTIONS = `## What to produce
+function buildReportInstructions(planMode: boolean): string {
+  const lines: string[] = [];
+  lines.push("## What to produce");
+  lines.push("");
+  lines.push("Write a focused developer-facing report with these sections, in order.");
+  lines.push("Use the run labels from \"Runs under comparison\" above; do not say \"A\"");
+  lines.push("or \"B\" in prose unless quoting a table.");
+  lines.push("");
+  lines.push("### What changed");
+  lines.push("2–3 sentences. Name the technique under test (use the provided or");
+  lines.push("inferred hypothesis above). State whether the runs are equivalent in");
+  lines.push("shape (same call count, same answers, same drift status) or whether");
+  lines.push("the second run diverged behaviorally from the first. If the runs");
+  lines.push("diverged, say so plainly — divergent runs cannot cleanly attribute");
+  lines.push("cost deltas to the technique.");
+  lines.push("");
+  lines.push("### Cost outcome");
+  lines.push("One short paragraph. Did the second run save money, cost more, or stay");
+  lines.push("flat? Quote the headline delta in both cr and USD if shown. Use the");
+  lines.push("pre-vs-post-divergence split to say what fraction of the delta is");
+  lines.push("attributable to the prompt prefix change vs path-dependent agent");
+  lines.push("behavior. If a projection is shown, quote the projected savings over N");
+  lines.push("calls.");
+  lines.push("");
+  lines.push("### What caused it");
+  lines.push("3–5 bullets. Translate the bucket waterfall and per-call breakdown");
+  lines.push("into developer meaning, e.g. \"<nameB> dropped tool_defs by X cr");
+  lines.push("because tools were unregistered\", \"<nameB> paid less in history");
+  lines.push("because the conversation was shorter\", \"<nameB> output Y% fewer");
+  lines.push("response tokens because the answer was terser\". Avoid raw field");
+  lines.push("names. End each bullet with the supporting number. Use the bucket");
+  lines.push("vocabulary defined in the appendix below.");
+  lines.push("");
 
-Write a focused developer-facing report with these sections, in order.
-Use the run labels from "Runs under comparison" above; do not say "A"
-or "B" in prose unless quoting a table.
+  if (planMode) {
+    lines.push("### Did the planned change land?");
+    lines.push("This section is required because the developer provided an");
+    lines.push("experiment plan from the prior single-session analysis. For each");
+    lines.push("item in the plan (Hypothesis, Expected effect, Setup B differences,");
+    lines.push("Validation), give one bullet with a verdict prefix:");
+    lines.push("");
+    lines.push("- ✅ **Landed, effect as expected** — the diff shows the change and");
+    lines.push("  the numbers match the predicted direction and magnitude.");
+    lines.push("- ✅ **Landed, smaller/larger than expected** — the change is");
+    lines.push("  visible but the effect is materially different. Quote both the");
+    lines.push("  expected and observed numbers.");
+    lines.push("- ⚠ **Landed with side effect** — the change is visible but caused");
+    lines.push("  an unintended shift (e.g. answer divergence, drift, cache pollution).");
+    lines.push("- ❌ **Not detectable in the diff** — the diff does not show evidence");
+    lines.push("  the change was actually made. Ask the developer to confirm.");
+    lines.push("- ❓ **Not measurable from this comparison** — the plan asks about");
+    lines.push("  something the comparison cannot show (e.g. answer quality without");
+    lines.push("  validation data).");
+    lines.push("");
+    lines.push("Cite the supporting metric in parentheses for each bullet.");
+    lines.push("");
+  }
 
-### What changed
-2–3 sentences. Name the technique under test (use the provided or
-inferred hypothesis above). State whether the runs are equivalent in
-shape (same call count, same answers, same drift status) or whether
-the second run diverged behaviorally from the first. If the runs
-diverged, say so plainly — divergent runs cannot cleanly attribute
-cost deltas to the technique.
-
-### Cost outcome
-One short paragraph. Did the second run save money, cost more, or stay
-flat? Quote the headline delta in both cr and USD if shown. Use the
-pre-vs-post-divergence split to say what fraction of the delta is
-attributable to the prompt prefix change vs path-dependent agent
-behavior. If a projection is shown, quote the projected savings over N
-calls.
-
-### What caused it
-3–5 bullets. Translate the bucket waterfall and per-call breakdown
-into developer meaning, e.g. "<nameB> dropped tool_defs by X cr
-because tools were unregistered", "<nameB> paid less in history
-because the conversation was shorter", "<nameB> output Y% fewer
-response tokens because the answer was terser". Avoid raw field
-names. End each bullet with the supporting number.
-
-### Warnings and caveats
-Surface anything that makes the comparison less trustworthy:
-- run drift on identical-by-construction axes (blocking),
-- cache pollution (a fresh cache run vs a warm cache run),
-- divergent answers when the technique was expected to be answer-equivalent,
-- different call shapes when the technique was expected to be shape-preserving.
-
-If the inferred hypothesis from the file names does not match what
-the numbers show (e.g. names suggest "tool defs disabled" but
-tool_defs cost is unchanged), call that out explicitly.
-
-If no caveats apply, say "No blocking caveats. The comparison is
-attributable to the technique under test."
-
-### What to validate next
-2–3 bullets. What follow-up runs or measurements would make the
-result more conclusive? Examples: re-run with cache pre-warmed on
-both sides, re-run with the same first prompt to remove prefix
-drift, capture quality validation (tests / human review) before
-claiming the cheaper run is "as good".
-
-## Rules
-
-- Do not invent metrics. Only use numbers present in the comparison
-  block. If a metric is missing, say so explicitly.
-- Refer to the runs by their labels (provided above), not "A" / "B".
-- If the runs have different answers and the technique was supposed
-  to preserve the answer, flag that as a blocking caveat before
-  recommending the cheaper run.
-- Do not recommend a cheaper model or Auto mode based on this
-  comparison alone unless quality validation is mentioned in the
-  block.
-- Keep the report 400–600 words. Use bullets liberally. Avoid section
-  preambles like "In this section we will…".
-- Cite numbers inline; do not duplicate the comparison block.
-
-The comparison block is the source of truth. If your prose seems to
-contradict it, the block wins — rewrite the prose.
-`;
+  lines.push("### Warnings and caveats");
+  lines.push("Surface anything that makes the comparison less trustworthy:");
+  lines.push("- run drift on identical-by-construction axes (blocking),");
+  lines.push("- cache pollution (a fresh cache run vs a warm cache run),");
+  lines.push("- divergent answers when the technique was expected to be answer-equivalent,");
+  lines.push("- different call shapes when the technique was expected to be shape-preserving.");
+  lines.push("");
+  lines.push("If the inferred hypothesis from the file names does not match what");
+  lines.push("the numbers show (e.g. names suggest \"tool defs disabled\" but");
+  lines.push("tool_defs cost is unchanged), call that out explicitly.");
+  lines.push("");
+  lines.push("If no caveats apply, say \"No blocking caveats. The comparison is");
+  lines.push("attributable to the technique under test.\"");
+  lines.push("");
+  lines.push("### What to validate next");
+  lines.push("2–3 bullets. What follow-up runs or measurements would make the");
+  lines.push("result more conclusive? Examples: re-run with cache pre-warmed on");
+  lines.push("both sides, re-run with the same first prompt to remove prefix");
+  lines.push("drift, capture quality validation (tests / human review) before");
+  lines.push("claiming the cheaper run is \"as good\".");
+  lines.push(planMode
+    ? "If any plan item came back as ❌ or ❓, the first validation step should be re-running the experiment with that item explicitly addressed."
+    : "");
+  lines.push("");
+  lines.push("## Rules");
+  lines.push("");
+  lines.push("- Do not invent metrics. Only use numbers present in the comparison");
+  lines.push("  block. If a metric is missing, say so explicitly.");
+  lines.push("- Refer to the runs by their labels (provided above), not \"A\" / \"B\".");
+  lines.push("- If the runs have different answers and the technique was supposed");
+  lines.push("  to preserve the answer, flag that as a blocking caveat before");
+  lines.push("  recommending the cheaper run.");
+  lines.push("- Do not recommend a cheaper model or Auto mode based on this");
+  lines.push("  comparison alone unless quality validation is mentioned in the");
+  lines.push("  block.");
+  if (planMode) {
+    lines.push("- The plan-verification section is required. Do not skip it, even");
+    lines.push("  if the plan looks incomplete; mark unmeasurable items as ❓.");
+  }
+  lines.push("- Keep the report " + (planMode ? "500–700" : "400–600") + " words. Use bullets liberally. Avoid section");
+  lines.push("  preambles like \"In this section we will…\".");
+  lines.push("- Cite numbers inline; do not duplicate the comparison block.");
+  lines.push("");
+  lines.push("The comparison block is the source of truth. If your prose seems to");
+  lines.push("contradict it, the block wins — rewrite the prose.");
+  lines.push("");
+  lines.push("## Shared vocabulary (matches the single-session LLM analysis)");
+  lines.push("");
+  lines.push("- **Bucket / cost category** — where tokens are spent in a single call:");
+  lines.push("  - `system` = system prompt + custom chat mode instructions.");
+  lines.push("  - `tool_defs` = tool/skill registration overhead (shipped every call).");
+  lines.push("  - `history` = accumulated conversation history.");
+  lines.push("  - `tool_results` = output of tool calls carried back into context.");
+  lines.push("  - `current` = the user's prompt for this turn.");
+  lines.push("  - `output` = the model's response.");
+  lines.push("- **Workflow shape** — `efficient_single_pass`, `tool_heavy_but_expected`, `many_model_turns_for_repeatable_workflow`, `terminal_heavy_orchestration`, `hidden_deliberation_spike`.");
+  lines.push("- **Cache pollution** — a comparison artifact where one run hit a warm cache and the other did not. Single-session analysis calls this `cache_health: poor`. Both views agree.");
+  lines.push("- **Fixed vs variable cost** — the share of cost paid on every call regardless of the user's request (system + tool_defs + skill carry) vs the share that scales with the actual work. Single-session calls this `every_call_overhead`.");
+  return lines.join("\n");
+}
 
 export function buildComparisonLlmPrompt(
   cmp: CostComparison,
   opts: LlmCompareOptions = {}
 ): string {
   const facts = formatComparisonAsMarkdown(cmp, opts);
-  // Infer hypothesis from the file names so the analyst can frame the
-  // diff as a hypothesis under test even when no explicit technique is
-  // provided. We pass the *raw* names (nameA/nameB from opts) so the
-  // inference can see prefixes/suffixes that prettifyRunName would
-  // strip later in the formatting layer.
   const inferred = inferTechniqueFromRunNames(opts.nameA, opts.nameB);
   const header = buildComparePromptHeader(
     inferred.nameA,
@@ -367,9 +448,10 @@ export function buildComparisonLlmPrompt(
     inferred.sharedContext,
     opts.techniqueUnderTest,
   );
+  const planMode = looksLikePlan(opts.techniqueUnderTest);
   return [
     header,
-    COMPARE_REPORT_INSTRUCTIONS,
+    buildReportInstructions(planMode),
     "## Comparison facts (source of truth)\n",
     facts,
   ].join("\n");

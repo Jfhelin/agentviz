@@ -74,6 +74,20 @@ describe("buildLlmAnalysisPrompt", () => {
     expect(out).toMatch(/1\. Add validation output/);
   });
 
+  it("requires an A/B test handoff block in Suggested next experiment for compare-flow handoff", () => {
+    const out = buildLlmAnalysisPrompt(analysis);
+    expect(out).toContain("A/B test handoff");
+    expect(out).toMatch(/Hypothesis:/);
+    expect(out).toMatch(/Setup A/);
+    expect(out).toMatch(/Setup B/);
+  });
+
+  it("includes a shared vocabulary appendix that matches the Compare LLM prompt", () => {
+    const out = buildLlmAnalysisPrompt(analysis);
+    expect(out).toContain("Shared vocabulary");
+    expect(out).toContain("every_call_overhead");
+  });
+
   it("ends Evidence with a Capture next time instrumentation checklist", () => {
     const out = buildLlmAnalysisPrompt(analysis);
     expect(out).toMatch(/Capture next time/);
