@@ -537,6 +537,7 @@ export function buildMcpReachabilityFacts(reach: McpReachabilityAnalysis): Recor
     declared_count: reach.declaredCount,
     visible_count: reach.visibleCount,
     unused_count: reach.unusedCount,
+    mcp_tool_count_on_wire: reach.mcpToolCount,
     visible_servers: reach.matches.map((m) => ({
       label: m.server.label,
       type: m.server.type ?? null,
@@ -569,6 +570,7 @@ export function renderMcpReachabilityMarkdown(reach: McpReachabilityAnalysis): s
   out.push("- MCP servers listed in the export: **" + reach.declaredCount + "**");
   out.push("- Servers whose `mcp_*` tools appeared in any chat request: **" + reach.visibleCount + "**");
   out.push("- Listed but contributed no tool definitions: **" + reach.unusedCount + "**");
+  out.push("- Total distinct `mcp_*` tool definitions sent on the wire: **" + reach.mcpToolCount + "**");
   out.push("- Match confidence: " + reach.confidence + " (label-slug to `mcp_<slug>_*` prefix)");
   out.push("");
   out.push("> " + reach.note);

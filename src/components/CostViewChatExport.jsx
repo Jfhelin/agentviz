@@ -2272,6 +2272,8 @@ function McpReachabilityCallout(props) {
   if (!reach.unusedCount || reach.unusedCount === 0) return null;
   var warn = (theme.semantic && theme.semantic.warning) || "#eab308";
   var unusedLabels = reach.unused.map(function (s) { return s.label; });
+  var mcpToolCount = reach.mcpToolCount || 0;
+  var matchedToolCount = reach.matches.reduce(function (sum, m) { return sum + (m.toolCount || 0); }, 0);
   return (
     <div
       role="alert"
@@ -2289,7 +2291,7 @@ function McpReachabilityCallout(props) {
     >
       <div style={{ fontWeight: 600, marginBottom: 6, color: warn }}>
         {"\u26A0\uFE0F  "}
-        {reach.unusedCount} of {reach.declaredCount} MCP servers in the export contributed no tool definitions
+        {reach.visibleCount} of {reach.declaredCount} listed MCP servers produced all {matchedToolCount} <code style={{ background: "transparent" }}>mcp_*</code> tools the model saw; the other {reach.unusedCount} produced 0
       </div>
       <div style={{ color: theme.text.secondary, marginBottom: 6 }}>
         No <code>mcp_*</code> tools from these labels appeared in any chat request. They may be disabled, may have failed to start, or simply had no tools the IDE chose to send.
@@ -2306,9 +2308,12 @@ function McpReachabilityCallout(props) {
       </div>
       <div style={{ color: theme.text.muted, fontSize: theme.fontSize.xs, fontStyle: "italic" }}>
         Heuristic label-slug match against <code>mcp_&lt;slug&gt;_*</code> tool names.
+        {mcpToolCount > matchedToolCount ? (
+          <span> {mcpToolCount - matchedToolCount} additional <code>mcp_*</code> tool(s) appeared on the wire without a matching listed server.</span>
+        ) : null}
         {reach.extraInWire && reach.extraInWire.length > 0 ? (
           <span>
-            {" "}Also seen on the wire without a matching declared server: {reach.extraInWire.map(function (e) { return "mcp_" + e.slug + "_*"; }).join(", ")}.
+            {" "}Unmatched prefixes: {reach.extraInWire.map(function (e) { return "mcp_" + e.slug + "_*"; }).join(", ")}.
           </span>
         ) : null}
       </div>

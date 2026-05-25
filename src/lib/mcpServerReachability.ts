@@ -66,6 +66,10 @@ export interface McpReachabilityAnalysis {
   declaredCount: number;
   visibleCount: number;
   unusedCount: number;
+  /** Total distinct `mcp_*` tool definitions observed across all chat
+   *  requests (matched-server tools + extra-on-wire tools). Lets callers
+   *  contrast "all model-visible tools" against just the MCP portion. */
+  mcpToolCount: number;
   matches: McpServerMatch[];
   unused: DeclaredMcpServer[];
   extraInWire: ExtraInWire[];
@@ -154,11 +158,18 @@ export function analyzeMcpReachability(
   toolNames: Iterable<string>,
 ): McpReachabilityAnalysis {
   if (!declared || declared.length === 0) {
+    // Even with no declared servers, the wire may carry mcp_* tools we should
+    // count so callers can render a coherent "MCP visibility" story.
+    let mcpToolCount = 0;
+    for (const name of toolNames) {
+      if (name && name.startsWith("mcp_")) mcpToolCount++;
+    }
     return {
       available: false,
       declaredCount: 0,
       visibleCount: 0,
       unusedCount: 0,
+      mcpToolCount,
       matches: [],
       unused: [],
       extraInWire: [],
@@ -229,6 +240,7 @@ export function analyzeMcpReachability(
     declaredCount: declared.length,
     visibleCount: matches.length,
     unusedCount: unused.length,
+    mcpToolCount: seenNamesAll.size,
     matches,
     unused,
     extraInWire,
