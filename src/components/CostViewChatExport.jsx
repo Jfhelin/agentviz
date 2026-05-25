@@ -2270,7 +2270,7 @@ function McpReachabilityCallout(props) {
   var reach = props.reachability;
   if (!reach || !reach.available) return null;
   if (!reach.unusedCount || reach.unusedCount === 0) return null;
-  var warn = theme.status.warning || "#eab308";
+  var warn = (theme.semantic && theme.semantic.warning) || "#eab308";
   var unusedLabels = reach.unused.map(function (s) { return s.label; });
   return (
     <div
