@@ -7,6 +7,7 @@
 // Pure function. No I/O, no formatting choices that depend on theme.
 
 import type { CostComparison, BehavioralKpiValue, DriftRow, BucketDelta } from "./compareCost";
+import { inferTechniqueFromRunNames } from "./runDisplayName";
 
 export interface FormatOptions {
   nameA?: string;
@@ -222,39 +223,91 @@ export interface LlmCompareOptions extends FormatOptions {
   techniqueUnderTest?: string;
 }
 
-const COMPARE_REPORT_PROMPT = `# Cost Compare analysis prompt
+function buildComparePromptHeader(
+  nameA: string,
+  nameB: string,
+  hypothesis: string | null,
+  sharedContext: string | null,
+  explicitTechnique: string | undefined,
+): string {
+  const lines: string[] = [];
+  lines.push("# Cost Compare analysis prompt");
+  lines.push("");
+  lines.push("You are a Copilot cost-optimization analyst. The block below contains a");
+  lines.push("deterministic, side-by-side comparison of two VS Code Copilot Chat runs,");
+  lines.push("exported from agentviz Cost Compare. All numbers in the block are ground");
+  lines.push("truth.");
+  lines.push("");
+  lines.push("## Runs under comparison");
+  lines.push("");
+  lines.push(`- **A** = \`${nameA}\``);
+  lines.push(`- **B** = \`${nameB}\``);
+  if (sharedContext) {
+    lines.push(`- Shared scenario inferred from the names: \`${sharedContext}\``);
+  }
+  lines.push("");
+  lines.push("**Use the run labels above (or their short variants) throughout the report");
+  lines.push("instead of generic \"A\" and \"B\". For example, write");
+  lines.push(`\"${nameA} spent fewer tokens on tool definitions than ${nameB}\" rather than`);
+  lines.push("\"A spent fewer tokens than B\".**");
+  lines.push("");
 
-You are a Copilot cost-optimization analyst. The block below contains a
-deterministic, side-by-side comparison of two VS Code Copilot Chat runs
-(A and B), exported from agentviz Cost Compare. All numbers in the block
-are ground truth.
+  if (explicitTechnique) {
+    lines.push("## Technique under test (provided)");
+    lines.push("");
+    lines.push(explicitTechnique.trim());
+    lines.push("");
+  } else if (hypothesis) {
+    lines.push("## Technique under test (inferred from file names)");
+    lines.push("");
+    lines.push(hypothesis);
+    lines.push("");
+    lines.push("This was inferred from the file names. If the names do not actually");
+    lines.push("encode the experiment intent, treat this as a weak hint only and lead");
+    lines.push("with what the numbers actually show.");
+    lines.push("");
+  } else {
+    lines.push("## Technique under test");
+    lines.push("");
+    lines.push("The run names do not encode an obvious experiment hypothesis. Infer what");
+    lines.push("you can from the numbers themselves: are the runs the same workflow with");
+    lines.push("different settings, the same prompt at different times, or two unrelated");
+    lines.push("sessions? Say so plainly in the report.");
+    lines.push("");
+  }
 
-## What to produce
+  return lines.join("\n");
+}
 
-Write a focused developer-facing report with these sections, in order:
+const COMPARE_REPORT_INSTRUCTIONS = `## What to produce
+
+Write a focused developer-facing report with these sections, in order.
+Use the run labels from "Runs under comparison" above; do not say "A"
+or "B" in prose unless quoting a table.
 
 ### What changed
-2–3 sentences. Name the technique under test (if given). State whether
-the runs are equivalent in shape (same call count, same answers, same
-drift status) or whether B diverged behaviorally from A. If the runs
-diverged, say so plainly — divergent runs cannot cleanly attribute cost
-deltas to the technique.
+2–3 sentences. Name the technique under test (use the provided or
+inferred hypothesis above). State whether the runs are equivalent in
+shape (same call count, same answers, same drift status) or whether
+the second run diverged behaviorally from the first. If the runs
+diverged, say so plainly — divergent runs cannot cleanly attribute
+cost deltas to the technique.
 
 ### Cost outcome
-One short paragraph. Did B save money, cost more, or stay flat? Quote
-the headline delta in both cr and USD if shown. Use the
+One short paragraph. Did the second run save money, cost more, or stay
+flat? Quote the headline delta in both cr and USD if shown. Use the
 pre-vs-post-divergence split to say what fraction of the delta is
 attributable to the prompt prefix change vs path-dependent agent
 behavior. If a projection is shown, quote the projected savings over N
 calls.
 
 ### What caused it
-3–5 bullets. Translate the bucket waterfall and per-call breakdown into
-developer meaning: e.g. "B dropped tool_defs by X cr because tools were
-unregistered", "B paid less in history because the conversation was
-shorter", "B output Y% fewer response tokens because the answer was
-terser". Avoid raw field names. End each bullet with the supporting
-number.
+3–5 bullets. Translate the bucket waterfall and per-call breakdown
+into developer meaning, e.g. "<nameB> dropped tool_defs by X cr
+because tools were unregistered", "<nameB> paid less in history
+because the conversation was shorter", "<nameB> output Y% fewer
+response tokens because the answer was terser". Avoid raw field
+names. End each bullet with the supporting number.
 
 ### Warnings and caveats
 Surface anything that makes the comparison less trustworthy:
@@ -263,25 +316,31 @@ Surface anything that makes the comparison less trustworthy:
 - divergent answers when the technique was expected to be answer-equivalent,
 - different call shapes when the technique was expected to be shape-preserving.
 
+If the inferred hypothesis from the file names does not match what
+the numbers show (e.g. names suggest "tool defs disabled" but
+tool_defs cost is unchanged), call that out explicitly.
+
 If no caveats apply, say "No blocking caveats. The comparison is
 attributable to the technique under test."
 
 ### What to validate next
-2–3 bullets. What follow-up runs or measurements would make the result
-more conclusive? Examples: re-run with cache pre-warmed on both sides,
-re-run with the same first prompt to remove prefix drift, capture
-quality validation (tests / human review) before claiming B is "as
-good".
+2–3 bullets. What follow-up runs or measurements would make the
+result more conclusive? Examples: re-run with cache pre-warmed on
+both sides, re-run with the same first prompt to remove prefix
+drift, capture quality validation (tests / human review) before
+claiming the cheaper run is "as good".
 
 ## Rules
 
 - Do not invent metrics. Only use numbers present in the comparison
   block. If a metric is missing, say so explicitly.
-- If the runs have different answers and the technique was supposed to
-  preserve the answer, flag that as a blocking caveat before
-  recommending B.
+- Refer to the runs by their labels (provided above), not "A" / "B".
+- If the runs have different answers and the technique was supposed
+  to preserve the answer, flag that as a blocking caveat before
+  recommending the cheaper run.
 - Do not recommend a cheaper model or Auto mode based on this
-  comparison alone unless quality validation is mentioned in the block.
+  comparison alone unless quality validation is mentioned in the
+  block.
 - Keep the report 400–600 words. Use bullets liberally. Avoid section
   preambles like "In this section we will…".
 - Cite numbers inline; do not duplicate the comparison block.
@@ -295,12 +354,22 @@ export function buildComparisonLlmPrompt(
   opts: LlmCompareOptions = {}
 ): string {
   const facts = formatComparisonAsMarkdown(cmp, opts);
-  const technique = opts.techniqueUnderTest
-    ? `\n## Technique under test\n\n${opts.techniqueUnderTest.trim()}\n`
-    : "";
+  // Infer hypothesis from the file names so the analyst can frame the
+  // diff as a hypothesis under test even when no explicit technique is
+  // provided. We pass the *raw* names (nameA/nameB from opts) so the
+  // inference can see prefixes/suffixes that prettifyRunName would
+  // strip later in the formatting layer.
+  const inferred = inferTechniqueFromRunNames(opts.nameA, opts.nameB);
+  const header = buildComparePromptHeader(
+    inferred.nameA,
+    inferred.nameB,
+    inferred.hypothesis,
+    inferred.sharedContext,
+    opts.techniqueUnderTest,
+  );
   return [
-    COMPARE_REPORT_PROMPT,
-    technique,
+    header,
+    COMPARE_REPORT_INSTRUCTIONS,
     "## Comparison facts (source of truth)\n",
     facts,
   ].join("\n");

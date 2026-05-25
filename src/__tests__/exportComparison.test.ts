@@ -96,6 +96,7 @@ describe("buildComparisonLlmPrompt", () => {
     const cmp = compareRunsCost(mkRun({}), mkRun({}))!;
     const out = buildComparisonLlmPrompt(cmp, { nameA: "baseline", nameB: "experiment" });
     expect(out).toContain("Cost Compare analysis prompt");
+    expect(out).toContain("Runs under comparison");
     expect(out).toContain("What changed");
     expect(out).toContain("Cost outcome");
     expect(out).toContain("Warnings and caveats");
@@ -105,19 +106,58 @@ describe("buildComparisonLlmPrompt", () => {
     expect(out).toContain("experiment");
   });
 
-  it("includes a technique-under-test header when provided", () => {
+  it("includes an explicit technique-under-test block when provided", () => {
     const cmp = compareRunsCost(mkRun({}), mkRun({}))!;
     const out = buildComparisonLlmPrompt(cmp, {
       nameA: "a", nameB: "b",
       techniqueUnderTest: "B disables tool definitions",
     });
-    expect(out).toContain("Technique under test");
+    expect(out).toContain("Technique under test (provided)");
     expect(out).toContain("B disables tool definitions");
   });
 
-  it("omits the technique section when not provided", () => {
+  it("infers a shared scenario and variant axis from structured file names", () => {
     const cmp = compareRunsCost(mkRun({}), mkRun({}))!;
-    const out = buildComparisonLlmPrompt(cmp, { nameA: "a", nameB: "b" });
-    expect(out).not.toContain("Technique under test");
+    const out = buildComparisonLlmPrompt(cmp, {
+      nameA: "munich3-baseline",
+      nameB: "munich3-no-tool-defs",
+    });
+    expect(out).toContain("Technique under test (inferred from file names)");
+    // Shared scenario surfaced.
+    expect(out).toContain("shared scenario: munich3");
+    // Variant axis surfaced on both sides.
+    expect(out).toContain("A=baseline");
+    expect(out).toContain("B=no-tool-defs");
+  });
+
+  it("infers a hypothesis from fully different names when no shared scenario exists", () => {
+    const cmp = compareRunsCost(mkRun({}), mkRun({}))!;
+    const out = buildComparisonLlmPrompt(cmp, {
+      nameA: "caveman",
+      nameB: "polite",
+    });
+    expect(out).toContain("Technique under test (inferred from file names)");
+    expect(out).toContain("A=caveman vs B=polite");
+  });
+
+  it("falls back to a no-signal message when names look like raw timestamps", () => {
+    const cmp = compareRunsCost(mkRun({}), mkRun({}))!;
+    const out = buildComparisonLlmPrompt(cmp, {
+      nameA: "copilot_all_prompts_2026-04-29T14-41-16.json",
+      nameB: "copilot_all_prompts_2026-04-30T09-22-04.json",
+    });
+    expect(out).toContain("Technique under test");
+    expect(out).toContain("do not encode an obvious experiment hypothesis");
+  });
+
+  it("instructs the analyst to use run labels instead of generic A/B", () => {
+    const cmp = compareRunsCost(mkRun({}), mkRun({}))!;
+    const out = buildComparisonLlmPrompt(cmp, {
+      nameA: "baseline",
+      nameB: "experiment",
+    });
+    expect(out).toContain("instead of generic");
+    // Quoted example uses the real names, not "A spent fewer than B".
+    expect(out).toContain("baseline spent fewer tokens on tool definitions than experiment");
   });
 });
