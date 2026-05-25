@@ -317,6 +317,17 @@ export default function App() {
     session.handleFile(text, name);
   }, [session.handleFile]);
 
+  var handleFilePair = useCallback(function (textA, nameA, textB, nameB) {
+    sessionLoadCount.current += 1;
+    setShowPalette(false);
+    setShowFilters(false);
+    setLoadError(null);
+    sessionB.resetSession();
+    setCompareLanding(true);
+    session.handleFile(textA, nameA);
+    sessionB.handleFile(textB, nameB);
+  }, [session.handleFile, sessionB.handleFile, sessionB.resetSession]);
+
   var openStoredSession = useCallback(function (entry) {
     if (!entry) return;
     var sessionPath = entry.discoveredPath || null;
@@ -454,6 +465,7 @@ export default function App() {
       <AppLandingState
         error={session.error || loadError}
         onLoad={handleFile}
+        onLoadPair={handleFilePair}
         onLoadSample={loadSample}
         onStartCompare={function () { setCompareLanding(true); }}
         inboxEntries={allSessions}

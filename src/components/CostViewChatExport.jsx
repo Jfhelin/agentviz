@@ -2054,31 +2054,32 @@ function ExportPromptButton(props) {
       setTimeout(function () { setStatus("idle"); }, 3000); // eslint-disable-line
     }
   }
-  var label = status === "copied" ? "Copied to clipboard"
-    : status === "error" ? "Copy failed"
-    : "Copy LLM analysis prompt";
-  var bg = status === "copied" ? theme.cost.fresh
-    : status === "error" ? theme.cost.cwrite
-    : (hover ? theme.bg.surface : theme.bg.base);
-  var fg = status === "copied" || status === "error" ? theme.bg.base : theme.text.primary;
+  var label = status === "copied" ? "✓ Analysis prompt copied"
+    : status === "error" ? "Copy failed -- see console"
+    : "Copy for LLM analysis";
   return (
-    <div style={{ display: "flex", justifyContent: "flex-end", margin: "0 0 16px" }}>
+    <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end", gap: 8 }}>
       <button
         type="button"
         onClick={onClick}
         onMouseEnter={function () { setHover(true); }}
         onMouseLeave={function () { setHover(false); }}
-        title="Copy a structured markdown + JSON prompt describing this session. Paste into an LLM chat (ChatGPT, Claude, etc.) to get a written analysis: efficiency review, model-fit suggestions, what the user could have done differently."
+        title="Copy the session wrapped in analyst instructions. Paste into ChatGPT/Claude/Copilot to get a focused report on efficiency, model fit, and what the user could have done differently."
         style={{
-          padding: "8px 14px",
-          background: bg, color: fg,
-          border: "1px solid " + theme.border.default,
-          borderRadius: 5, cursor: "pointer",
-          fontFamily: theme.font.mono, fontSize: theme.fontSize.sm, fontWeight: 500,
+          background: status === "copied" ? "rgba(34,197,94,0.15)" : (hover ? theme.bg.surface : "transparent"),
+          border: "1px solid " + (status === "error" ? theme.semantic.error : theme.border.default),
+          color: status === "copied" ? theme.semantic.success
+            : status === "error" ? theme.semantic.error
+            : theme.accent.primary,
+          padding: "4px 12px",
+          borderRadius: theme.radius.sm,
+          cursor: "pointer",
+          fontFamily: theme.font.mono,
+          fontSize: theme.fontSize.xs,
           transition: "background 120ms ease, color 120ms ease",
         }}
       >
-        {status === "idle" ? "📋 " : status === "copied" ? "✓ " : "⚠ "}{label}
+        {label}
       </button>
     </div>
   );
