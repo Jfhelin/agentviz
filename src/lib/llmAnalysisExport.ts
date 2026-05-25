@@ -415,6 +415,17 @@ export interface BuildOptions {
   /** Reserved for baseline comparison wiring (Compare-view integration).
    * Currently only the truthy/falsy flag is consumed. */
   baseline?: { sessionLabel?: string } | null;
+  /** Intended experiment setup, used to detect run-vs-intent mismatches.
+   * Each field is optional; only provided fields are checked. */
+  expected?: {
+    chatModeName?: string;
+    customAgentName?: string;
+    modelName?: string;
+    toolWhitelist?: string[];
+  };
+  /** Surfaces the developer cannot modify (e.g. ["model_selector", "ide_tools"]).
+   * Recommendations on these surfaces are demoted to external/fixed overhead. */
+  outOfScopeSurfaces?: string[];
 }
 
 export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOptions = {}): string {
@@ -626,7 +637,7 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
   lines.push("");
   lines.push("## Source-of-truth precedence");
   lines.push("");
-  lines.push("The developer-facing JSON keys (`developer_action_summary`, `workflow_classification`, `developer_efficiency_findings`, `developer_levers_detected`, `developer_cost_categories`, `recommended_changes`, `custom_mode_or_agent_analysis`, `ide_tool_configuration_analysis`, `skills_profile_analysis`, `automation_boundary_recommendation`, `model_strategy_recommendation`, `prompt_strategy_recommendation`, `quality_and_validation`, `workflow_phase_analysis`, `agent_loop_efficiency`, `tool_result_size_analysis`, `baseline_comparison`, `missing_data`) are the source of truth. The `raw_supporting_telemetry` block is evidence only. If a human-readable supporting section later in this prompt appears to contradict the developer-facing JSON, the JSON wins.");
+  lines.push("The developer-facing JSON keys (`developer_action_summary`, `workflow_classification`, `developer_efficiency_findings`, `developer_levers_detected`, `developer_cost_categories`, `recommended_changes`, `custom_mode_or_agent_analysis`, `ide_tool_configuration_analysis`, `skills_profile_analysis`, `automation_boundary_recommendation`, `model_strategy_recommendation`, `prompt_strategy_recommendation`, `quality_and_validation`, `workflow_phase_analysis`, `agent_loop_efficiency`, `tool_result_size_analysis`, `baseline_comparison`, `experiment_validity`, `control_surface_analysis`, `missing_data`) are the source of truth. The `raw_supporting_telemetry` block is evidence only. If a human-readable supporting section later in this prompt appears to contradict the developer-facing JSON, the JSON wins.");
   lines.push("");
   lines.push("## Output format");
   lines.push("");
@@ -650,7 +661,8 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
   lines.push("## Cross-cutting analyst guidance");
   lines.push("");
   lines.push("- **Iteration-aware analysis.** If `baseline_comparison.available == true`, compare current vs baseline: what improved, what regressed, what stayed the same, what is attributable to user-controlled changes, what is external or fixed. If `baseline_comparison.available == false`, do not invent a comparison.");
-  lines.push("- **Control-surface discipline.** Prioritize recommendations whose `surface` the developer actually controls. Do not keep recommending a lever as the main action if data shows it is outside their control; mention it as fixed or external overhead instead.");
+  lines.push("- **Experiment validity check.** Before judging whether an optimization worked, inspect `experiment_validity`. If `valid_for_agent_prompt_evaluation`, `valid_for_model_evaluation`, or `valid_for_tool_profile_evaluation` is `false`, lead with that mismatch and warn that conclusions about the affected surface are unsafe. If `experiment_validity.available == false`, note that no intended setup was declared and skip this check.");
+  lines.push("- **Control-surface discipline.** Use `control_surface_analysis.surfaces` to find which surfaces have recommendations. De-emphasize any surface whose `controllable == false`, and any surface listed in `control_surface_analysis.external_or_not_controllable` -- mention them as fixed/external overhead instead of as primary actions.");
   lines.push("- **Phase-aware diagnosis.** Use `workflow_phase_analysis.largest_cost_phase` and `largest_context_growth_phase` to target the expensive phase. Do not recommend generic token reductions when one phase clearly dominates.");
   lines.push("- **Loop-shape diagnosis.** Use `agent_loop_efficiency.call_shape_assessment`. If the shape is `many_model_turns_for_repeatable_workflow` or `hidden_deliberation_spike`, name the specific waste pattern; do not recommend more turns.");
   lines.push("- **Quality-aware model guidance.** If `quality_and_validation.available == false`, frame cheaper-model and more-automation recommendations as hypotheses to test, never as safe defaults.");
@@ -1597,12 +1609,16 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
     : chatCallsForShape <= 2 ? "efficient_single_pass"
     : longInternalProcessingCalls.length >= 2 ? "hidden_deliberation_spike"
     : chatCallsForShape >= 10 && noToolNoVisibleOutputCalls.length >= 3 ? "many_model_turns_for_repeatable_workflow"
-    : totals.toolCalls >= chatCallsForShape * 1.5 ? "tool_heavy_but_expected"
-    : "reasonable_interactive_session";
+    : (() => {
+        const termCount = perTurnEvents.reduce((a, ev) => a + (ev.producedToolCalls || []).filter(tc => classifyToolFamily(tc.name) === "terminal").length, 0);
+        return termCount >= Math.max(totals.toolCalls * 0.5, 5) && totals.toolCalls >= 8 ? "terminal_heavy_orchestration" : null;
+      })() || (totals.toolCalls >= chatCallsForShape * 1.5 ? "tool_heavy_but_expected" : "reasonable_interactive_session");
   const recommendedTargetShape = callShapeAssessment === "many_model_turns_for_repeatable_workflow"
     ? { chat_calls: "3-5", description: "Workflow looks repeatable. Move deterministic steps to scripts so the model only handles ambiguity and final review." }
     : callShapeAssessment === "hidden_deliberation_spike"
     ? { chat_calls: String(chatCallsForShape), description: "Call count is fine; reduce per-call deliberation. Lower reasoning effort, instruct the model to think briefly, or split into smaller sub-tasks." }
+    : callShapeAssessment === "terminal_heavy_orchestration"
+    ? { chat_calls: String(Math.max(3, Math.ceil(chatCallsForShape / 3))), description: "Most tool calls are terminal commands the model is orchestrating step by step. Bundle them into a shell script or Makefile and have the model invoke the script once." }
     : callShapeAssessment === "tool_heavy_but_expected"
     ? { chat_calls: String(chatCallsForShape), description: "Tool-heavy shape is appropriate for this workflow." }
     : { chat_calls: String(chatCallsForShape), description: "Current loop shape looks reasonable for an interactive session." };
@@ -1668,6 +1684,123 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
     ? { available: true, reason: "Baseline wiring not yet implemented; placeholder for future Compare-view integration." }
     : { available: false, reason: "No baseline session was provided. To enable iteration-aware analysis, pass a second session through the Compare view (planned)." };
 
+  // -- Experiment validity ------------------------------------------------
+  // If the caller declared an expected setup (intended chat mode, agent,
+  // model, tool whitelist), check whether the session actually ran under
+  // it. Mismatches invalidate "did the optimization work?" comparisons.
+  const expected = opts.expected || {};
+  const actualChatMode = firstChatMode ? firstChatMode.name : null;
+  const actualModel = chosenModelName || null;
+  const offeredToolNames = new Set<string>();
+  prompts.forEach(p => p.events.forEach(e => {
+    if (e.kind === "llm") {
+      (e.toolGroups || []).forEach(g => g.tools.forEach(t => offeredToolNames.add(t.name)));
+    }
+  }));
+  const mismatches: { field: string; expected: string; actual: string }[] = [];
+  if (expected.chatModeName != null) {
+    if ((actualChatMode || "") !== expected.chatModeName) {
+      mismatches.push({ field: "chat_mode", expected: expected.chatModeName, actual: actualChatMode || "(none)" });
+    }
+  }
+  if (expected.customAgentName != null) {
+    // We do not detect custom agents separately today. Declare honestly.
+    mismatches.push({ field: "custom_agent", expected: expected.customAgentName, actual: "not_detected_by_parser" });
+  }
+  if (expected.modelName != null) {
+    if ((actualModel || "") !== expected.modelName) {
+      mismatches.push({ field: "model", expected: expected.modelName, actual: actualModel || "(unknown)" });
+    }
+  }
+  if (expected.toolWhitelist && expected.toolWhitelist.length > 0) {
+    const extras = Array.from(offeredToolNames).filter(t => !expected.toolWhitelist!.includes(t));
+    if (extras.length > 0) {
+      mismatches.push({ field: "tool_whitelist", expected: expected.toolWhitelist.join(","), actual: "extras_present: " + extras.slice(0, 8).join(",") + (extras.length > 8 ? " ..." : "") });
+    }
+  }
+  const expectationProvided = expected.chatModeName != null || expected.customAgentName != null || expected.modelName != null || (expected.toolWhitelist && expected.toolWhitelist.length > 0);
+  const experimentValidity = {
+    available: !!expectationProvided,
+    expected: expectationProvided ? {
+      chat_mode: expected.chatModeName || null,
+      custom_agent: expected.customAgentName || null,
+      model: expected.modelName || null,
+      tool_whitelist_size: expected.toolWhitelist ? expected.toolWhitelist.length : null,
+    } : null,
+    actual: expectationProvided ? {
+      chat_mode: actualChatMode,
+      custom_agent: "not_detected_by_parser",
+      model: actualModel,
+      tools_offered_count: offeredToolNames.size,
+    } : null,
+    mismatches,
+    valid_for_agent_prompt_evaluation: expectationProvided ? !mismatches.some(m => m.field === "chat_mode" || m.field === "custom_agent") : null,
+    valid_for_model_evaluation: expectationProvided ? !mismatches.some(m => m.field === "model") : null,
+    valid_for_tool_profile_evaluation: expectationProvided ? !mismatches.some(m => m.field === "tool_whitelist") : null,
+    reason: expectationProvided ? null : "No expected setup was provided; cannot check experiment validity. Pass `opts.expected` to enable.",
+  };
+
+  // -- Control-surface analysis (aggregator over recommended_changes) ----
+  const outOfScopeSurfaces = new Set((opts.outOfScopeSurfaces || []).map(s => s.toLowerCase()));
+  function canonSurface(surface: string): string {
+    const s = surface.toLowerCase();
+    if (s.includes("chatmode") || s.includes("chat mode")) return "custom_chat_mode";
+    if (s.includes("configure tools") || s.includes("ide_tools")) return "tool_configuration";
+    if (s.includes("skill")) return "skills_or_extensions";
+    if (s.includes("repo script") || s.includes("script")) return "scripts_or_automation";
+    if (s.includes("agents.md") || s.includes("copilot-instructions")) return "repo_instructions";
+    if (s.includes("inline") || s.includes("prompt")) return "inline_prompt";
+    if (s.includes("model")) return "model_selection";
+    if (s.includes("validation")) return "validation_pipeline";
+    return "other";
+  }
+  const recsBySurface: Record<string, { surface: string; controllable: boolean; recommendations: Record<string, unknown>[] }> = {};
+  recommendedChanges.forEach(r => {
+    const rec = r as { surface: string };
+    const key = canonSurface(rec.surface);
+    if (!recsBySurface[key]) {
+      recsBySurface[key] = { surface: key, controllable: !outOfScopeSurfaces.has(key), recommendations: [] };
+    }
+    recsBySurface[key].recommendations.push(r);
+  });
+  const externalOrFixed: { surface: string; reason: string }[] = [];
+  outOfScopeSurfaces.forEach(s => {
+    externalOrFixed.push({ surface: s, reason: "Marked out of scope by the caller. Treat as fixed or external overhead, not as a recommended action." });
+  });
+  const controlSurfaceAnalysis = {
+    available: true,
+    surfaces: Object.values(recsBySurface),
+    external_or_not_controllable: externalOrFixed,
+    note: "Each recommendation in `recommended_changes` has a `surface` field. This block groups them and marks any surface the caller listed in `opts.outOfScopeSurfaces` as not controllable. The analyst should de-emphasize recommendations whose surface is not controllable.",
+  };
+
+  // -- Automation boundary extensions -------------------------------------
+  // Detect deterministic indicators on top of the existing
+  // `automationBoundary` block: scripts/tools created in the session,
+  // raw large data carried into chat. These are heuristic.
+  const fileCreateNames: string[] = [];
+  perTurnEvents.forEach(ev => {
+    (ev.producedToolCalls || []).forEach(tc => {
+      if (classifyToolFamily(tc.name) === "file_editing") {
+        const args = tc.argsSummary || "";
+        const match = args.match(/[\w\-./]+\.(sh|bash|zsh|py|js|ts|mjs|cjs|mk|Makefile|ps1|rb)\b/);
+        if (match) fileCreateNames.push(match[0]);
+      }
+    });
+  });
+  const scriptsOrToolsCreated = Array.from(new Set(fileCreateNames));
+  const rawLargeDataCarriedInChat = toolResultSizeAnalysis.available && toolResultSizeAnalysis.bloat_assessment !== "low";
+  const automationBoundaryExtensions = {
+    scripts_or_tools_created: scriptsOrToolsCreated,
+    scripts_or_tools_reused: [] as string[],
+    raw_large_data_carried_in_chat: rawLargeDataCarriedInChat,
+    raw_large_data_signal: rawLargeDataCarriedInChat
+      ? "Tool-result bloat is " + toolResultSizeAnalysis.bloat_assessment + " (avg " + toolResultSizeAnalysis.avg_tool_result_chars_per_chat_call + " chars/call). Large raw tool output is flowing back into the model's context."
+      : "No significant raw-data carry detected from tool results.",
+    confidence: "low",
+    caveat: "Heuristic detection from tool-name + filename patterns. The export does not track script re-use or distinguish authored scripts from regenerated content.",
+  };
+
   const facts = {
     // ===================== Developer-facing layer =====================
     session_metadata: {
@@ -1701,7 +1834,9 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
     custom_mode_or_agent_analysis: customModeOrAgentAnalysis,
     ide_tool_configuration_analysis: ideToolConfigurationAnalysis,
     skills_profile_analysis: skillsProfileAnalysis,
-    automation_boundary_recommendation: automationBoundary,
+    automation_boundary_recommendation: automationBoundary
+      ? { ...(automationBoundary as Record<string, unknown>), ...automationBoundaryExtensions }
+      : { available: false, ...automationBoundaryExtensions },
     model_strategy_recommendation: modelStrategyRecommendation,
     prompt_strategy_recommendation: promptStrategyRecommendation,
     quality_and_validation: qualityAndValidation,
@@ -1709,6 +1844,8 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
     agent_loop_efficiency: agentLoopEfficiency,
     tool_result_size_analysis: toolResultSizeAnalysis,
     baseline_comparison: baselineComparison,
+    experiment_validity: experimentValidity,
+    control_surface_analysis: controlSurfaceAnalysis,
     missing_data: [
       firstChatMode ? {
         field: "custom_chat_mode_full_prompt_or_summary",

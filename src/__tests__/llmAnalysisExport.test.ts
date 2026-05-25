@@ -162,6 +162,8 @@ describe("buildLlmAnalysisPrompt", () => {
     expect(facts).toHaveProperty("agent_loop_efficiency");
     expect(facts).toHaveProperty("tool_result_size_analysis");
     expect(facts).toHaveProperty("baseline_comparison");
+    expect(facts).toHaveProperty("experiment_validity");
+    expect(facts).toHaveProperty("control_surface_analysis");
     expect(facts).toHaveProperty("missing_data");
     expect(Array.isArray(facts.missing_data)).toBe(true);
     expect(facts.missing_data.length).toBeGreaterThan(0);
@@ -223,11 +225,46 @@ describe("buildLlmAnalysisPrompt", () => {
     const out = buildLlmAnalysisPrompt(analysis);
     expect(out).toContain("Cross-cutting analyst guidance");
     expect(out).toContain("Iteration-aware analysis");
+    expect(out).toContain("Experiment validity check");
     expect(out).toContain("Control-surface discipline");
     expect(out).toContain("Phase-aware diagnosis");
     expect(out).toContain("Loop-shape diagnosis");
     expect(out).toContain("Quality-aware model guidance");
     expect(out).toContain("Automation-boundary diagnosis");
     expect(out).toContain("Generality");
+  });
+
+  it("emits experiment_validity placeholder when no expected setup is provided", () => {
+    const out = buildLlmAnalysisPrompt(analysis);
+    const match = out.match(/## Structured facts \(JSON\)[\s\S]*?```json\n([\s\S]*?)\n```/);
+    const facts = JSON.parse(match![1]);
+    expect(facts.experiment_validity.available).toBe(false);
+    expect(facts.experiment_validity.reason).toMatch(/expected setup/i);
+  });
+
+  it("detects mismatches when expected setup conflicts with actual run", () => {
+    const out = buildLlmAnalysisPrompt(analysis, {
+      expected: { modelName: "definitely-not-the-model-used-xyz" },
+    });
+    const match = out.match(/## Structured facts \(JSON\)[\s\S]*?```json\n([\s\S]*?)\n```/);
+    const facts = JSON.parse(match![1]);
+    expect(facts.experiment_validity.available).toBe(true);
+    expect(facts.experiment_validity.valid_for_model_evaluation).toBe(false);
+    expect(facts.experiment_validity.mismatches.some((m: { field: string }) => m.field === "model")).toBe(true);
+  });
+
+  it("groups recommendations by surface and marks out-of-scope surfaces as not controllable", () => {
+    const out = buildLlmAnalysisPrompt(analysis, {
+      outOfScopeSurfaces: ["model_selection"],
+    });
+    const match = out.match(/## Structured facts \(JSON\)[\s\S]*?```json\n([\s\S]*?)\n```/);
+    const facts = JSON.parse(match![1]);
+    expect(facts.control_surface_analysis.available).toBe(true);
+    expect(Array.isArray(facts.control_surface_analysis.surfaces)).toBe(true);
+    const modelSurface = facts.control_surface_analysis.surfaces.find((s: { surface: string }) => s.surface === "model_selection");
+    if (modelSurface) {
+      expect(modelSurface.controllable).toBe(false);
+    }
+    expect(facts.control_surface_analysis.external_or_not_controllable.some((e: { surface: string }) => e.surface === "model_selection")).toBe(true);
   });
 });
