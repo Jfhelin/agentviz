@@ -44,6 +44,11 @@ import {
   type ActualToolCall,
   type ToolDefinitionShapeAnalysis,
 } from "./toolDefinitionShape";
+import {
+  analyzeMcpReachability,
+  type DeclaredMcpServer,
+  type McpReachabilityAnalysis,
+} from "./mcpServerReachability";
 import type {
   NormalizedEvent,
   ParsedSession,
@@ -209,6 +214,27 @@ interface RawExport {
 }
 
 // ── Component classification ─────────────────────────────────────────────────
+
+/** Normalize the optional `root.mcpServers` array into typed `DeclaredMcpServer`
+ *  records. Tolerates partial/missing fields and non-array inputs. */
+function extractDeclaredMcpServers(raw: unknown): DeclaredMcpServer[] {
+  if (!Array.isArray(raw)) return [];
+  const out: DeclaredMcpServer[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    const e = entry as Record<string, unknown>;
+    const label = typeof e.label === "string" ? e.label : "";
+    if (!label) continue;
+    out.push({
+      label,
+      type: typeof e.type === "string" ? e.type : undefined,
+      command: typeof e.command === "string" ? e.command : undefined,
+      args: Array.isArray(e.args) ? e.args : undefined,
+      version: typeof e.version === "string" ? e.version : undefined,
+    });
+  }
+  return out;
+}
 
 function chars_to_tokens(chars: number): number {
   // Rough English heuristic. The whole call's bucket totals are scaled to the
@@ -982,6 +1008,11 @@ export interface CostAnalysis {
    *  name across all primary calls. Router-usage stats are computed from
    *  every `toolCall` log entry in the session. */
   toolDefinitionShape: ToolDefinitionShapeAnalysis;
+  /** Cross-check between the IDE's declared MCP servers (`root.mcpServers`)
+   *  and the `mcp_*` tool definitions actually shipped to the model. Surfaces
+   *  configured-but-invisible servers that cost setup overhead without
+   *  contributing any tool the model can see. */
+  mcpReachability: McpReachabilityAnalysis;
   totals: {
     promptTokens: number;
     output: number;
@@ -1576,12 +1607,15 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
   });
 
   const totalDenom = cumCached + cumFresh + cumCwrite;
+  const declaredMcpServers = extractDeclaredMcpServers(root.mcpServers);
+  const allVisibleToolNames = Array.from(sessionUniqueTools.keys());
   const costAnalysis: CostAnalysis = {
     prompts: costPrompts,
     toolDefinitionShape: analyzeToolDefinitionShape(
       Array.from(sessionUniqueTools.values()),
       sessionActualCalls,
     ),
+    mcpReachability: analyzeMcpReachability(declaredMcpServers, allVisibleToolNames),
     totals: {
       promptTokens: cumPt,
       output: cumOut,
