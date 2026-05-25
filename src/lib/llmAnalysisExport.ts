@@ -534,6 +534,56 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
   const autoOptimalCost = cheapestAlt ? cheapestAlt.projected_cost_usd * (1 - AUTO_DISCOUNT) : null;
   const autoOptimalSavings = autoOptimalCost != null ? totals.cost - autoOptimalCost : null;
 
+  // Auto-mode fit: Auto picks ONE model based on the FIRST chat prompt and
+  // sticks with it. If session complexity drifts upward (later turns produce
+  // much larger outputs, chain more tools, or the user manually switched to
+  // a heavier model), Auto's first-prompt pick was wrong for the rest. We
+  // compute concrete drift signals from the per-call data so the analyst
+  // can cite numbers instead of guessing.
+  const chatEvents: (CostAnalysisCall & { kind: "llm" })[] = [];
+  prompts.forEach(p => p.events.forEach(e => {
+    if (e.kind === "llm" && e.category !== "overhead") chatEvents.push(e);
+  }));
+  const firstChat = chatEvents[0];
+  const firstUserPromptText = (function () {
+    const um = aggregateUserMessages(prompts);
+    return um[0] ? um[0].text : "";
+  })();
+  const firstPromptChars = firstUserPromptText.length;
+  // Output-size escalation: max output token count vs first call's output.
+  const firstOut = firstChat ? (firstChat.output || 0) : 0;
+  let maxOut = firstOut;
+  let maxOutTurn = 1;
+  chatEvents.forEach((e, idx) => {
+    if ((e.output || 0) > maxOut) { maxOut = e.output || 0; maxOutTurn = idx + 1; }
+  });
+  const outputEscalationRatio = firstOut > 0 ? maxOut / firstOut : (maxOut > 0 ? Infinity : 1);
+  // Tool-call escalation: did later turns chain many more tools than the first?
+  const firstToolCalls = firstChat ? ((firstChat.producedToolCalls || []).length) : 0;
+  let maxToolCalls = firstToolCalls;
+  chatEvents.forEach(e => {
+    const tc = (e.producedToolCalls || []).length;
+    if (tc > maxToolCalls) maxToolCalls = tc;
+  });
+  // Model switching: did the user manually change model mid-session?
+  const distinctChatModels = new Set(chatEvents.map(e => e.model).filter(Boolean));
+  const autoModelSwitched = distinctChatModels.size > 1;
+  // Derive a coarse verdict from these signals.
+  const driftSignals: string[] = [];
+  if (firstPromptChars < 200) driftSignals.push("short first prompt (" + firstPromptChars + " chars) gives Auto very little signal");
+  if (outputEscalationRatio >= 3 && maxOut > 1500) driftSignals.push("output escalated " + outputEscalationRatio.toFixed(1) + "x by turn " + maxOutTurn + " (" + firstOut.toLocaleString() + " -> " + maxOut.toLocaleString() + " tokens)");
+  if (maxToolCalls >= 5 && firstToolCalls <= 1) driftSignals.push("tool-chain depth grew from " + firstToolCalls + " to " + maxToolCalls + " calls per turn");
+  if (autoModelSwitched) driftSignals.push("user manually switched models mid-session (" + Array.from(distinctChatModels).map(shortModelName).join(", ") + ")");
+  let autoFitVerdict: "good" | "borderline" | "poor";
+  if (driftSignals.length === 0) autoFitVerdict = "good";
+  else if (driftSignals.length === 1) autoFitVerdict = "borderline";
+  else autoFitVerdict = "poor";
+  const autoFitLabel = autoFitVerdict === "good"
+    ? "Good fit"
+    : autoFitVerdict === "borderline"
+    ? "Borderline fit"
+    : "Poor fit";
+
   // Build the markdown.
   const lines: string[] = [];
   lines.push("# Copilot session analysis request");
@@ -558,7 +608,7 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
   lines.push("4. **Where the money went** — Focus on cost. For each notable cost driver, name the specific data field (e.g. `ctx_components.tool_results grew from 12k to 28k between turns 8 and 10`) and translate it into a savings opportunity. Skip purely narrative observations. 3-5 bullets.");
   lines.push("5. **What the user could change** — Up to 3 concrete prompt or setup changes. For each: one-line rationale + qualitative size (large / moderate / small). Reference the pre-computed cost-lever block when possible.");
   lines.push("6. **Model fit** — Was " + (chosenModelName ? shortModelName(chosenModelName) : "the chosen model") + " (" + (chosenTier || "unknown") + " tier) right for this task? 2-3 sentences. Reference the alt-model table.");
-  lines.push("7. **Auto-mode verdict** — Score 1-5. Reference the pre-computed Auto-mode savings figures below. Cite complexity drift signals.");
+  lines.push("7. **Auto-mode verdict** — One line: cite the pre-computed **Auto-mode fit verdict** (Good / Borderline / Poor fit) and the named drift signals verbatim, then quote the realistic cost figure the verdict points you at (floor for Poor, floor or in-between for Borderline, optimistic for Good).");
   lines.push("8. **Unused capacity** — Two short paragraphs. (a) Unused tools: cite the pre-computed `% of session cost` figure, name 2-3 specific tools the user could safely disable in VS Code's Configure Tools UI for similar tasks. (b) Unused skills: cite the pre-computed **Unused skills** figure (`N skills / $X / Y%`) verbatim — that number is detected from the data, not inferred. Name the 2-3 largest unused skills from the System anatomy list as the top removal candidates.");
   lines.push("");
   lines.push("**Hard rules:**");
@@ -581,6 +631,19 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
   if (autoOptimalCost != null && cheapestAlt && autoOptimalSavings != null && autoOptimalSavings > 0) {
     const altPct = totals.cost > 0 ? (autoOptimalSavings / totals.cost) * 100 : 0;
     lines.push("- **Auto-mode optimistic (cheapest viable pick):** Auto picks a model from the first prompt and applies 10% off. If Auto picked the cheapest model in the alt-projection table (" + cheapestAlt.model + ", " + cheapestAlt.category + " tier), projected ~" + fmtUsd(autoOptimalCost) + " (save ~" + fmtUsd(autoOptimalSavings) + ", " + altPct.toFixed(0) + "%). Judge whether " + cheapestAlt.category + "-tier is realistic for this task before quoting this number — if the task needed a Versatile or Powerful model, the realistic Auto cost is between the floor and this figure.");
+  }
+  // Auto-mode fit verdict: would Auto's first-prompt pick have served the
+  // whole session, or did complexity drift make the first guess wrong?
+  {
+    const fitLine = "- **Auto-mode fit verdict (pre-computed):** **" + autoFitLabel + "**. "
+      + "Auto picks a model from the first user prompt only (" + firstPromptChars.toLocaleString() + " chars) and reuses it for every subsequent turn. "
+      + (driftSignals.length === 0
+        ? "No complexity-drift signals detected (output size, tool-chain depth, and model choice stayed stable across turns), so Auto's first-prompt pick would have served the whole session. Quote this verdict directly in section 7."
+        : "Drift signals detected: " + driftSignals.map(s => "(" + s + ")").join("; ") + ". "
+          + (autoFitVerdict === "poor"
+            ? "Auto's first-prompt pick would likely have under-served the later turns -- the Auto-optimistic cost figure above is unrealistic for this session. Quote this verdict directly in section 7."
+            : "Auto's first-prompt pick was probably workable but not optimal -- use the same-model floor figure above as the realistic estimate, not the optimistic one. Quote this verdict directly in section 7."));
+    lines.push(fitLine);
   }
   if (totals.unexpectedMissCount > 0) {
     lines.push("- **Unexpected cache misses:** " + totals.unexpectedMissCount + " calls / wasted **~" + fmtUsd(totals.unexpectedMissCost) + " (" + (totals.cost > 0 ? (totals.unexpectedMissCost / totals.cost * 100).toFixed(1) : "0") + "% of session cost)**. See per-call rows with `unexpected_cache_miss: true`.");

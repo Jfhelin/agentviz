@@ -106,4 +106,13 @@ describe("buildLlmAnalysisPrompt", () => {
     expect(out).toContain("✗ `ghost-skill`");
     expect(out).toMatch(/2 skills attached \(1 used, 1 unused\)/);
   });
+
+  it("emits a pre-computed Auto-mode fit verdict with named drift signals", () => {
+    const out = buildLlmAnalysisPrompt(analysis);
+    expect(out).toContain("Auto-mode fit verdict");
+    // Verdict label must be one of the three buckets.
+    expect(out).toMatch(/\*\*(Good fit|Borderline fit|Poor fit)\*\*/);
+    // Sec 7 instructions must reference the pre-computed verdict.
+    expect(out).toMatch(/cite the pre-computed \*\*Auto-mode fit verdict\*\*/);
+  });
 });
