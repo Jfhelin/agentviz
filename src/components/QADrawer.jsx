@@ -8,6 +8,8 @@
 
 import { useState, useRef, useEffect, useMemo } from "react";
 import { theme, alpha } from "../lib/theme.js";
+import useFocusTrap from "../hooks/useFocusTrap.js";
+import useReducedMotion from "../hooks/useReducedMotion.js";
 import Icon from "./Icon.jsx";
 import KeyboardHint from "./ui/KeyboardHint.jsx";
 import { classify } from "../lib/qaClassifier.js";
@@ -110,6 +112,7 @@ var INSIGHT_DEFS = [
 ];
 
 function QuickInsights({ sessionData, onAsk }) {
+  var prefersReducedMotion = useReducedMotion();
   var insights = useMemo(function () {
     if (!sessionData || !sessionData.metadata) return [];
     return INSIGHT_DEFS.filter(function (def) {
@@ -160,7 +163,7 @@ function QuickInsights({ sessionData, onAsk }) {
                 fontSize: theme.fontSize.sm,
                 padding: "4px 8px",
                 cursor: "pointer",
-                transition: "background 100ms ease-out",
+                transition: prefersReducedMotion ? "none" : "background 100ms ease-out",
               }}
             >
               <Icon name={ins.icon} size={11} style={{ color: theme.text.dim, flexShrink: 0 }} />
@@ -274,7 +277,7 @@ function renderParts(parts, onSeekTurn) {
 
 // ── Message bubble ──────────────────────────────────────────────────────────
 
-function MessageBubble({ message, onSeekTurn }) {
+function MessageBubble({ message, onSeekTurn, prefersReducedMotion }) {
   var isUser = message.role === "user";
   var bg = isUser ? alpha(theme.agent.user, 0.08) : alpha(theme.agent.assistant, 0.06);
   var borderColor = isUser ? alpha(theme.agent.user, 0.15) : alpha(theme.agent.assistant, 0.12);
@@ -297,7 +300,7 @@ function MessageBubble({ message, onSeekTurn }) {
       maxWidth: "92%",
     }}>
       {message.streaming && !message.content && (
-        <span style={{ display: "inline-block", animation: "spin 1.2s linear infinite", color: theme.accent.primary }}>
+        <span style={{ display: "inline-block", animation: prefersReducedMotion ? "none" : "spin 1.2s linear infinite", color: theme.accent.primary }}>
           {"\u2726"}
         </span>
       )}
@@ -318,36 +321,30 @@ function MessageBubble({ message, onSeekTurn }) {
 
 // ── Drawer ──────────────────────────────────────────────────────────────────
 
-export default function QADrawer({ open, onClose, onDisable, sessionData, onSeek, turns, qa }) {
-  var [input, setInput] = useState("");
+export default function QADrawer({ open, onClose, onDisable, sessionData, onSeek, turns, qa, initialQuestion }) {
+  var [input, setInput] = useState(initialQuestion || "");
   var messagesEndRef = useRef(null);
   var inputRef = useRef(null);
+  var panelRef = useRef(null);
+  var wasOpenRef = useRef(open);
+  var prefersReducedMotion = useReducedMotion();
+
+  useFocusTrap(panelRef, { active: open, initialFocusRef: inputRef, onEscape: onClose });
 
   // Auto-scroll to bottom on new messages
   useEffect(function () {
     if (messagesEndRef.current && messagesEndRef.current.scrollIntoView) {
-      messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+      messagesEndRef.current.scrollIntoView({ behavior: prefersReducedMotion ? "auto" : "smooth" });
     }
-  }, [qa.messages]);
+  }, [qa.messages, prefersReducedMotion]);
 
   // Focus input when drawer opens
   useEffect(function () {
+    var justOpened = open && !wasOpenRef.current;
+    wasOpenRef.current = open;
     if (!open) return;
-    var id = setTimeout(function () {
-      if (inputRef.current) inputRef.current.focus();
-    }, 50);
-    return function () { clearTimeout(id); };
-  }, [open]);
-
-  // Escape to close
-  useEffect(function () {
-    if (!open) return;
-    function handleKey(e) {
-      if (e.key === "Escape") { e.preventDefault(); onClose(); }
-    }
-    window.addEventListener("keydown", handleKey);
-    return function () { window.removeEventListener("keydown", handleKey); };
-  }, [open, onClose]);
+    if (justOpened) setInput(initialQuestion || "");
+  }, [open, initialQuestion]);
 
   function handleSubmit(e) {
     e.preventDefault();
@@ -368,7 +365,10 @@ export default function QADrawer({ open, onClose, onDisable, sessionData, onSeek
     <>
       {/* Backdrop */}
       <div
-        onClick={onClose}
+        role="presentation"
+        onMouseDown={function (event) {
+          if (event.target === event.currentTarget) onClose();
+        }}
         style={{
           position: "fixed",
           inset: 0,
@@ -379,8 +379,10 @@ export default function QADrawer({ open, onClose, onDisable, sessionData, onSeek
 
       {/* Drawer panel */}
       <div
+        ref={panelRef}
         role="dialog"
-        aria-label="Session Q&A"
+        aria-modal="true"
+        aria-labelledby="qa-drawer-title"
         style={{
           position: "fixed",
           top: 0,
@@ -407,15 +409,16 @@ export default function QADrawer({ open, onClose, onDisable, sessionData, onSeek
           borderBottom: "1px solid " + theme.border.default,
           flexShrink: 0,
         }}>
-          <span style={{
+          <h2 id="qa-drawer-title" style={{
             fontSize: theme.fontSize.sm,
             color: theme.text.dim,
             textTransform: "uppercase",
             letterSpacing: 2,
             fontFamily: theme.font.mono,
+            margin: 0,
           }}>
             Session Q&A
-          </span>
+          </h2>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             {qa.messages.length > 0 && (
               <button
@@ -430,6 +433,7 @@ export default function QADrawer({ open, onClose, onDisable, sessionData, onSeek
                   fontSize: theme.fontSize.sm,
                   fontFamily: theme.font.mono,
                   padding: "2px 8px",
+                  minHeight: 24,
                 }}
               >
                 clear
@@ -446,6 +450,8 @@ export default function QADrawer({ open, onClose, onDisable, sessionData, onSeek
                 fontSize: theme.fontSize.xl,
                 lineHeight: 1,
                 padding: 0,
+                minWidth: 24,
+                minHeight: 24,
               }}
             >
               <Icon name="close" size={16} />
@@ -486,7 +492,7 @@ export default function QADrawer({ open, onClose, onDisable, sessionData, onSeek
           )}
 
           {qa.messages.map(function (msg) {
-            return <MessageBubble key={msg.id} message={msg} onSeekTurn={handleSeekTurn} />;
+            return <MessageBubble key={msg.id} message={msg} onSeekTurn={handleSeekTurn} prefersReducedMotion={prefersReducedMotion} />;
           })}
 
           {qa.isStreaming && qa.streamingStatus && (
@@ -499,7 +505,7 @@ export default function QADrawer({ open, onClose, onDisable, sessionData, onSeek
               fontFamily: theme.font.mono,
               padding: "2px 4px",
             }}>
-              <span style={{ display: "inline-block", animation: "spin 1.2s linear infinite" }}>{"\u2726"}</span>
+              <span style={{ display: "inline-block", animation: prefersReducedMotion ? "none" : "spin 1.2s linear infinite" }}>{"\u2726"}</span>
               <span>{qa.streamingStatus}</span>
             </div>
           )}
@@ -543,7 +549,7 @@ export default function QADrawer({ open, onClose, onDisable, sessionData, onSeek
               border: "1px solid " + theme.border.default,
               borderRadius: theme.radius.md,
               padding: "4px 8px",
-              transition: "border-color 150ms ease-out",
+              transition: prefersReducedMotion ? "none" : "border-color 150ms ease-out",
             }}
           >
             <input
@@ -577,6 +583,8 @@ export default function QADrawer({ open, onClose, onDisable, sessionData, onSeek
                   color: theme.text.primary,
                   cursor: "pointer",
                   padding: "4px 8px",
+                  minWidth: 24,
+                  minHeight: 24,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
@@ -597,6 +605,8 @@ export default function QADrawer({ open, onClose, onDisable, sessionData, onSeek
                   color: input.trim() ? theme.text.primary : theme.text.ghost,
                   cursor: input.trim() ? "pointer" : "default",
                   padding: "4px 8px",
+                  minWidth: 24,
+                  minHeight: 24,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
@@ -613,6 +623,7 @@ export default function QADrawer({ open, onClose, onDisable, sessionData, onSeek
             </span>
             <button
               onClick={function () { if (onDisable) onDisable(); }}
+              aria-label="Disable Q&A drawer"
               style={{
                 background: "none",
                 border: "none",

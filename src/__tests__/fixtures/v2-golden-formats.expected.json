@@ -1,0 +1,187 @@
+{
+  "cases": [
+    {
+      "id": "claude-code",
+      "sourceFixture": "test-claude-code.jsonl",
+      "metadata": {
+        "format": "claude-code",
+        "primaryModel": "claude-sonnet-4-20250514",
+        "totalEvents": 4,
+        "totalTurns": 1,
+        "totalToolCalls": 1,
+        "errorCount": 0,
+        "tokenUsage": {
+          "inputTokens": 2100,
+          "outputTokens": 350,
+          "cacheRead": 600,
+          "cacheWrite": 300
+        }
+      },
+      "events": {
+        "firstText": "Build a REST API with Express",
+        "toolNames": ["bash"],
+        "errorEventIndexes": []
+      },
+      "review": {
+        "label": "Healthy",
+        "totalEvents": 4,
+        "totalTurns": 1,
+        "totalToolCalls": 1,
+        "errorCount": 0,
+        "insightIds": ["token-usage"]
+      },
+      "cost": {
+        "inputTokens": 2100,
+        "outputTokens": 350,
+        "cacheRead": 600,
+        "cacheWrite": 300,
+        "freshInputTokens": 1200,
+        "callCount": 1
+      },
+      "ui": {
+        "investigateEventText": "Build a REST API with Express"
+      }
+    },
+    {
+      "id": "vscode-chat",
+      "sourceFixture": "test-vscode-chat.json",
+      "metadata": {
+        "format": "vscode-chat",
+        "sessionId": "test-vscode-session-001",
+        "primaryModel": "copilot/claude-opus-4.6",
+        "customTitle": "Refactor auth module",
+        "sessionMode": "agent",
+        "totalTurns": 3,
+        "tokenUsage": null
+      },
+      "events": {
+        "firstText": "Refactor the auth module to use JWT tokens",
+        "mustIncludeToolNames": ["readFile", "findTextInFiles", "createFile", "run_in_terminal", "file_edit"]
+      },
+      "review": {
+        "totalTurns": 3
+      },
+      "ui": {
+        "investigateEventText": "Refactor the auth module to use JWT tokens"
+      }
+    },
+    {
+      "id": "copilot-prompts",
+      "sourceFixture": "test-copilot-prompts.json",
+      "metadata": {
+        "format": "copilot-prompts",
+        "primaryModel": "gpt-4.1",
+        "totalEvents": 2,
+        "totalTurns": 2,
+        "totalToolCalls": 0,
+        "errorCount": 0,
+        "tokenUsage": {
+          "inputTokens": 2800,
+          "outputTokens": 360,
+          "cacheRead": 1100,
+          "cacheWrite": 70
+        }
+      },
+      "events": {
+        "firstText": "Build a parser",
+        "toolNames": [],
+        "errorEventIndexes": []
+      },
+      "review": {
+        "label": "Healthy",
+        "totalEvents": 2,
+        "totalTurns": 2,
+        "totalToolCalls": 0,
+        "errorCount": 0,
+        "insightIds": ["interventions", "token-usage"]
+      },
+      "cost": {
+        "inputTokens": 2800,
+        "outputTokens": 360,
+        "cacheRead": 1100,
+        "cacheWrite": 70,
+        "freshInputTokens": 1630,
+        "callCount": 2
+      },
+      "ui": {
+        "investigateEventText": "Build a parser"
+      }
+    },
+    {
+      "id": "atif",
+      "sourceFixture": "v2-golden-atif.json",
+      "metadata": {
+        "format": "atif",
+        "sessionId": "v2-golden-atif",
+        "primaryModel": "gpt-test",
+        "totalTurns": 3,
+        "tokenUsage": {
+          "inputTokens": 290,
+          "outputTokens": 55,
+          "cacheRead": 60,
+          "cacheWrite": 0
+        }
+      },
+      "events": {
+        "firstText": "Review the authentication code.",
+        "mustIncludeToolNames": ["delegate_to_subagent"]
+      },
+      "review": {
+        "totalTurns": 3,
+        "cost": 0.123,
+        "insightIds": ["interventions", "token-usage"]
+      },
+      "cost": {
+        "inputTokens": 290,
+        "outputTokens": 55,
+        "cacheRead": 60,
+        "cacheWrite": 0,
+        "freshInputTokens": 230
+      },
+      "ui": {
+        "investigateEventText": "Review the authentication code."
+      }
+    },
+    {
+      "id": "multiagent",
+      "sourceFixture": "test-multiagent.jsonl",
+      "metadata": {
+        "format": "copilot-cli",
+        "sessionId": "test-multiagent-001",
+        "primaryModel": "claude-opus-4.6",
+        "totalTurns": 2,
+        "totalToolCalls": 9,
+        "errorCount": 2,
+        "tokenUsage": {
+          "inputTokens": 50000,
+          "outputTokens": 8000,
+          "cacheRead": 10000,
+          "cacheWrite": 2000
+        }
+      },
+      "events": {
+        "firstText": "Review this code and fix the bugs",
+        "mustIncludeToolNames": ["task", "view", "grep", "edit"],
+        "mustIncludeErrorText": ["Context window exceeded"]
+      },
+      "review": {
+        "label": "Healthy",
+        "totalTurns": 2,
+        "totalToolCalls": 9,
+        "errorCount": 2,
+        "insightIds": ["first-error", "interventions", "slow-tool", "token-usage"]
+      },
+      "cost": {
+        "inputTokens": 50000,
+        "outputTokens": 8000,
+        "cacheRead": 10000,
+        "cacheWrite": 2000,
+        "freshInputTokens": 38000,
+        "callCount": 1
+      },
+      "ui": {
+        "investigateEventText": "Review this code and fix the bugs"
+      }
+    }
+  ]
+}

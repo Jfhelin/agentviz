@@ -1,0 +1,4 @@
+{"type":"human","timestamp":"2026-01-18T22:24:55.672Z","message":{"content":"Build a REST API with Express"}}
+{"type":"assistant","timestamp":"2026-01-18T22:24:58.000Z","message":{"id":"msg_claude_1","model":"claude-sonnet-4-20250514","content":[{"type":"text","text":"Here is the Express.js project with TypeScript."}],"usage":{"input_tokens":1200,"output_tokens":350,"cache_read_input_tokens":600,"cache_creation_input_tokens":300}}}
+{"type":"assistant","timestamp":"2026-01-18T22:25:00.000Z","message":{"model":"claude-sonnet-4-20250514","content":[{"type":"tool_use","id":"tool_01","name":"bash","input":{"command":"mkdir -p src"}}]}}
+{"type":"assistant","timestamp":"2026-01-18T22:25:02.000Z","message":{"content":[{"type":"tool_result","tool_use_id":"tool_01","content":"Directory created successfully"}]}}

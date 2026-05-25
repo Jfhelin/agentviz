@@ -507,6 +507,36 @@ function buildTurns(records: RawRecord[], events: NormalizedEvent[], sessionStar
   return turns;
 }
 
+function getTokenDetailCount(details: Record<string, any> | null | undefined, key: string): number {
+  const bucket = details && details[key];
+  return bucket && typeof bucket.tokenCount === "number" ? bucket.tokenCount : 0;
+}
+
+function getMetricTokenUsage(metric: Record<string, any> | null | undefined): { inputTokens: number; outputTokens: number; cacheRead: number; cacheWrite: number } | null {
+  if (!metric) return null;
+  if (metric.usage) {
+    const usage = {
+      inputTokens: metric.usage.inputTokens || 0,
+      outputTokens: metric.usage.outputTokens || 0,
+      cacheRead: metric.usage.cacheReadTokens || 0,
+      cacheWrite: metric.usage.cacheWriteTokens || 0,
+    };
+    if (usage.inputTokens + usage.outputTokens + usage.cacheRead + usage.cacheWrite > 0) return usage;
+  }
+
+  if (metric.tokenDetails) {
+    const freshInput = getTokenDetailCount(metric.tokenDetails, "input");
+    const cacheRead = getTokenDetailCount(metric.tokenDetails, "cache_read");
+    const cacheWrite = getTokenDetailCount(metric.tokenDetails, "cache_write");
+    const outputTokens = getTokenDetailCount(metric.tokenDetails, "output");
+    const inputTokens = freshInput + cacheRead + cacheWrite;
+    const usage = { inputTokens, outputTokens, cacheRead, cacheWrite };
+    if (usage.inputTokens + usage.outputTokens + usage.cacheRead + usage.cacheWrite > 0) return usage;
+  }
+
+  return null;
+}
+
 function buildMetadata(
   records: RawRecord[],
   events: NormalizedEvent[],
@@ -547,11 +577,12 @@ function buildMetadata(
     modelTokenUsage = {};
     for (const model of Object.keys(modelMetrics)) {
       const metric = modelMetrics[model];
-      if (metric.usage) {
-        const inputTokens = metric.usage.inputTokens || 0;
-        const outputTokens = metric.usage.outputTokens || 0;
-        const cacheReadTokens = metric.usage.cacheReadTokens || 0;
-        const cacheWriteTokens = metric.usage.cacheWriteTokens || 0;
+      const usage = getMetricTokenUsage(metric);
+      if (usage) {
+        const inputTokens = usage.inputTokens;
+        const outputTokens = usage.outputTokens;
+        const cacheReadTokens = usage.cacheRead;
+        const cacheWriteTokens = usage.cacheWrite;
         totalInputTokens += inputTokens;
         totalOutputTokens += outputTokens;
         totalCacheReadTokens += cacheReadTokens;

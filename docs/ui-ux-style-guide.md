@@ -657,8 +657,8 @@ Use a `::before`-style absolute-positioned div for color-coded status:
   left: 0,
   top: 0,
   bottom: 0,
-  width: 3,
-  borderRadius: "3px 0 0 3px",
+  width: 4,
+  borderRadius: "4px 0 0 4px",
   background: healthColor, // from theme.semantic.* or Data Visualization Scales
 }} />
 ```
@@ -689,6 +689,26 @@ This prevents session cards from collapsing in WebKit and keeps dense session li
 
 **Landing-mode toolbar parity:**
 If two landing modes expose the same session dataset, they should reuse the same search, dropdown, and refresh treatments. Do not mix native browser selects in one mode with custom floating dropdowns in the other.
+
+### Default Workflow Shell
+
+The default workflow shell uses a single task-oriented rail instead of peer visualization tabs:
+
+1. Find
+2. Review
+3. Investigate
+4. Analyze
+5. Compare
+6. Improve
+
+Rules:
+
+- The rail is the primary navigation surface. Do not add a second row of workflow preset buttons.
+- Each zone uses `theme.font.mono`, thin borders, and the same dark/light token system as v1.
+- Zone-specific preferences use `agentviz:v2:*` localStorage keys.
+- Workflow command-palette items use `type: "zone"` and navigate by zone id.
+- Live sessions dim Compare and Improve until streaming completes, then show a completion banner with Review, Compare, and Improve actions.
+- The workflow shell must mount exclusively. Do not render the workflow shell and Classic UI at the same time.
 
 **Cards must be `<button>` elements**, not clickable `<div>`. Set `textAlign: "left"` to
 override the button default. This ensures keyboard accessibility.
@@ -1106,8 +1126,9 @@ import KeyboardHint from "./ui/KeyboardHint.jsx";
 
 ### Focus Management
 
-- Command palette auto-focuses the input on open.
-- Modals close on backdrop click or Escape (no formal focus trap yet -- this is a known gap).
+- Command palette and Q&A drawer auto-focus their primary input on open.
+- Command palette and Q&A drawer use `useFocusTrap` to cycle `Tab`, close on `Esc`, close on backdrop click, and restore focus to the trigger on close.
+- Popover menus, such as the v2 theme menu, expose `aria-expanded`, close on `Esc`, and close on outside click.
 - Keyboard shortcuts are registered via a centralized `useKeyboardShortcuts` hook
   with ref-based stable listeners.
 
@@ -1146,6 +1167,7 @@ import KeyboardHint from "./ui/KeyboardHint.jsx";
 - No external global state management (no Redux, Zustand, or similar libraries).
 - Components receive data as props by default. Stateful behavior lives in hooks (`usePlayback`, `useSearch`, etc.).
 - Context is reserved for cross-cutting session state that would otherwise cause prop drilling. `PlaybackContext` owns playback, search, track filtering, and derived session state.
+- Responsive layout, modal focus trapping, and reduced-motion checks use shared hooks: `useBreakpoint`, `useFocusTrap`, and `useReducedMotion`.
 - Shared UI primitives: `ShellFrame`, `BrandWordmark`, `ToolbarButton`, `ExportStatusButton`,
   `KeyboardHint`, `ResizablePanel`, `Icon`, `ErrorBoundary`.
 
@@ -1199,20 +1221,20 @@ UI and the `Cmd+Shift+K` shortcut is a no-op.
 
 ### Target State
 
-These are goals for the project. Some are not fully implemented yet.
+These are goals for the project. The v2 workflow shell is the default UI and is the reference target for new accessibility work.
 
 - All interactive elements must be keyboard accessible.
 - Use semantic HTML (`<button>`, not `<div onClick>`) -- some legacy clickable divs remain.
-- `prefers-reduced-motion` is respected for CSS (see Section 7). SVG animations need JS guards.
+- `prefers-reduced-motion` is respected for CSS (see Section 7). Inline and SVG animations use `useReducedMotion`.
 - Focus ring visible on keyboard navigation, hidden on mouse click.
-- `aria-label` on icon-only buttons -- coverage is currently incomplete.
+- `aria-label` on icon-only buttons.
 
 ### Recommended
 
 - Color is never the only indicator of state (always pair with text or icon).
 - Minimum touch target: 24x24px for interactive elements.
 - Scrollable regions should be keyboard-navigable.
-- Modals should implement focus trapping (currently close-on-Escape only).
+- Modals should implement focus trapping, `aria-modal`, Escape close, backdrop click-to-dismiss, and focus restoration.
 
 ---
 

@@ -46,7 +46,7 @@ function highlightText(text, query) {
   return parts.length > 0 ? parts : text;
 }
 
-function ReplayInspector({ selectedEntry, hasExplicitSelection, metadata, toolEntries }) {
+function ReplayInspector({ selectedEntry, hasExplicitSelection, metadata, toolEntries, renderSelectedActions }) {
   var selected = selectedEntry ? selectedEntry.event : null;
   var [showRaw, setShowRaw] = useState(false);
   var hasDiff = selected && isDiffViewable(selected);
@@ -190,6 +190,25 @@ function ReplayInspector({ selectedEntry, hasExplicitSelection, metadata, toolEn
               })}
             </div>
 
+            {renderSelectedActions && hasExplicitSelection && (
+              <div style={{
+                marginTop: theme.space.lg,
+                paddingTop: theme.space.lg,
+                borderTop: "1px solid " + theme.border.default,
+              }}>
+                <div style={{
+                  fontSize: theme.fontSize.xs,
+                  color: theme.text.dim,
+                  textTransform: "uppercase",
+                  letterSpacing: 1,
+                  marginBottom: theme.space.sm,
+                }}>
+                  Actions
+                </div>
+                {renderSelectedActions({ entry: selectedEntry, event: selected })}
+              </div>
+            )}
+
             {hasDiff && !showRaw && (
               <div style={{ marginTop: theme.space.lg }}>
                 <div style={{
@@ -258,7 +277,7 @@ function ReplayInspector({ selectedEntry, hasExplicitSelection, metadata, toolEn
   );
 }
 
-export default function ReplayView({ currentTime, eventEntries, turnStartMap, searchQuery, matchSet, metadata }) {
+export default function ReplayView({ currentTime, eventEntries, turnStartMap, searchQuery, matchSet, metadata, targetEventIndex, renderSelectedActions }) {
   var containerRef = useRef(null);
   var itemRefs = useRef({});
   var [selectedIndex, setSelectedIndex] = useState(null);
@@ -293,6 +312,26 @@ export default function ReplayView({ currentTime, eventEntries, turnStartMap, se
       eventEntries[eventEntries.length - 1].index,
     ].join(":");
   }, [eventEntries]);
+
+  useEffect(function () {
+    if (targetEventIndex == null) return;
+    var targetItem = null;
+    for (var i = 0; i < layout.items.length; i++) {
+      if (layout.items[i].entry.index === targetEventIndex) {
+        targetItem = layout.items[i];
+        break;
+      }
+    }
+    if (!targetItem) return;
+
+    setSelectedIndex(targetEventIndex);
+    shouldFollowRef.current = false;
+    if (containerRef.current) {
+      var offset = Math.max(0, targetItem.top - 32);
+      containerRef.current.scrollTop = offset;
+      setScrollTop(offset);
+    }
+  }, [targetEventIndex, layout.items]);
 
   useEffect(function () {
     if (containerRef.current && visibleEntries.length > prevCount.current && shouldFollowRef.current) {
@@ -556,6 +595,7 @@ export default function ReplayView({ currentTime, eventEntries, turnStartMap, se
           hasExplicitSelection={hasExplicitSelection}
           metadata={metadata}
           toolEntries={toolEntries}
+          renderSelectedActions={renderSelectedActions}
         />
       </ErrorBoundary>
     </ResizablePanel>

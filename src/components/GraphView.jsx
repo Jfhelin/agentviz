@@ -9,6 +9,7 @@ import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { theme, alpha } from "../lib/theme.js";
 import { formatTimeClock } from "../lib/formatTime.js";
 import { buildGraphData, runLayout, mergeLayout, getGraphBounds } from "../lib/graphLayout.js";
+import useReducedMotion from "../hooks/useReducedMotion.js";
 import ResizablePanel from "./ResizablePanel.jsx";
 import Icon from "./Icon.jsx";
 
@@ -42,34 +43,6 @@ function getNodeTitle(node) {
   if (node.type === "join") return "Join";
   if (node.type === "turn") return "Turn " + node.turnIndex;
   return node.label || node.type;
-}
-
-function usePrefersReducedMotion() {
-  var [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
-
-  useEffect(function () {
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
-    var media = window.matchMedia("(prefers-reduced-motion: reduce)");
-    setPrefersReducedMotion(media.matches);
-
-    function handleChange(e) {
-      setPrefersReducedMotion(e.matches);
-    }
-
-    if (typeof media.addEventListener === "function") {
-      media.addEventListener("change", handleChange);
-      return function () {
-        media.removeEventListener("change", handleChange);
-      };
-    }
-
-    media.addListener(handleChange);
-    return function () {
-      media.removeListener(handleChange);
-    };
-  }, []);
-
-  return prefersReducedMotion;
 }
 
 // ── Edge rendering with animated flowing dots ──
@@ -756,7 +729,7 @@ export default function GraphView({ currentTime, eventEntries, totalTime, timeMa
   var [selectedNode, setSelectedNode] = useState(null);
   var [layoutResult, setLayoutResult] = useState(null);
   var [viewBox, setViewBox] = useState(null);
-  var prefersReducedMotion = usePrefersReducedMotion();
+  var prefersReducedMotion = useReducedMotion();
   var svgRef = useRef(null);
   var isPanning = useRef(false);
   var panStart = useRef({ x: 0, y: 0 });

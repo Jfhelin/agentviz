@@ -2,6 +2,7 @@ var DEFAULT_TURN_LIMIT = 8;
 var MAX_RESULTS = 24;
 var TYPE_CAPS = {
   action: 4,
+  zone: 8,
   view: 4,
   turn: 8,
   event: 12,
@@ -29,9 +30,11 @@ function buildActionItems() {
   ];
 }
 
-export function buildCommandPaletteIndex(events, turns) {
-  var viewItems = buildViewItems();
-  var actionItems = buildActionItems();
+export function buildCommandPaletteIndex(events, turns, options) {
+  var config = options || {};
+  var extraItems = config.extraItems || [];
+  var viewItems = config.includeLegacyViews === false ? [] : buildViewItems();
+  var actionItems = config.includeDefaultActions === false ? [] : buildActionItems();
   var turnItems = [];
   var eventItems = [];
   var seenEvents = {};
@@ -83,8 +86,8 @@ export function buildCommandPaletteIndex(events, turns) {
 
   return {
     views: viewItems,
-    defaults: actionItems.concat(viewItems, turnItems.slice(0, DEFAULT_TURN_LIMIT)),
-    items: actionItems.concat(viewItems, turnItems, eventItems),
+    defaults: extraItems.concat(actionItems, viewItems, turnItems.slice(0, DEFAULT_TURN_LIMIT)),
+    items: extraItems.concat(actionItems, viewItems, turnItems, eventItems),
   };
 }
 
@@ -110,6 +113,7 @@ function scoreItem(item, query, queryTokens) {
   else if (text.indexOf(query) !== -1) score += 12;
 
   if (item.type === "action") score += 8;
+  if (item.type === "zone") score += 8;
   if (item.type === "view") score += 6;
   if (item.type === "turn") score += 4;
 

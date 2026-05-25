@@ -449,6 +449,25 @@ describe("metadata", function () {
     expect(meta.modelTokenUsage["claude-opus-4.6"].cacheHitRate).toBeCloseTo(3000 / ((5000 - 3000) + 0 + 3000), 6);
   });
 
+  it("falls back to tokenDetails buckets when usage is absent", function () {
+    var shutdown = JSON.parse(JSON.stringify(SESSION_SHUTDOWN));
+    delete shutdown.data.modelMetrics["claude-opus-4.6"].usage;
+    shutdown.data.modelMetrics["claude-opus-4.6"].tokenDetails = {
+      input: { tokenCount: 200 },
+      cache_read: { tokenCount: 3000 },
+      cache_write: { tokenCount: 500 },
+      output: { tokenCount: 150 },
+    };
+    var trace = [SESSION_START, USER_MSG, TURN_START, ASSISTANT_MSG_WITH_REASONING, TURN_END, shutdown];
+    var parsed = parseCopilotCliJSONL(buildTrace(trace));
+
+    expect(parsed.metadata.tokenUsage.inputTokens).toBe(3700);
+    expect(parsed.metadata.tokenUsage.outputTokens).toBe(150);
+    expect(parsed.metadata.tokenUsage.cacheRead).toBe(3000);
+    expect(parsed.metadata.tokenUsage.cacheWrite).toBe(500);
+    expect(parsed.metadata.modelTokenUsage["claude-opus-4.6"].cacheHitRate).toBeCloseTo(3000 / (200 + 500 + 3000), 6);
+  });
+
   it("returns null totalCost and modelTokenUsage when no shutdown data", function () {
     var traceNoShutdown = [SESSION_START, USER_MSG, TURN_START, ASSISTANT_MSG_WITH_REASONING, TOOL_START, TOOL_COMPLETE, TURN_END];
     var parsed = parseCopilotCliJSONL(buildTrace(traceNoShutdown));

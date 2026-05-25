@@ -80,6 +80,13 @@ function Legend({ items }) {
 }
 
 function CallRow({ call, miss }) {
+  var tokenParts = [
+    formatTokens(call.freshInputTokens) + " fresh",
+    formatTokens(call.cachedInputTokens) + " cached",
+  ];
+  if ((call.cacheWriteTokens || 0) > 0) tokenParts.push(formatTokens(call.cacheWriteTokens) + " write");
+  tokenParts.push(formatTokens(call.outputTokens) + " out");
+
   return (
     <div style={{
       border: "1px solid " + (miss ? alpha(theme.semantic.warning, 0.55) : theme.border.default),
@@ -101,7 +108,7 @@ function CallRow({ call, miss }) {
           <Chip>{formatCost(call.cost)}</Chip>
         </div>
         <div style={{ color: theme.text.muted, fontSize: theme.fontSize.sm, marginTop: theme.space.md, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {formatTokens(call.freshInputTokens)} fresh · {formatTokens(call.cachedInputTokens)} cached · {formatTokens(call.outputTokens)} out
+          {tokenParts.join(" · ")}
         </div>
       </div>
     </div>
@@ -205,7 +212,11 @@ export default function CostView({ events, metadata }) {
       <div style={{ display: "grid", gridTemplateColumns: SUMMARY_GRID_5_COLUMNS, gap: theme.space.lg }}>
         <SummaryCard label="Cost view" value="Token spend & context buildup" valueSize={theme.fontSize.lg} sub="Full context, net-new tokens, and billed API usage." />
         <SummaryCard label="Total spend" value={formatCost(totals.cost)} sub={cachePercent + "% cached input"} />
-        <SummaryCard label="Input tokens" value={formatTokens(totals.inputTokens)} sub={formatTokens(totals.freshInputTokens) + " fresh · " + formatTokens(totals.cacheRead) + " cached"} />
+        <SummaryCard label="Input tokens" value={formatTokens(totals.inputTokens)} sub={[
+          formatTokens(totals.freshInputTokens) + " fresh",
+          formatTokens(totals.cacheRead) + " cached",
+          totals.cacheWrite > 0 ? formatTokens(totals.cacheWrite) + " write" : null,
+        ].filter(Boolean).join(" · ")} />
         <SummaryCard label="Peak context" value={formatTokens(totals.peakContext)} sub="tools + history dominate context" />
         <SummaryCard label="Cache misses" value={analysis.cacheMisses.length} sub="unexpected fresh-token spikes" color={analysis.cacheMisses.length ? theme.semantic.warning : theme.text.primary} />
       </div>

@@ -1,0 +1,43 @@
+[
+  {
+    "request": {
+      "model": "gpt-4.1",
+      "messages": [
+        { "role": "system", "content": "You are a coding assistant." },
+        { "role": "user", "content": "Build a parser" }
+      ],
+      "tools": [
+        { "type": "function", "function": { "name": "read_file", "parameters": { "type": "object" } } }
+      ]
+    },
+    "response": {
+      "usage": {
+        "prompt_tokens": 1000,
+        "completion_tokens": 120,
+        "prompt_tokens_details": { "cached_tokens": 200 },
+        "cache_creation_input_tokens": 50
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "gpt-4.1",
+      "messages": [
+        { "role": "system", "content": "You are a coding assistant." },
+        { "role": "assistant", "content": "I can do that." },
+        { "role": "user", "content": "Now build the UI" }
+      ],
+      "tools": [
+        { "type": "function", "function": { "name": "read_file", "parameters": { "type": "object" } } }
+      ]
+    },
+    "response": {
+      "usage": {
+        "input_tokens": 1800,
+        "output_tokens": 240,
+        "input_tokens_details": { "cached_tokens": 900 },
+        "cache_write_input_tokens": 20
+      }
+    }
+  }
+]

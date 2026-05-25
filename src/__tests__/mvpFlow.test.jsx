@@ -55,6 +55,7 @@ function findExactButton(container, text) {
 }
 
 async function renderApp(fetchImpl) {
+  window.localStorage.setItem("agentviz:v2:enabled", "false");
   global.fetch = fetchImpl || createInactiveFetch();
   var container = document.createElement("div");
   document.body.appendChild(container);

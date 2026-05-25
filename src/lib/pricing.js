@@ -58,14 +58,15 @@ export function hasModelPricing(modelName) {
 
 /**
  * Estimate cost in USD for a tokenUsage object.
- * tokenUsage: { inputTokens, outputTokens, cacheRead, cacheWrite }
+ * tokenUsage.inputTokens is normalized total input tokens, including cache reads
+ * and cache writes. Cache write tokens are billed in their own bucket.
  * modelName: string (optional, used to look up pricing)
  */
 export function estimateCost(tokenUsage, modelName) {
   if (!tokenUsage) return 0;
   var price = lookupPrice(modelName);
   if (!price) return 0; // unknown model -- don't fabricate a number
-  var freshInputTokens = Math.max((tokenUsage.inputTokens || 0) - (tokenUsage.cacheRead || 0), 0);
+  var freshInputTokens = Math.max((tokenUsage.inputTokens || 0) - (tokenUsage.cacheRead || 0) - (tokenUsage.cacheWrite || 0), 0);
   var inputCost  = freshInputTokens / 1e6 * price.input;
   var outputCost = (tokenUsage.outputTokens || 0) / 1e6 * price.output;
   var cacheReadCost  = (tokenUsage.cacheRead  || 0) / 1e6 * price.input * 0.1;

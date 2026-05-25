@@ -1,0 +1,65 @@
+{
+  "schema_version": "ATIF-v1.6",
+  "session_id": "v2-golden-atif",
+  "agent": {
+    "name": "test-agent",
+    "version": "1.0.0",
+    "model_name": "gpt-test"
+  },
+  "steps": [
+    {
+      "step_id": 1,
+      "timestamp": "2026-04-24T20:20:00.000Z",
+      "source": "user",
+      "message": "Review the authentication code."
+    },
+    {
+      "step_id": 2,
+      "timestamp": "2026-04-24T20:20:05.000Z",
+      "source": "agent",
+      "message": "Delegating to code-reviewer subagent.",
+      "model_name": "gpt-test",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_delegate",
+          "function_name": "delegate_to_subagent",
+          "arguments": {
+            "agent_name": "code-reviewer",
+            "task": "Review auth changes"
+          }
+        }
+      ],
+      "observation": {
+        "results": [
+          {
+            "source_call_id": "call_delegate",
+            "content": "Subagent finished with 2 findings."
+          }
+        ]
+      },
+      "metrics": {
+        "prompt_tokens": 200,
+        "completion_tokens": 40,
+        "cached_tokens": 60
+      }
+    },
+    {
+      "step_id": 3,
+      "timestamp": "2026-04-24T20:20:30.000Z",
+      "source": "agent",
+      "message": "Review complete.",
+      "model_name": "gpt-test",
+      "metrics": {
+        "prompt_tokens": 90,
+        "completion_tokens": 15
+      }
+    }
+  ],
+  "final_metrics": {
+    "total_prompt_tokens": 290,
+    "total_completion_tokens": 55,
+    "total_cached_tokens": 60,
+    "total_steps": 3,
+    "total_cost_usd": 0.123
+  }
+}
