@@ -2266,6 +2266,56 @@ function Legend() {
   );
 }
 
+function McpReachabilityCallout(props) {
+  var reach = props.reachability;
+  if (!reach || !reach.available) return null;
+  if (!reach.unusedCount || reach.unusedCount === 0) return null;
+  var warn = theme.status.warning || "#eab308";
+  var unusedLabels = reach.unused.map(function (s) { return s.label; });
+  return (
+    <div
+      role="alert"
+      style={{
+        margin: "0 0 16px",
+        padding: "12px 14px",
+        background: warn + "14",
+        border: "1px solid " + warn + "55",
+        borderLeft: "4px solid " + warn,
+        borderRadius: 5,
+        fontSize: theme.fontSize.sm,
+        color: theme.text.primary,
+        lineHeight: 1.5,
+      }}
+    >
+      <div style={{ fontWeight: 600, marginBottom: 6, color: warn }}>
+        {"\u26A0\uFE0F  "}
+        {reach.unusedCount} of {reach.declaredCount} configured MCP servers contributed no tool definitions to this session
+      </div>
+      <div style={{ color: theme.text.secondary, marginBottom: 6 }}>
+        These servers are declared in your IDE's <code>mcp.json</code> but their tools never appeared in any chat request, so the model could not see or call them. They still cost startup time, process memory, and (for hosted servers) occasional reconnect/auth prompts.
+      </div>
+      <div style={{ color: theme.text.secondary, marginBottom: 6 }}>
+        Unused: {unusedLabels.map(function (label, idx) {
+          return (
+            <span key={label}>
+              <code style={{ background: theme.bg.surface, padding: "1px 6px", borderRadius: 3 }}>{label}</code>
+              {idx < unusedLabels.length - 1 ? ", " : ""}
+            </span>
+          );
+        })}
+      </div>
+      <div style={{ color: theme.text.muted, fontSize: theme.fontSize.xs, fontStyle: "italic" }}>
+        Heuristic match (label slug to <code>mcp_&lt;slug&gt;_*</code> tool name). Disable in <code>mcp.json</code> unless intentionally kept for ad-hoc use.
+        {reach.extraInWire && reach.extraInWire.length > 0 ? (
+          <span>
+            {" "}Also seen on the wire without a matching declared server: {reach.extraInWire.map(function (e) { return "mcp_" + e.slug + "_*"; }).join(", ")}.
+          </span>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 export default function CostView(props) {
   var analysis = props.analysis;
   var [openRow, setOpenRow] = useState({});
@@ -2371,6 +2421,7 @@ export default function CostView(props) {
       <ModelBreakdown prompts={analysis.prompts} />
       <Glossary />
       <Legend />
+      <McpReachabilityCallout reachability={analysis.mcpReachability} />
 
       <div style={{
         display: "flex", alignItems: "center", gap: 12, margin: "0 0 12px",

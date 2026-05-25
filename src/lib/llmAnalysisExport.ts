@@ -20,6 +20,7 @@
 
 import type { CostAnalysis, CostAnalysisCall, CostAnalysisToolCall, CostAnalysisPrompt } from "./copilotChatExportParser";
 import type { ToolDefinitionShapeAnalysis, ToolDefinitionClassification } from "./toolDefinitionShape";
+import type { McpReachabilityAnalysis } from "./mcpServerReachability";
 
 const USER_MSG_CHAR_CAP = 2000;
 const ASSISTANT_PREVIEW_CHAR_CAP = 350;
@@ -519,6 +520,90 @@ export function renderToolDefinitionShapeMarkdown(shape: ToolDefinitionShapeAnal
   return out;
 }
 
+/** Build the `mcp_server_reachability_analysis` JSON block. Surfaces the
+ *  discrepancy between MCP servers the IDE declared and MCP servers whose
+ *  tools the model actually saw on the wire. Heuristic matcher; see
+ *  mcpServerReachability.ts for the rules. */
+export function buildMcpReachabilityFacts(reach: McpReachabilityAnalysis): Record<string, unknown> {
+  if (!reach || !reach.available) {
+    return {
+      available: false,
+      note: reach?.note ?? "No `mcpServers` block was present in the export.",
+    };
+  }
+  return {
+    available: true,
+    confidence: reach.confidence,
+    declared_count: reach.declaredCount,
+    visible_count: reach.visibleCount,
+    unused_count: reach.unusedCount,
+    visible_servers: reach.matches.map((m) => ({
+      label: m.server.label,
+      type: m.server.type ?? null,
+      command: m.server.command ?? null,
+      matched_slug: m.slug,
+      tool_count: m.toolCount,
+    })),
+    unused_servers: reach.unused.map((s) => ({
+      label: s.label,
+      type: s.type ?? null,
+      command: s.command ?? null,
+      reason: "no tool definitions matching `mcp_<label-slug>_*` were sent to the model in this session",
+    })),
+    extra_on_wire_prefixes: reach.extraInWire,
+    interpretation: "Unused MCP servers cost setup overhead (process memory, startup time, IDE/UX complexity, occasional auth prompts) without contributing any tool the model can see. Recommend disabling them in mcp.json unless they are intentionally kept for ad-hoc invocation outside this session.",
+    note: reach.note,
+  };
+}
+
+/** Render the human-readable "MCP server reachability" markdown section. */
+export function renderMcpReachabilityMarkdown(reach: McpReachabilityAnalysis): string[] {
+  const out: string[] = [];
+  out.push("### MCP server reachability");
+  out.push("");
+  if (!reach || !reach.available) {
+    out.push("_" + (reach?.note ?? "No `mcpServers` block was present in the export.") + "_");
+    out.push("");
+    return out;
+  }
+  out.push("- Declared MCP servers: **" + reach.declaredCount + "**");
+  out.push("- MCP servers whose tools were visible to the model: **" + reach.visibleCount + "**");
+  out.push("- Configured but invisible (unused): **" + reach.unusedCount + "**");
+  out.push("- Confidence: " + reach.confidence);
+  out.push("");
+  out.push("> " + reach.note);
+  out.push("");
+  if (reach.matches.length > 0) {
+    out.push("**Visible MCP servers**");
+    out.push("");
+    out.push("| Server | Type | Matched slug | Tools visible |");
+    out.push("|---|---|---|---:|");
+    for (const m of reach.matches) {
+      out.push("| `" + m.server.label + "` | " + (m.server.type ?? "_unknown_") + " | `mcp_" + m.slug + "_*` | " + m.toolCount + " |");
+    }
+    out.push("");
+  }
+  if (reach.unused.length > 0) {
+    out.push("**Unused MCP servers (declared but contributed zero tool definitions)**");
+    out.push("");
+    out.push("| Server | Type | Command |");
+    out.push("|---|---|---|");
+    for (const s of reach.unused) {
+      out.push("| `" + s.label + "` | " + (s.type ?? "_unknown_") + " | " + (s.command ? "`" + s.command + "`" : "_n/a_") + " |");
+    }
+    out.push("");
+  }
+  if (reach.extraInWire.length > 0) {
+    out.push("**Extra on-wire `mcp_` prefixes (no matching declared server)**");
+    out.push("");
+    for (const e of reach.extraInWire) {
+      out.push("- `mcp_" + e.slug + "_*` -- " + e.toolCount + " tool(s). May indicate a server added/renamed after the export was captured, or a label-to-slug mismatch worth investigating.");
+    }
+    out.push("");
+  }
+  return out;
+}
+
 export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOptions = {}): string {
   const totals = analysis.totals;
   const prompts = analysis.prompts;
@@ -728,7 +813,7 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
   lines.push("");
   lines.push("## Source-of-truth precedence");
   lines.push("");
-  lines.push("The developer-facing JSON keys (`developer_action_summary`, `session_narrative`, `cache_health`, `every_call_overhead`, `cost_projection`, `workflow_classification`, `developer_efficiency_findings`, `developer_levers_detected`, `developer_cost_categories`, `recommended_changes`, `custom_mode_or_agent_analysis`, `ide_tool_configuration_analysis`, `skills_profile_analysis`, `automation_boundary_recommendation`, `model_strategy_recommendation`, `prompt_strategy_recommendation`, `quality_and_validation`, `workflow_phase_analysis`, `agent_loop_efficiency`, `tool_result_size_analysis`, `baseline_comparison`, `experiment_validity`, `control_surface_analysis`, `missing_data`) are the source of truth. The `raw_supporting_telemetry` block is evidence only. If a human-readable supporting section later in this prompt appears to contradict the developer-facing JSON, the JSON wins.");
+  lines.push("The developer-facing JSON keys (`developer_action_summary`, `session_narrative`, `cache_health`, `every_call_overhead`, `cost_projection`, `workflow_classification`, `developer_efficiency_findings`, `developer_levers_detected`, `developer_cost_categories`, `recommended_changes`, `custom_mode_or_agent_analysis`, `ide_tool_configuration_analysis`, `tool_definition_shape_analysis`, `mcp_server_reachability_analysis`, `skills_profile_analysis`, `automation_boundary_recommendation`, `model_strategy_recommendation`, `prompt_strategy_recommendation`, `quality_and_validation`, `workflow_phase_analysis`, `agent_loop_efficiency`, `tool_result_size_analysis`, `baseline_comparison`, `experiment_validity`, `control_surface_analysis`, `missing_data`) are the source of truth. The `raw_supporting_telemetry` block is evidence only. If a human-readable supporting section later in this prompt appears to contradict the developer-facing JSON, the JSON wins.");
   lines.push("");
   lines.push("## Output format");
   lines.push("");
@@ -2178,6 +2263,7 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
     custom_mode_or_agent_analysis: customModeOrAgentAnalysis,
     ide_tool_configuration_analysis: ideToolConfigurationAnalysis,
     tool_definition_shape_analysis: buildToolDefinitionShapeFacts(analysis.toolDefinitionShape),
+    mcp_server_reachability_analysis: buildMcpReachabilityFacts(analysis.mcpReachability),
     skills_profile_analysis: skillsProfileAnalysis,
     automation_boundary_recommendation: automationBoundary
       ? { ...(automationBoundary as Record<string, unknown>), ...automationBoundaryExtensions }
@@ -2501,6 +2587,10 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
   // selected/enabled tools were sent on the wire, which is not true.
   const usedToolNames = Array.from(unused.used);
   for (const ln of renderToolDefinitionShapeMarkdown(analysis.toolDefinitionShape, usedToolNames)) {
+    lines.push(ln);
+  }
+  // MCP server reachability (declared in IDE vs visible to the model).
+  for (const ln of renderMcpReachabilityMarkdown(analysis.mcpReachability)) {
     lines.push(ln);
   }
   lines.push("### Complexity drift signals (for auto-mode judgement)");

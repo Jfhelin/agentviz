@@ -417,3 +417,51 @@ describe("buildToolDefinitionShapeFacts + renderToolDefinitionShapeMarkdown", ()
     expect(md).toContain("| `mcp_azure_mcp_ser_search` | yes (2, learn=true)");
   });
 });
+
+describe("buildMcpReachabilityFacts + renderMcpReachabilityMarkdown", () => {
+  it("emits visible + unused + extra-on-wire JSON and markdown for the 8-vs-3 fixture", async () => {
+    const { buildMcpReachabilityFacts, renderMcpReachabilityMarkdown } = await import("../lib/llmAnalysisExport");
+    const { analyzeMcpReachability } = await import("../lib/mcpServerReachability");
+    const declared = [
+      { label: "Azure MCP Server", type: "stdio", command: "npx" },
+      { label: "github", type: "stdio", command: "docker" },
+      { label: "playwright", type: "stdio", command: "npx" },
+      { label: "io.github.github/github-mcp-server", type: "http" },
+      { label: "Bicep", type: "stdio" },
+    ];
+    const toolNames = [
+      "mcp_azure_mcp_storage_list",
+      "mcp_io_github_create_issue",
+      "mcp_playwright_browser_click",
+      "mcp_someother_thing",
+    ];
+    const reach = analyzeMcpReachability(declared, toolNames);
+    const facts = buildMcpReachabilityFacts(reach) as Record<string, unknown>;
+    expect(facts.available).toBe(true);
+    expect(facts.declared_count).toBe(5);
+    expect(facts.visible_count).toBe(3);
+    expect(facts.unused_count).toBe(2);
+    const unused = facts.unused_servers as Array<Record<string, unknown>>;
+    const unusedLabels = unused.map((u) => u.label).sort();
+    expect(unusedLabels).toEqual(["Bicep", "github"]);
+    expect(facts.extra_on_wire_prefixes).toEqual([{ slug: "someother", toolCount: 1 }]);
+
+    const md = renderMcpReachabilityMarkdown(reach).join("\n");
+    expect(md).toContain("### MCP server reachability");
+    expect(md).toContain("Declared MCP servers: **5**");
+    expect(md).toContain("Configured but invisible (unused): **2**");
+    expect(md).toContain("**Unused MCP servers");
+    expect(md).toContain("**Extra on-wire");
+  });
+
+  it("emits a graceful no-mcpServers section when the export has none", async () => {
+    const { buildMcpReachabilityFacts, renderMcpReachabilityMarkdown } = await import("../lib/llmAnalysisExport");
+    const { analyzeMcpReachability } = await import("../lib/mcpServerReachability");
+    const reach = analyzeMcpReachability([], []);
+    const facts = buildMcpReachabilityFacts(reach) as Record<string, unknown>;
+    expect(facts.available).toBe(false);
+    const md = renderMcpReachabilityMarkdown(reach).join("\n");
+    expect(md).toContain("### MCP server reachability");
+    expect(md).toContain("No `mcpServers` block");
+  });
+});
