@@ -24,6 +24,7 @@ describe("buildLlmAnalysisPrompt", () => {
     expect(out).toContain("What happened");
     expect(out).toContain("Fix before next run");
     expect(out).toContain("Cost drivers in plain English");
+    expect(out).toContain("What's working");
     expect(out).toContain("What not to over-optimize");
     expect(out).toContain("Model guidance");
     expect(out).toContain("Suggested next experiment");
@@ -45,15 +46,37 @@ describe("buildLlmAnalysisPrompt", () => {
     expect(out).toContain("### Setup cleanup");
   });
 
-  it("caps Evidence at 5 bullets by default and tells the analyst not to dump every metric", () => {
+  it("caps Evidence at 6 bullets by default and tells the analyst not to dump every metric", () => {
     const out = buildLlmAnalysisPrompt(analysis);
-    expect(out).toMatch(/max 5 bullets/i);
+    expect(out).toMatch(/max 6 bullets/i);
     expect(out).toMatch(/do NOT dump every available metric/i);
   });
 
   it("frames cheaper-model suggestions as experimental when validation is missing", () => {
     const out = buildLlmAnalysisPrompt(analysis);
     expect(out).toMatch(/cheaper models? .*(not yet proven safe|hypothes)/i);
+  });
+
+  it("includes the workflow-shape diagram instruction and IDE config table instruction for repeatable work", () => {
+    const out = buildLlmAnalysisPrompt(analysis);
+    expect(out).toMatch(/Current vs better shape/);
+    expect(out).toMatch(/IDE \/ workspace configuration/);
+  });
+
+  it("opens Model guidance with the workflow-before-model rule", () => {
+    const out = buildLlmAnalysisPrompt(analysis);
+    expect(out).toMatch(/Do not optimize model choice before optimizing workflow shape/);
+  });
+
+  it("turns Suggested next experiment into an ordered sequence starting with validation", () => {
+    const out = buildLlmAnalysisPrompt(analysis);
+    expect(out).toMatch(/numbered, ordered sequence/);
+    expect(out).toMatch(/1\. Add validation output/);
+  });
+
+  it("ends Evidence with a Capture next time instrumentation checklist", () => {
+    const out = buildLlmAnalysisPrompt(analysis);
+    expect(out).toMatch(/Capture next time/);
   });
 
 
@@ -190,6 +213,14 @@ describe("buildLlmAnalysisPrompt", () => {
     expect(Array.isArray(facts.session_narrative.agent_path_compressed)).toBe(true);
     expect(Array.isArray(facts.session_narrative.artifacts_created)).toBe(true);
     expect(facts.session_narrative).toHaveProperty("outcome_signal");
+    expect(facts).toHaveProperty("cache_health");
+    expect(facts.cache_health).toHaveProperty("verdict");
+    expect(facts.cache_health).toHaveProperty("cache_hit_rate_pct");
+    expect(facts).toHaveProperty("every_call_overhead");
+    expect(facts.every_call_overhead).toHaveProperty("estimated_stable_prefix_tokens_per_call");
+    expect(facts).toHaveProperty("cost_projection");
+    expect(facts.cost_projection).toHaveProperty("if_unchanged");
+    expect(facts.cost_projection.if_unchanged).toHaveProperty("10x_runs_usd");
     expect(facts).toHaveProperty("workflow_classification");
     expect(facts).toHaveProperty("developer_efficiency_findings");
     expect(facts).toHaveProperty("developer_levers_detected");

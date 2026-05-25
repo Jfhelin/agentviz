@@ -641,13 +641,13 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
   lines.push("");
   lines.push("## Source-of-truth precedence");
   lines.push("");
-  lines.push("The developer-facing JSON keys (`developer_action_summary`, `session_narrative`, `workflow_classification`, `developer_efficiency_findings`, `developer_levers_detected`, `developer_cost_categories`, `recommended_changes`, `custom_mode_or_agent_analysis`, `ide_tool_configuration_analysis`, `skills_profile_analysis`, `automation_boundary_recommendation`, `model_strategy_recommendation`, `prompt_strategy_recommendation`, `quality_and_validation`, `workflow_phase_analysis`, `agent_loop_efficiency`, `tool_result_size_analysis`, `baseline_comparison`, `experiment_validity`, `control_surface_analysis`, `missing_data`) are the source of truth. The `raw_supporting_telemetry` block is evidence only. If a human-readable supporting section later in this prompt appears to contradict the developer-facing JSON, the JSON wins.");
+  lines.push("The developer-facing JSON keys (`developer_action_summary`, `session_narrative`, `cache_health`, `every_call_overhead`, `cost_projection`, `workflow_classification`, `developer_efficiency_findings`, `developer_levers_detected`, `developer_cost_categories`, `recommended_changes`, `custom_mode_or_agent_analysis`, `ide_tool_configuration_analysis`, `skills_profile_analysis`, `automation_boundary_recommendation`, `model_strategy_recommendation`, `prompt_strategy_recommendation`, `quality_and_validation`, `workflow_phase_analysis`, `agent_loop_efficiency`, `tool_result_size_analysis`, `baseline_comparison`, `experiment_validity`, `control_surface_analysis`, `missing_data`) are the source of truth. The `raw_supporting_telemetry` block is evidence only. If a human-readable supporting section later in this prompt appears to contradict the developer-facing JSON, the JSON wins.");
   lines.push("");
   lines.push("## Output format");
   lines.push("");
   const reportMode = opts.reportMode || "developer_action_report";
   if (reportMode === "developer_action_report") {
-    lines.push("Mode: **developer_action_report** (default). Aim for 600-750 words. Organize around developer actionability, not the JSON schema. The final report should feel like: *what happened, why it cost money, what to change next time, what not to waste time on, and what to validate.*");
+    lines.push("Mode: **developer_action_report** (default). Aim for 700-900 words. Organize around developer actionability, not the JSON schema. The final report should feel like: *what happened, why it cost money, what's already working, what to change next time, what not to waste time on, and what to validate.*");
     lines.push("");
     lines.push("Start your reply with `# <Workflow name>: Optimization Review` as the very first line (the title IS the H1 -- do not write a separate label). Then use `##` subheadings for the sections below, in this exact order.");
     lines.push("");
@@ -657,16 +657,31 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
     lines.push("   - Mention `artifacts_created` only when non-empty. When `artifacts_caveat` indicates heuristic extraction, frame as \"appears to have produced\" rather than asserted truth. If artifact paths in `artifacts_created` conflict with the visible final response shown in `raw_supporting_telemetry`, prefer the visible final response but keep cautious wording.");
     lines.push("   - End with the `outcome_signal`, especially whether validation was captured.");
     lines.push("   - If `session_narrative` is missing or empty, degrade gracefully: infer a one-sentence objective from the visible user messages in `raw_supporting_telemetry` and skip detailed path reconstruction.");
-    lines.push("2. **Bottom line** -- Diagnosis, not the story. One short paragraph (3-5 sentences). Explain: (a) what workflow class this was, (b) what cost pattern mattered most, (c) the ONE main fix. Tone example: \"This was not expensive because of one bad prompt. It was expensive because a repeatable file-processing workflow ran inside the chat loop. The main fix is to move deterministic steps into a script and let the custom chat mode handle ambiguity, exceptions, and final review.\" Cite `workflow_classification.type`, `workflow_classification.confidence`, and `agent_loop_efficiency.call_shape_assessment`.");
+    lines.push("2. **Bottom line** -- Diagnosis, not the story. One short paragraph (3-5 sentences). Explain: (a) what workflow class this was, (b) what cost pattern mattered most, (c) the ONE main fix. **Add one plain-English spend-pattern sentence** that names what was actually being paid for. For repeatable workflows, say something like: \"The expensive part was not the single user request -- it was repeatedly re-entering the workflow loop: carrying chat-mode instructions, skills, tool definitions, and accumulated history into every call, then doing a large reasoning-heavy batch step before execution.\" Cite `workflow_classification.type`, `workflow_classification.confidence`, `agent_loop_efficiency.call_shape_assessment`, and `every_call_overhead.estimated_stable_prefix_tokens_per_call` when material.");
     lines.push("3. **Fix before next run** -- Prefer **3 fixes** by default. Use 4-5 only if the extra fixes are materially different and medium/high impact. Split into two subgroups when useful:");
-    lines.push("   - `### Workflow fixes` first (unless setup overhead is dominant): script deterministic steps; update custom chat mode / agent to use the script and ask only on ambiguity; keep intermediate output compact; add validation output.");
+    lines.push("   - `### Workflow fixes` first (unless setup overhead is dominant): script deterministic steps; update custom chat mode / agent to use the script and ask only on ambiguity; keep intermediate output compact; **add validation output** (this unblocks every downstream optimization).");
     lines.push("   - `### Setup cleanup` after: prune unused skills if material; restrict tools if useful (demote tool cleanup under 5% to *What not to over-optimize*); try Auto or cheaper model only after validation exists.");
     lines.push("   For each fix include: bold title / one-line why / fenced ```text snippet the developer can copy / expected impact / confidence. Do not let low-impact tool cleanup crowd out workflow-shape fixes.");
-    lines.push("4. **Cost drivers in plain English** -- 3-5 short bullets. Translate telemetry into developer meaning; do NOT lead with field names. Cite supporting numbers in parentheses at the END of each bullet. Prioritize: (1) agent loop shape, (2) large hidden deliberation / output spike, (3) context accumulation / tool-result bloat, (4) material setup overhead, (5) model choice only if relevant.");
-    lines.push("5. **What not to over-optimize** -- 1-3 short bullets. This section is important; keep it. Any lever contributing <5% of session cost is cleanup, not the main optimization. Explicitly tell the developer not to overfocus on low-impact but visible levers. When a custom chat mode or custom agent was active, mention the inline prompt only as session-specific scope -- not as the primary fix. Phrase as \"X was real overhead, but only ~Y% of this session -- clean up when convenient, but it is not the main optimization.\"");
-    lines.push("6. **Model guidance** -- 2-4 sentences. Quote the conservative Auto-same-model estimate FIRST. Mention the Auto verdict if present. Mention optimistic cheaper-model projections only as hypotheses. If `quality_and_validation.available == false`, explicitly say cheaper models are not yet proven safe. Do NOT claim GPT-5 mini or any cheaper model is sufficient unless quality validation supports it. Cite `model_strategy_recommendation.summary`.");
-    lines.push("7. **Suggested next experiment** -- One concrete next-run setup as a short bulleted list of conditions: deterministic script for repeatable steps; chat mode limited to ambiguity / review; compact intermediate artifacts; validation output; Auto mode or model experiment only if validation exists or is being captured; optional skill/tool cleanup if material. Tie back to `recommended_changes` items.");
-    lines.push("8. **Evidence** -- Default **max 5 bullets**. Cite only the numbers that support the recommendations above. Use field paths sparingly. End with a 1-line caveat summarizing `missing_data` (e.g. \"Quality, per-command tool sizes, and reasoning-token counts are not captured -- model and automation suggestions are hypotheses to validate next run.\"). Do NOT dump every available metric.");
+    lines.push("   **When `workflow_classification.type` indicates repeatable work, immediately after the fix list add a compact `### Current vs better shape` block** rendered as two single-line arrow diagrams:");
+    lines.push("   ```");
+    lines.push("   Current: user -> custom chat mode -> inspect -> carry state across N silent turns -> batch reason -> execute -> summarize");
+    lines.push("   Better:  user -> custom chat mode -> run script -> review compact JSON -> ask only on ambiguity -> write summary + validation");
+    lines.push("   ```");
+    lines.push("   Keep arrows short. Do not invent steps not supported by `session_narrative.agent_path_compressed` and `recommended_changes`.");
+    lines.push("   **When tools OR skills overhead is material (>=5% of session, or composition_hints shows broad surfaces), add a compact `### IDE / workspace configuration` table** with columns `Surface | Keep / use | Disable / prune | Why`. Rows: custom chat mode, Configure Tools, Skills, Repo script. Skip this table if both tool AND skill overhead are under 5%.");
+    lines.push("4. **Cost drivers in plain English** -- 3-5 short bullets. Translate telemetry into developer meaning; do NOT lead with field names. Cite supporting numbers in parentheses at the END of each bullet. Prioritize: (1) agent loop shape, (2) large hidden deliberation / output spike, (3) every-call overhead from stable prefix (use `every_call_overhead.estimated_stable_prefix_tokens_per_call` and explain that this is paid on EVERY call), (4) context accumulation / tool-result bloat, (5) material setup overhead, (6) model choice only if relevant. **When `cache_health.verdict` is `excellent` or `healthy`, add one short bullet that names the cache hit rate and notes that caching reduces unit cost but does NOT make a long stable prefix free.** When the verdict is `partial` or `poor`, lead one bullet with cache instability as a real problem.");
+    lines.push("5. **What's working** -- 2-3 short bullets of positive reinforcement so the developer does not optimize things that are not broken. Pull from: `cache_health.verdict` if healthy or excellent, `model_strategy_recommendation` if model tier is a good fit, `session_narrative.artifacts_created` if non-empty and the outcome line is positive, `agent_loop_efficiency.call_shape_assessment` if `efficient_single_pass` or `tool_heavy_but_expected`. If nothing material is working well, write one honest sentence explaining that (no fabricated positives).");
+    lines.push("6. **What not to over-optimize** -- 1-3 short bullets. This section is important; keep it. Any lever contributing <5% of session cost is cleanup, not the main optimization. Explicitly tell the developer not to overfocus on low-impact but visible levers. When a custom chat mode or custom agent was active, mention the inline prompt only as session-specific scope -- not as the primary fix. Phrase as \"X was real overhead, but only ~Y% of this session -- clean up when convenient, but it is not the main optimization.\"");
+    lines.push("7. **Model guidance** -- 2-4 sentences. **Open with: \"Do not optimize model choice before optimizing workflow shape. First reduce the amount of work the model has to do; then test whether a cheaper model can handle the smaller, validated task.\"** Then quote the conservative Auto-same-model estimate. Mention the Auto verdict if present. Mention optimistic cheaper-model projections only as hypotheses. If `quality_and_validation.available == false`, explicitly say cheaper models are not yet proven safe and that **validation is the unlock that makes any model downgrade defensible**. Do NOT claim GPT-5 mini or any cheaper model is sufficient unless quality validation supports it. Cite `model_strategy_recommendation.summary`.");
+    lines.push("8. **Suggested next experiment** -- A **numbered, ordered sequence** (not a flat list). Use this default order, adjusted only if structured facts clearly indicate a different dominant issue:");
+    lines.push("   1. Add validation output (the unlock for everything below).");
+    lines.push("   2. Script the deterministic workflow steps.");
+    lines.push("   3. Update the custom chat mode / agent to call the script and keep intermediate summaries compact.");
+    lines.push("   4. Prune unused skills if material (>=5%).");
+    lines.push("   5. Restrict tools to the whitelist (note: low priority if <5%).");
+    lines.push("   6. Try Auto or a cheaper model -- only after validation captures correctness.");
+    lines.push("   Each step should be one short sentence with a concrete artifact (script name, chat-mode file, validation file) when known. Tie back to `recommended_changes` items. Optionally close with a one-line `cost_projection` reference (e.g. \"At unchanged shape, 10 runs cost ~$X; after fix the projection drops to ~$Y per run -- still a hypothesis until validation lands.\").");
+    lines.push("9. **Evidence** -- Default **max 6 bullets** (was 5; the projection and prefix lines justify one more). Cite only the numbers that support the recommendations above. Use field paths sparingly. Close with a **2-line `Capture next time:` checklist** of the highest-leverage missing fields from `missing_data` (e.g. `validation result`, `per-command tool output size`, `skill attachment source`, `before/after file inventory`). Do NOT dump every available metric, and do NOT dump the entire `missing_data` array.");
     lines.push("");
     lines.push("### Decision logic for the default report");
     lines.push("");
@@ -682,7 +697,7 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
     lines.push("");
     lines.push("### Required section names (for downstream parsers)");
     lines.push("");
-    lines.push("Use these exact `##` headings verbatim, **in this order**: `What happened`, `Bottom line`, `Fix before next run`, `Cost drivers in plain English`, `What not to over-optimize`, `Model guidance`, `Suggested next experiment`, `Evidence`.");
+    lines.push("Use these exact `##` headings verbatim, **in this order**: `What happened`, `Bottom line`, `Fix before next run`, `Cost drivers in plain English`, `What's working`, `What not to over-optimize`, `Model guidance`, `Suggested next experiment`, `Evidence`.");
   } else {
     // detailed_audit -- the original 12-section heavy report.
     lines.push("Mode: **detailed_audit**. Aim for under 900 words. Mirror the full JSON schema for an in-depth audit.");
@@ -1918,6 +1933,102 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
     note_for_analyst: "Write the What-happened section as 2-4 sentences. Frame: (1) the user objective (one sentence), (2) the agent's path in 1-2 sentences using phase + tool clues, (3) the outcome line. Do not list every turn; collapse the compressed path into prose.",
   };
 
+  // -- Cache health (hit rate + verdict) ----------------------------------
+  // Cached input is billed at a fraction of fresh input (typically ~10% for
+  // Anthropic, 10% for OpenAI per the pricing table). High cache reuse on a
+  // long session means the prefix is stable and the savings are real, but
+  // it does NOT mean the long prefix is free.
+  const totalIn = totals.promptTokens || 0;
+  const totalCached = totals.cached || 0;
+  const cacheHitRate = totalIn > 0 ? totalCached / totalIn : 0;
+  const cacheVerdict = totalIn < 1000
+    ? "not_applicable"
+    : cacheHitRate >= 0.85
+    ? "excellent"
+    : cacheHitRate >= 0.6
+    ? "healthy"
+    : cacheHitRate >= 0.3
+    ? "partial"
+    : "poor";
+  const cacheGuidance = cacheVerdict === "excellent" || cacheVerdict === "healthy"
+    ? "Cache is doing its job. The prefix is stable across calls. Focus optimization on shrinking the prefix and cutting call count, not on cache strategy."
+    : cacheVerdict === "partial"
+    ? "Cache is helping but something is shifting the prefix mid-session (skill order, tool list, dynamic instructions). Stabilize the prefix to lift the hit rate."
+    : cacheVerdict === "poor"
+    ? "Cache is not engaging. The prefix likely changes every call (timestamps, dynamic IDs, reordered tools/skills). Investigate before any other optimization."
+    : "Session too short to draw cache conclusions.";
+  const cacheHealth = {
+    available: totalIn > 0,
+    cache_hit_rate: Number(cacheHitRate.toFixed(3)),
+    cache_hit_rate_pct: Math.round(cacheHitRate * 100),
+    cached_input_tokens: totalCached,
+    billed_input_tokens: totalIn,
+    verdict: cacheVerdict,
+    guidance: cacheGuidance,
+    note: "Cached tokens are still billed (typically ~10% of fresh-input rate). Caching reduces unit cost; it does not make a long stable prefix free.",
+  };
+
+  // -- Every-call overhead (estimated stable-prefix tokens per call) -------
+  // The stable prefix is what gets paid on every chat call: chat-mode text,
+  // repo instructions, tool definitions, attached skills, plus carried
+  // history once it stops changing. We approximate it as `cached / chat_calls`,
+  // which is a tight lower bound when cache hit rate is high.
+  const prefixTokensPerCall = chatCallCount > 0 ? Math.round(totalCached / chatCallCount) : 0;
+  const chosenCachedRateForOverhead = chosenPriceRow ? chosenPriceRow.cachedInputPerMTok : 0;
+  const prefixCostPerCallUsd = Number(((prefixTokensPerCall / 1e6) * chosenCachedRateForOverhead).toFixed(5));
+  const prefixCostTotalUsd = Number((prefixCostPerCallUsd * chatCallCount).toFixed(4));
+  const prefixPctOfSession = totals.cost > 0 ? Number(((prefixCostTotalUsd / totals.cost) * 100).toFixed(1)) : 0;
+  const everyCallOverhead = {
+    available: chatCallCount > 0 && totalCached > 0,
+    chat_calls: chatCallCount,
+    estimated_stable_prefix_tokens_per_call: prefixTokensPerCall,
+    estimated_prefix_cost_per_call_usd: prefixCostPerCallUsd,
+    estimated_prefix_cost_total_usd: prefixCostTotalUsd,
+    estimated_prefix_pct_of_session: prefixPctOfSession,
+    composition_hints: {
+      attached_skills_count: skillCarry.skillCount || 0,
+      unused_skills_count: skillCarry.unusedCount || 0,
+      unused_tools_count: unused.unused.length || 0,
+      custom_chat_mode_active: !!firstChatMode,
+      repo_instructions_active: instructions.length > 0,
+    },
+    note: "Approximation: cached_tokens / chat_calls. Tight lower bound when cache hit rate is high. Use to size the every-call overhead lever (prune skills, prune tools, slim chat mode, shrink repo instructions) vs the per-call workflow lever (shrink history, scripting).",
+  };
+
+  // -- Cost projection (1x / 10x / 100x current + rough after-fix) --------
+  // Helps the developer decide whether to invest in optimization. The
+  // after-fix estimate is intentionally rough: it assumes the workflow
+  // shape recommendation lands (target chat-call count from
+  // agent_loop_efficiency) and that setup overhead is removed. Quality
+  // and validity must still be proven separately.
+  const currentRunCost = Number(totals.cost.toFixed(4));
+  let afterFixCostEstimate: number | null = null;
+  let afterFixAssumptions: string[] = [];
+  const targetShapeRaw = recommendedTargetShape?.chat_calls || null;
+  const targetCallsLow = targetShapeRaw ? Number(String(targetShapeRaw).split(/[-–]/)[0]) : null;
+  if (chatCallCount > 0 && targetCallsLow && targetCallsLow > 0 && currentRunCost > 0) {
+    const callShrinkRatio = targetCallsLow / chatCallCount;
+    const overheadShare = (unusedToolPctOfSession + unusedSkillPctOfSession) / 100;
+    afterFixCostEstimate = Number((currentRunCost * callShrinkRatio * (1 - overheadShare)).toFixed(4));
+    afterFixAssumptions = [
+      "chat calls drop from " + chatCallCount + " to ~" + targetCallsLow + " (workflow scripted, per agent_loop_efficiency.recommended_target_shape)",
+      "unused tools + unused skills are pruned (combined " + (unusedToolPctOfSession + unusedSkillPctOfSession).toFixed(1) + "% of current cost)",
+      "model tier unchanged; cache hit rate unchanged",
+    ];
+  }
+  const costProjection = {
+    available: currentRunCost > 0,
+    current_run_usd: currentRunCost,
+    if_unchanged: {
+      "1x_runs_usd": currentRunCost,
+      "10x_runs_usd": Number((currentRunCost * 10).toFixed(2)),
+      "100x_runs_usd": Number((currentRunCost * 100).toFixed(2)),
+    },
+    after_fix_estimate_per_run_usd: afterFixCostEstimate,
+    after_fix_assumptions: afterFixAssumptions,
+    after_fix_caveat: "Rough hypothesis. Actual after-fix cost depends on quality validation passing on the cheaper workflow. Treat as a target, not a promise.",
+  };
+
   const facts = {
     // ===================== Developer-facing layer =====================
     session_metadata: {
@@ -1939,6 +2050,9 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
     },
     developer_action_summary: developerActionSummary,
     session_narrative: sessionNarrative,
+    cache_health: cacheHealth,
+    every_call_overhead: everyCallOverhead,
+    cost_projection: costProjection,
     workflow_classification: {
       type: workflowType,
       confidence: workflowConfidence,
@@ -2304,7 +2418,7 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
   lines.push("");
   lines.push(reportMode === "detailed_audit"
     ? "End of facts. Produce the 12-section detailed audit report now. Remember: write the TL;DR last but place it first; the very first line of your reply is `# <session title>`. Telemetry field paths belong in parentheses as evidence, not as the main prose."
-    : "End of facts. Produce the developer-action report now (8 sections in this exact order: What happened / Bottom line / Fix before next run / Cost drivers in plain English / What not to over-optimize / Model guidance / Suggested next experiment / Evidence). The very first line of your reply is `# <Workflow name>: Optimization Review`. Aim for 600-750 words. Telemetry field paths belong in parentheses as evidence, not as the main prose.");
+    : "End of facts. Produce the developer-action report now (9 sections in this exact order: What happened / Bottom line / Fix before next run / Cost drivers in plain English / What's working / What not to over-optimize / Model guidance / Suggested next experiment / Evidence). The very first line of your reply is `# <Workflow name>: Optimization Review`. Aim for 700-900 words. Telemetry field paths belong in parentheses as evidence, not as the main prose.");
   lines.push("");
   return lines.join("\n");
 }
