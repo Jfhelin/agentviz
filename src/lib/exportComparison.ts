@@ -467,6 +467,23 @@ export function formatComparisonAsMarkdown(
   lines.push(`- **same_call_shape:** ${cmp.sameShape}`);
   lines.push(`- **same_final_answer:** ${cmp.answersEquivalent}`);
   lines.push(`- **output_verbosity_delta_pct:** ${fmtPctSigned(outputDeltaPct)}`);
+  // Reasoning vs visible split — answers "is the +N% verbosity hidden
+  // thinking tokens or text the user actually sees?"
+  const reasonA = bkSrc.reasoningOutputTokens.a;
+  const reasonB = bkSrc.reasoningOutputTokens.b;
+  const visA = bkSrc.visibleOutputTokens.a;
+  const visB = bkSrc.visibleOutputTokens.b;
+  const anyReasoning = reasonA > 0 || reasonB > 0;
+  lines.push(`- **reasoning_tokens:** A=${reasonA}, B=${reasonB} (hidden from end user; billed as output)`);
+  lines.push(`- **visible_output_tokens:** A=${visA}, B=${visB} (what the user actually saw)`);
+  if (anyReasoning) {
+    const visDeltaPct = visA > 0 ? ((visB - visA) / visA) * 100 : 0;
+    const reasonDeltaPct = reasonA > 0 ? ((reasonB - reasonA) / reasonA) * 100 : 0;
+    lines.push(`- **visible_output_delta_pct:** ${fmtPctSigned(visDeltaPct)} (verbosity the user felt)`);
+    lines.push(`- **reasoning_delta_pct:** ${fmtPctSigned(reasonDeltaPct)} (extended-thinking spend)`);
+  } else {
+    lines.push("- **reasoning_used:** false — neither run used an extended-thinking model; the verbosity delta is 100% visible response text.");
+  }
   lines.push("");
 
   // Fixed vs variable cost (synthesized from bucket deltas)
@@ -564,6 +581,8 @@ export function formatComparisonAsMarkdown(
   lines.push(kpiRow("Distinct tools", bk.distinctTools));
   lines.push(kpiRow("Distinct files touched", bk.distinctFilesTouched));
   lines.push(kpiRow("Total output tokens", bk.totalOutputTokens));
+  lines.push(kpiRow("  ↳ Reasoning (hidden from user)", bk.reasoningOutputTokens));
+  lines.push(kpiRow("  ↳ Visible response tokens", bk.visibleOutputTokens));
   lines.push(kpiRow("Avg output per call", bk.avgOutputPerCall, 1));
   lines.push(kpiRow("Avg user message chars", bk.avgUserMessageChars, 1));
   lines.push(kpiRow("User turns", bk.userTurns));
@@ -859,7 +878,7 @@ function buildReportInstructions(planMode: boolean): string {
   lines.push("| Call shape | No/Yes | LLM/tool call counts and sequence |");
   lines.push("| Files edited | No/Yes | Count or list |");
   lines.push("| Files referenced | No/Yes/Maybe noise | Flag truncation-looking deltas |");
-  lines.push("| Output verbosity | No/Yes | Quote `output_verbosity_delta_pct` if shown |");
+  lines.push("| Output verbosity | No/Yes | Quote `output_verbosity_delta_pct` AND split into reasoning vs visible (see below) |");
   lines.push("| Final answer text | No/Yes | From `same_final_answer` |");
   lines.push("| Cost | No/Yes | Quote headline delta in cr and % |");
   lines.push("");
@@ -906,6 +925,35 @@ function buildReportInstructions(planMode: boolean): string {
   lines.push("with what stayed the same, then call out what diverged and by");
   lines.push("how much (output verbosity delta, distinct tools, file sets).");
   lines.push("Save cost interpretation for the Cost outcome section.");
+  lines.push("");
+  lines.push("**REQUIRED — output-token attribution.** Whenever you report an");
+  lines.push("`output_verbosity_delta_pct`, you MUST also state how the delta");
+  lines.push("splits between visible response tokens (what the end user sees)");
+  lines.push("and reasoning tokens (internal extended thinking, billed as");
+  lines.push("output but hidden from the user). The facts block ships:");
+  lines.push("");
+  lines.push("- `reasoning_tokens: A=N, B=M` — internal thinking, end user");
+  lines.push("  never sees these.");
+  lines.push("- `visible_output_tokens: A=N, B=M` — what the user actually saw");
+  lines.push("  in the response stream.");
+  lines.push("- `visible_output_delta_pct` and `reasoning_delta_pct` when");
+  lines.push("  reasoning is present in either run.");
+  lines.push("- `reasoning_used: false` when neither run used an extended-");
+  lines.push("  thinking model — in that case say so plainly: \"the verbosity");
+  lines.push("  delta is 100% visible response text\".");
+  lines.push("");
+  lines.push("Frame it for the developer:");
+  lines.push("");
+  lines.push("- If reasoning_tokens > 0 on both sides and the verbosity delta");
+  lines.push("  is mostly in reasoning, say so: \"The +N% verbosity is hidden");
+  lines.push("  reasoning, not user-visible text — the response the user saw");
+  lines.push("  was nearly identical in length.\"");
+  lines.push("- If the visible delta dominates, say so: \"The +N% verbosity is");
+  lines.push("  in user-visible response text — the user felt the chattier");
+  lines.push("  reply.\"");
+  lines.push("- If only one run used reasoning, flag the asymmetry: \"Run B");
+  lines.push("  spent K tokens on internal reasoning that Run A did not. Even");
+  lines.push("  if visible text is similar, B paid for extra thinking.\"");
   lines.push("");
 
   lines.push("### Output quality comparison");

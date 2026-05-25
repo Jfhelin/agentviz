@@ -208,6 +208,43 @@ describe("formatComparisonAsMarkdown", () => {
     expect(out).toContain("churn, not coverage");
   });
 
+  it("splits output verbosity into reasoning vs visible tokens", () => {
+    // A: 100 output, 60 reasoning, 40 visible
+    // B: 100 output, 0 reasoning, 100 visible -> same total, very different attribution
+    const runA = mkRun({});
+    runA.prompts[0].events[0].output = 100;
+    runA.prompts[0].events[0].reasoningTokens = 60;
+    runA.prompts[0].output = 100;
+    const runB = mkRun({});
+    runB.prompts[0].events[0].output = 100;
+    runB.prompts[0].events[0].reasoningTokens = 0;
+    runB.prompts[0].output = 100;
+    const cmp = compareRunsCost(runA, runB)!;
+    const md = formatComparisonAsMarkdown(cmp, { nameA: "a", nameB: "b" });
+    expect(md).toContain("reasoning_tokens:** A=60, B=0");
+    expect(md).toContain("visible_output_tokens:** A=40, B=100");
+    // KPI table indented rows
+    expect(md).toContain("Reasoning (hidden from user)");
+    expect(md).toContain("Visible response tokens");
+  });
+
+  it("states 'reasoning_used: false' when neither run used extended thinking", () => {
+    const cmp = compareRunsCost(mkRun({}), mkRun({}))!;
+    const md = formatComparisonAsMarkdown(cmp, { nameA: "a", nameB: "b" });
+    expect(md).toContain("reasoning_used:** false");
+    expect(md).toContain("100% visible response text");
+  });
+
+  it("instructs the analyst to attribute every verbosity delta to reasoning vs visible", () => {
+    const cmp = compareRunsCost(mkRun({}), mkRun({}))!;
+    const out = buildComparisonLlmPrompt(cmp, { nameA: "a", nameB: "b" });
+    expect(out).toContain("output-token attribution");
+    expect(out).toContain("reasoning_tokens");
+    expect(out).toContain("visible_output_tokens");
+    expect(out).toContain("end user");
+    expect(out).toContain("user actually saw");
+  });
+
   it("treats different newString on the same partial-replace as 'differ'", () => {
     const oldS = "const VERSION = '1.0.0';";
     const runA = mkRun({ toolCalls: [] });

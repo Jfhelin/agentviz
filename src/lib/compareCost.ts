@@ -88,6 +88,11 @@ export interface RunSummary {
   totalCost: number;
   totalInput: number;        // promptTokens (raw, includes cached)
   totalOutput: number;
+  /** Subset of totalOutput emitted as internal reasoning / extended thinking
+   *  tokens (OpenAI o-series `reasoning_tokens`, Claude extended thinking).
+   *  Billed as output tokens by the model but NOT shown to the end user.
+   *  totalOutputVisible = totalOutput - totalOutputReasoning. */
+  totalOutputReasoning: number;
   totalCached: number;
   totalFresh: number;
   totalCacheWrite: number;
@@ -397,8 +402,16 @@ export interface BehavioralKpis {
   distinctTools: BehavioralKpiValue;
   /** Distinct files mentioned in any tool args. */
   distinctFilesTouched: BehavioralKpiValue;
-  /** Total output (response) tokens across all primary LLM calls. */
+  /** Total output (response) tokens across all primary LLM calls. Includes
+   *  both visible response text AND internal reasoning tokens. */
   totalOutputTokens: BehavioralKpiValue;
+  /** Subset of totalOutputTokens spent on internal reasoning / extended
+   *  thinking (billed as output, NOT shown to the end user). 0 when neither
+   *  run used an extended-thinking model. */
+  reasoningOutputTokens: BehavioralKpiValue;
+  /** totalOutputTokens minus reasoningOutputTokens: tokens the end user
+   *  actually saw in the response stream. The "verbosity" the user perceives. */
+  visibleOutputTokens: BehavioralKpiValue;
   /** Mean output tokens per primary LLM call. */
   avgOutputPerCall: BehavioralKpiValue;
   /** Mean character length of user messages (across all turns). */
@@ -411,7 +424,7 @@ export interface BehavioralKpis {
 
 function summarizeRun(ca: CostAnalysisLike | null | undefined): RunSummary {
   const empty: RunSummary = {
-    totalCost: 0, totalInput: 0, totalOutput: 0, totalCached: 0, totalFresh: 0, totalCacheWrite: 0,
+    totalCost: 0, totalInput: 0, totalOutput: 0, totalOutputReasoning: 0, totalCached: 0, totalFresh: 0, totalCacheWrite: 0,
     cacheHitRate: 0, promptCount: 0, llmCallCount: 0,
     fixedCost: 0, variableCost: 0, fixedShare: 0,
     componentTokens: zeroBuckets(), componentShare: zeroBuckets(), bucketCost: zeroBuckets(),
@@ -423,7 +436,7 @@ function summarizeRun(ca: CostAnalysisLike | null | undefined): RunSummary {
   };
   if (!ca || !Array.isArray(ca.prompts) || ca.prompts.length === 0) return empty;
 
-  let totalCost = 0, totalInput = 0, totalOutput = 0, totalCached = 0, totalFresh = 0, totalCacheWrite = 0;
+  let totalCost = 0, totalInput = 0, totalOutput = 0, totalOutputReasoning = 0, totalCached = 0, totalFresh = 0, totalCacheWrite = 0;
   let llmCallCount = 0;
   const compTok = zeroBuckets();
   const modelSet = new Set<string>();
@@ -450,6 +463,7 @@ function summarizeRun(ca: CostAnalysisLike | null | undefined): RunSummary {
         }
       }
       compTok.output += ev.output || 0;
+      totalOutputReasoning += ((ev as { reasoningTokens?: number }).reasoningTokens) || 0;
     }
   }
 
@@ -544,7 +558,7 @@ function summarizeRun(ca: CostAnalysisLike | null | undefined): RunSummary {
   const avgOutputRatePerMTok = totalOutput > 0 ? (outputCost / totalOutput) * 1e6 : 0;
 
   return {
-    totalCost, totalInput, totalOutput, totalCached, totalFresh, totalCacheWrite,
+    totalCost, totalInput, totalOutput, totalOutputReasoning, totalCached, totalFresh, totalCacheWrite,
     cacheHitRate, promptCount: ca.prompts.length, llmCallCount,
     fixedCost, variableCost,
     fixedShare: totalCost > 0 ? fixedCost / totalCost : 0,
@@ -1337,6 +1351,22 @@ function sumPrimaryOutputTokens(ca: CostAnalysisLike | null | undefined): number
   return n;
 }
 
+/** Sum of `reasoning_tokens` across primary LLM calls. Reasoning tokens
+ *  are billed as output but NOT shown to the end user (OpenAI o-series
+ *  reasoning, Claude extended thinking). 0 when neither model uses it. */
+function sumPrimaryReasoningTokens(ca: CostAnalysisLike | null | undefined): number {
+  if (!ca || !Array.isArray(ca.prompts)) return 0;
+  let n = 0;
+  for (const p of ca.prompts) {
+    for (const ev of p.events || []) {
+      if (ev.kind && ev.kind !== "llm") continue;
+      if (ev.category === "overhead") continue;
+      n += ((ev as { reasoningTokens?: number }).reasoningTokens) || 0;
+    }
+  }
+  return n;
+}
+
 function avgUserMessageChars(summary: RunSummary): number {
   if (!summary.userPrompts.length) return 0;
   let total = 0;
@@ -1356,6 +1386,10 @@ function buildBehavioralKpis(
   const toolB = countToolCalls(costB);
   const outA = sumPrimaryOutputTokens(costA);
   const outB = sumPrimaryOutputTokens(costB);
+  const reasoningA = sumPrimaryReasoningTokens(costA);
+  const reasoningB = sumPrimaryReasoningTokens(costB);
+  const visibleA = Math.max(0, outA - reasoningA);
+  const visibleB = Math.max(0, outB - reasoningB);
   const summaryA = summarizeRun(costA);
   const summaryB = summarizeRun(costB);
   return {
@@ -1364,6 +1398,8 @@ function buildBehavioralKpis(
     distinctTools: makeKpiValue(fingerprintA.toolsInvoked.length, fingerprintB.toolsInvoked.length),
     distinctFilesTouched: makeKpiValue(fingerprintA.filesTouched.length, fingerprintB.filesTouched.length),
     totalOutputTokens: makeKpiValue(outA, outB),
+    reasoningOutputTokens: makeKpiValue(reasoningA, reasoningB),
+    visibleOutputTokens: makeKpiValue(visibleA, visibleB),
     avgOutputPerCall: makeKpiValue(
       primaryA > 0 ? outA / primaryA : 0,
       primaryB > 0 ? outB / primaryB : 0,
