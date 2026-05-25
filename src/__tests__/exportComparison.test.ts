@@ -310,6 +310,10 @@ describe("buildComparisonLlmPrompt", () => {
     const out = buildComparisonLlmPrompt(cmp, { nameA: "baseline", nameB: "experiment" });
     expect(out).toContain("Cost Compare analysis prompt");
     expect(out).toContain("Runs under comparison");
+    expect(out).toContain("Bottom line");
+    expect(out).toContain("TL;DR");
+    expect(out).toContain("Why this matters");
+    expect(out).toContain("Evidence (dive deeper)");
     expect(out).toContain("Experiment summary");
     expect(out).toContain("What changed");
     expect(out).toContain("A/B verdict");
@@ -317,10 +321,7 @@ describe("buildComparisonLlmPrompt", () => {
     expect(out).toContain("Behavior comparison");
     expect(out).toContain("Output quality comparison");
     expect(out).toContain("Artifact outcome");
-    expect(out).toContain("Cost outcome");
-    expect(out).toContain("Cost drivers");
-    expect(out).toContain("Divergence analysis");
-    expect(out).toContain("Fixed overhead vs work-dependent cost");
+    expect(out).toContain("Cost breakdown");
     expect(out).toContain("Was the extra cost worth it?");
     expect(out).toContain("Warnings and caveats");
     expect(out).toContain("What to validate next");
@@ -554,6 +555,32 @@ describe("buildComparisonLlmPrompt", () => {
     expect(md).toContain("✓ yes");
     expect(md).toContain("Different primary model");
     expect(md).toContain("Custom instructions / system prompt");
+  });
+
+  it("front-loads an executive panel (Bottom line / TL;DR / Why this matters) above the Evidence layer", () => {
+    const cmp = compareRunsCost(mkRun({}), mkRun({}))!;
+    const out = buildComparisonLlmPrompt(cmp, { nameA: "a", nameB: "b" });
+    const bottomLineIdx = out.indexOf("\n## Bottom line\n");
+    const tldrIdx = out.indexOf("\n## TL;DR\n");
+    const whyIdx = out.indexOf("\n## Why this matters\n");
+    const evidenceIdx = out.indexOf("\n# Evidence (dive deeper)\n");
+    expect(bottomLineIdx).toBeGreaterThan(0);
+    expect(tldrIdx).toBeGreaterThan(bottomLineIdx);
+    expect(whyIdx).toBeGreaterThan(tldrIdx);
+    expect(evidenceIdx).toBeGreaterThan(whyIdx);
+    expect(out).toContain("Lede-picking rule");
+    expect(out).toContain("One-sentence-action rule");
+    expect(out).toContain("Consistency rule");
+  });
+
+  it("consolidates cost analysis into one Cost breakdown section", () => {
+    const cmp = compareRunsCost(mkRun({}), mkRun({}))!;
+    const out = buildComparisonLlmPrompt(cmp, { nameA: "a", nameB: "b" });
+    expect(out).toContain("### Cost breakdown");
+    expect(out).not.toContain("### Cost outcome");
+    expect(out).not.toContain("### Cost drivers");
+    expect(out).not.toContain("### Divergence analysis");
+    expect(out).not.toContain("### Fixed overhead vs work-dependent cost");
   });
 
   it("instructs the analyst to use hypothesis-vs-observed framing and reference Developer levers", () => {
