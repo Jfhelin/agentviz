@@ -98,7 +98,9 @@ describe("buildComparisonLlmPrompt", () => {
     expect(out).toContain("Cost Compare analysis prompt");
     expect(out).toContain("Runs under comparison");
     expect(out).toContain("Experiment summary");
+    expect(out).toContain("What changed");
     expect(out).toContain("A/B verdict");
+    expect(out).toContain("Core story");
     expect(out).toContain("Behavior comparison");
     expect(out).toContain("Output quality comparison");
     expect(out).toContain("Artifact outcome");
@@ -223,6 +225,38 @@ describe("buildComparisonLlmPrompt", () => {
     expect(out).toMatch(/answered better/);
     expect(out).toMatch(/Equivalent for the user's goal/);
     expect(out).toContain("Do not infer quality from cost");
+    // New: usability-profile verdict so a format-only divergence isn't a cop-out
+    expect(out).toContain("Different usefulness profile");
+    // New: must judge meaning, not string equality
+    expect(out).toMatch(/Judge[\s\S]*?meaning[\s\S]*?not string equality/i);
+  });
+
+  it("includes the What changed scannable table and Core story hello-world framing", () => {
+    const cmp = compareRunsCost(mkRun({}), mkRun({}))!;
+    const out = buildComparisonLlmPrompt(cmp, { nameA: "a", nameB: "b" });
+    expect(out).toContain("### What changed");
+    expect(out).toContain("| Area | Changed? | Meaning |");
+    expect(out).toContain("### Core story");
+    expect(out).toMatch(/hello-world/i);
+    expect(out).toMatch(/pre-divergence/);
+    expect(out).toMatch(/amplification/i);
+  });
+
+  it("warns about telemetry path truncation in Artifact outcome and consolidates caveats", () => {
+    const cmp = compareRunsCost(mkRun({}), mkRun({}))!;
+    const out = buildComparisonLlmPrompt(cmp, { nameA: "a", nameB: "b" });
+    expect(out).toContain("Path-anomaly check");
+    expect(out).toMatch(/telemetry string truncation/i);
+    expect(out).toContain("Maybe noise");
+    // Anti-repetition guidance
+    expect(out).toMatch(/do not[\s]+repeat/i);
+  });
+
+  it("gives the decision rule for Was the extra cost worth it", () => {
+    const cmp = compareRunsCost(mkRun({}), mkRun({}))!;
+    const out = buildComparisonLlmPrompt(cmp, { nameA: "a", nameB: "b" });
+    expect(out).toContain("practical decision rule");
+    expect(out).toContain("Unproven.");
   });
 
   it("emits deterministic decision-support, behavior-diff, configuration-diff, and fixed-vs-variable blocks in the facts", () => {
