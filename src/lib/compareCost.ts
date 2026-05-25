@@ -223,11 +223,24 @@ export interface EditArtifact {
   path: string;
   /** Tool that did the edit (edit_file, create_file, str_replace, etc.). */
   tool: string;
-  /** Stable hash of the content that was written. "00000000" when no
-   *  content could be extracted from the tool args (e.g. str-replace tools
-   *  that only ship a diff, not the full new file). */
+  /** What kind of edit this was:
+   *  - "full-write": the tool args carry the FULL new file content
+   *    (create_file, write_file, edit_file with a `code` field). Hash
+   *    represents the end-state of the file → strongest ground truth.
+   *  - "partial-replace": the tool args carry an old→new string pair
+   *    (str_replace, replace_string_in_file, insert_edit). Hash covers
+   *    BOTH old + new, so two runs match only if they proposed the same
+   *    change at the same location. Does NOT prove the end-state file is
+   *    identical — that depends on the pre-edit file state.
+   *  - "patch": the tool args carry a unified diff / patch text
+   *    (apply_patch). Hash covers the patch text including context lines.
+   *  - "unknown": no recognizable content key in the args. */
+  editKind: "full-write" | "partial-replace" | "patch" | "unknown";
+  /** Stable hash of the change-request content (full bytes for full-write;
+   *  old+new pair for partial-replace; patch text for patch). "00000000"
+   *  when no content could be extracted. */
   contentHash: string;
-  /** Length in chars of the extracted content. */
+  /** Length in chars of the extracted content (combined for partial). */
   contentChars: number;
   /** First N chars of the content for human/LLM inspection. */
   contentPreview: string;
@@ -818,45 +831,74 @@ function extractFilePath(rawArgs: string | undefined, argsSummary: string | unde
   return null;
 }
 
-/** Extract the actual written content from an edit-tool call's args. For
- *  full-file writes (`create_file`, `write_file`) the content is in keys
- *  like `code`, `content`, `text`. For replacement tools (`str_replace`,
- *  `insert_edit`) it's in `newString` / `new_string`. Returns null when
- *  no content key is found (e.g. the tool only shipped a diff). */
-function extractEditContent(rawArgs: string | undefined): string | null {
+/** Extract change-request content from an edit-tool call's args, along with
+ *  the edit kind so downstream consumers know what an "identical hash"
+ *  actually proves.
+ *
+ *  - Full-file writes (create_file/write_file/edit_file with `code`):
+ *    return the full new content. Hash equality ⇒ end-state files match.
+ *  - Partial replaces (str_replace/replace_string/insert_edit): return
+ *    "<OLD>\n→\n<NEW>" so the hash captures both sides of the change.
+ *    Hash equality ⇒ same change request at the same location, but does
+ *    not prove the resulting file is byte-identical (depends on pre-state).
+ *  - Patches (apply_patch): return the patch/diff text including context.
+ *  - Nothing recognizable: return null. */
+function extractEditContent(
+  rawArgs: string | undefined,
+): { content: string; kind: "full-write" | "partial-replace" | "patch" } | null {
   if (!rawArgs) return null;
   try {
     const obj = JSON.parse(rawArgs);
     if (!obj || typeof obj !== "object") return null;
-    const keys = [
-      "code", "content", "text", "fileContent", "file_content",
-      "newString", "new_string", "newText", "new_text",
-      "patch", "diff",
-    ];
-    for (const k of keys) {
-      const v = (obj as Record<string, unknown>)[k];
-      if (typeof v === "string" && v.length > 0) return v;
+    const rec = obj as Record<string, unknown>;
+    const str = (k: string): string | null => {
+      const v = rec[k];
+      return typeof v === "string" && v.length > 0 ? v : null;
+    };
+
+    // 1. Patch tools: prefer the full patch text (includes context lines).
+    const patch = str("patch") ?? str("diff");
+    if (patch) return { content: patch, kind: "patch" };
+
+    // 2. Partial replace tools: combine old + new so the hash captures the
+    //    full intent. Match if EITHER side carries a recognizable old/new
+    //    pair — covers str_replace, replace_string_in_file, insert_edit,
+    //    multi_replace, etc.
+    const oldS = str("oldString") ?? str("old_string") ?? str("oldText") ?? str("old_text") ?? str("originalText");
+    const newS = str("newString") ?? str("new_string") ?? str("newText") ?? str("new_text") ?? str("replacement");
+    if (oldS != null || newS != null) {
+      return {
+        content: (oldS ?? "(empty)") + "\n→\n" + (newS ?? "(empty)"),
+        kind: "partial-replace",
+      };
     }
+
+    // 3. Full-file writes: code/content/text are the full new file body.
+    const full = str("code") ?? str("content") ?? str("text") ?? str("fileContent") ?? str("file_content");
+    if (full) return { content: full, kind: "full-write" };
   } catch { /* not JSON */ }
   return null;
 }
 
 function buildEditArtifact(name: string, path: string, rawArgs: string | undefined): EditArtifact {
-  const content = extractEditContent(rawArgs);
+  const extracted = extractEditContent(rawArgs);
   const previewMax = 400;
-  if (content == null) {
+  if (extracted == null) {
     return {
       path,
       tool: name,
+      editKind: "unknown",
       contentHash: "00000000",
       contentChars: 0,
       contentPreview: "",
     };
   }
+  const { content, kind } = extracted;
   const normalized = normalizeForHash(content);
   return {
     path,
     tool: name,
+    editKind: kind,
     contentHash: hashStr(normalized),
     contentChars: content.length,
     contentPreview: content.length > previewMax ? content.slice(0, previewMax) + "…" : content,

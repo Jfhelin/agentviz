@@ -128,6 +128,59 @@ describe("formatComparisonAsMarkdown", () => {
     expect(md).toContain("differ");
     expect(md).toContain("artifacts_identical:** false");
     expect(md).toContain("artifacts_with_extractable_content");
+    // full-write edits should be labeled as such in the Kind column
+    expect(md).toContain("full-write");
+  });
+
+  it("captures partial-replace edits as old→new pairs (the common LLM code-edit case)", () => {
+    // Same str_replace on both sides: same oldString → same newString → identical hash
+    const oldS = "function foo() { return 1; }";
+    const newS = "function foo() { return 2; }";
+    const runA = mkRun({ toolCalls: [] });
+    runA.prompts[0].events.push({
+      name: "replace_string_in_file", model: "", cost: 0, output: 0, cached: 0, fresh: 0, cacheWrite: 0,
+      promptTokens: 0,
+      rawArgs: JSON.stringify({ filePath: "/work/foo.js", oldString: oldS, newString: newS }),
+      argsSummary: "replace_string_in_file /work/foo.js", kind: "tool",
+    });
+    const runB = mkRun({ toolCalls: [] });
+    runB.prompts[0].events.push({
+      name: "replace_string_in_file", model: "", cost: 0, output: 0, cached: 0, fresh: 0, cacheWrite: 0,
+      promptTokens: 0,
+      rawArgs: JSON.stringify({ filePath: "/work/foo.js", oldString: oldS, newString: newS }),
+      argsSummary: "replace_string_in_file /work/foo.js", kind: "tool",
+    });
+    const cmp = compareRunsCost(runA, runB)!;
+    const md = formatComparisonAsMarkdown(cmp, { nameA: "a", nameB: "b" });
+    expect(md).toContain("partial-replace");
+    expect(md).toContain("/work/foo.js");
+    // identical change request -> identical hash
+    expect(md).toContain("artifacts_identical:** true");
+    // the caveat warning fires when partial-replace rows exist
+    expect(md).toContain("change-request");
+  });
+
+  it("treats different newString on the same partial-replace as 'differ'", () => {
+    const oldS = "const VERSION = '1.0.0';";
+    const runA = mkRun({ toolCalls: [] });
+    runA.prompts[0].events.push({
+      name: "str_replace", model: "", cost: 0, output: 0, cached: 0, fresh: 0, cacheWrite: 0,
+      promptTokens: 0,
+      rawArgs: JSON.stringify({ filePath: "/work/v.ts", oldString: oldS, newString: "const VERSION = '2.0.0';" }),
+      argsSummary: "str_replace /work/v.ts", kind: "tool",
+    });
+    const runB = mkRun({ toolCalls: [] });
+    runB.prompts[0].events.push({
+      name: "str_replace", model: "", cost: 0, output: 0, cached: 0, fresh: 0, cacheWrite: 0,
+      promptTokens: 0,
+      rawArgs: JSON.stringify({ filePath: "/work/v.ts", oldString: oldS, newString: "const VERSION = '3.0.0';" }),
+      argsSummary: "str_replace /work/v.ts", kind: "tool",
+    });
+    const cmp = compareRunsCost(runA, runB)!;
+    const md = formatComparisonAsMarkdown(cmp, { nameA: "a", nameB: "b" });
+    expect(md).toContain("partial-replace");
+    expect(md).toContain("| differ |");
+    expect(md).toContain("artifacts_identical:** false");
   });
 
   it("includes the technique label when provided", () => {

@@ -110,6 +110,10 @@ interface ArtifactDiffRow {
   hashB: string;
   /** "identical" | "differ" | "A-only" | "B-only" | "unknown" (no content extractable) */
   status: string;
+  /** Combined kind label, e.g. "full-write" / "partial-replace" / "patch" / "mixed".
+   *  Tells the analyst whether "identical" means end-state-bytes-match or
+   *  same-change-request-text. */
+  editKind: string;
 }
 
 interface ArtifactDiff {
@@ -117,25 +121,38 @@ interface ArtifactDiff {
   allIdentical: boolean;
   extractable: number;
   total: number;
+  /** Count by edit kind across both runs, for the LLM to reason about
+   *  whether "identical" rows prove end-state equality or just same patch. */
+  fullWriteCount: number;
+  partialReplaceCount: number;
+  patchCount: number;
 }
 
 function compareEditArtifacts(
-  artA: { path: string; contentHash: string }[],
-  artB: { path: string; contentHash: string }[],
+  artA: { path: string; contentHash: string; editKind?: string }[],
+  artB: { path: string; contentHash: string; editKind?: string }[],
 ): ArtifactDiff {
   // If a file is edited multiple times in one run, take the LAST edit's
-  // hash (that's the final byte state).
-  const mapA = new Map<string, string>();
-  const mapB = new Map<string, string>();
-  for (const a of artA) mapA.set(a.path, a.contentHash);
-  for (const b of artB) mapB.set(b.path, b.contentHash);
+  // hash (that's the final byte state for full-write; for partial-replace
+  // it's the last change-request — the analyst is told about this caveat
+  // via editKind).
+  const mapA = new Map<string, { hash: string; kind: string }>();
+  const mapB = new Map<string, { hash: string; kind: string }>();
+  for (const a of artA) mapA.set(a.path, { hash: a.contentHash, kind: a.editKind || "unknown" });
+  for (const b of artB) mapB.set(b.path, { hash: b.contentHash, kind: b.editKind || "unknown" });
   const allPaths = Array.from(new Set([...mapA.keys(), ...mapB.keys()])).sort();
   const rows: ArtifactDiffRow[] = [];
   let allIdentical = allPaths.length > 0;
   let extractable = 0;
+  let fullWriteCount = 0;
+  let partialReplaceCount = 0;
+  let patchCount = 0;
+
   for (const path of allPaths) {
-    const hashA = mapA.get(path) || "(absent)";
-    const hashB = mapB.get(path) || "(absent)";
+    const a = mapA.get(path);
+    const b = mapB.get(path);
+    const hashA = a?.hash || "(absent)";
+    const hashB = b?.hash || "(absent)";
     let status = "unknown";
     if (hashA === "(absent)") {
       status = "B-only";
@@ -154,24 +171,27 @@ function compareEditArtifacts(
       extractable += 1;
       allIdentical = false;
     }
-  }
-  // Second pass to populate rows in the same order (we needed the totals first)
-  for (const path of allPaths) {
-    const hashA = mapA.get(path) || "(absent)";
-    const hashB = mapB.get(path) || "(absent)";
-    let status = "unknown";
-    if (hashA === "(absent)") status = "B-only";
-    else if (hashB === "(absent)") status = "A-only";
-    else if (hashA === "00000000" || hashB === "00000000") status = "unknown (content not in args)";
-    else if (hashA === hashB) status = "identical";
-    else status = "differ";
-    rows.push({ path, hashA, hashB, status });
+    // Combined edit-kind label: if both sides agree, use that; otherwise "mixed".
+    const kinds = new Set<string>();
+    if (a) kinds.add(a.kind);
+    if (b) kinds.add(b.kind);
+    let editKind = "unknown";
+    if (kinds.size === 1) editKind = Array.from(kinds)[0];
+    else if (kinds.size > 1) editKind = "mixed (" + Array.from(kinds).sort().join("/") + ")";
+    rows.push({ path, hashA, hashB, status, editKind });
+
+    if (editKind.startsWith("full-write")) fullWriteCount += 1;
+    else if (editKind.startsWith("partial-replace")) partialReplaceCount += 1;
+    else if (editKind.startsWith("patch")) patchCount += 1;
   }
   return {
     rows,
     allIdentical,
     extractable,
     total: allPaths.length,
+    fullWriteCount,
+    partialReplaceCount,
+    patchCount,
   };
 }
 
@@ -569,26 +589,39 @@ export function formatComparisonAsMarkdown(
   // contents extracted from edit-tool args. Closest-to-ground-truth
   // quality signal available without filesystem snapshots.
   lines.push("## Edit artifacts diff");
-  lines.push("Per file written by edit/create/replace tools. Same content hash");
-  lines.push("on both sides means the runs wrote byte-identical content (after");
-  lines.push("whitespace normalization). Different hashes mean the artifacts");
-  lines.push("differ; absent on one side means only one run wrote that file.");
-  lines.push("Hash `00000000` means the tool args didn't carry the new content");
-  lines.push("(e.g. a diff-only str-replace) so identity can't be judged from");
-  lines.push("the export alone.");
+  lines.push("Per file written by edit/create/replace tools, with the kind of");
+  lines.push("edit so you know what an \"identical\" hash actually proves:");
+  lines.push("");
+  lines.push("- **full-write** (`create_file`, `write_file`, `edit_file` with a");
+  lines.push("  full `code` body): hash covers the END-STATE file bytes.");
+  lines.push("  Identical ⇒ both runs produced the same final file. Strong");
+  lines.push("  ground truth.");
+  lines.push("- **partial-replace** (`str_replace`, `replace_string_in_file`,");
+  lines.push("  `insert_edit`): hash covers `oldString → newString`. Identical");
+  lines.push("  ⇒ both runs proposed the same change at the same location, but");
+  lines.push("  the resulting file is byte-identical ONLY IF the pre-edit file");
+  lines.push("  state was the same. Treat this as strong evidence, not proof.");
+  lines.push("- **patch** (`apply_patch`): hash covers the full diff including");
+  lines.push("  context lines. Identical ⇒ identical patch applied.");
+  lines.push("- **unknown / hash `00000000`:** tool args didn't carry");
+  lines.push("  recognizable content; identity can't be judged from the export.");
   lines.push("");
   const artifactDiff = compareEditArtifacts(cmp.fingerprintA.editArtifacts, cmp.fingerprintB.editArtifacts);
   if (artifactDiff.rows.length === 0) {
     lines.push("(no edit-tool calls recorded on either side)");
   } else {
-    lines.push("| Path | A hash | B hash | Status |");
-    lines.push("|---|---|---|---|");
+    lines.push("| Path | Kind | A hash | B hash | Status |");
+    lines.push("|---|---|---|---|---|");
     for (const r of artifactDiff.rows) {
-      lines.push(`| \`${r.path}\` | ${r.hashA} | ${r.hashB} | ${r.status} |`);
+      lines.push(`| \`${r.path}\` | ${r.editKind} | ${r.hashA} | ${r.hashB} | ${r.status} |`);
     }
     lines.push("");
     lines.push(`- **artifacts_identical:** ${artifactDiff.allIdentical ? "true" : "false"} (every edit on both sides has matching content hashes)`);
     lines.push(`- **artifacts_with_extractable_content:** ${artifactDiff.extractable} / ${artifactDiff.total}`);
+    lines.push(`- **edit_kind_counts:** full-write ${artifactDiff.fullWriteCount}, partial-replace ${artifactDiff.partialReplaceCount}, patch ${artifactDiff.patchCount}`);
+    if (artifactDiff.partialReplaceCount > 0 || artifactDiff.patchCount > 0) {
+      lines.push("- ⚠ Some rows are partial-replace or patch — \"identical\" there means same change-request, not guaranteed-identical end-state.");
+    }
   }
   lines.push("");
 
@@ -882,15 +915,25 @@ function buildReportInstructions(planMode: boolean): string {
   lines.push("- `artifacts_identical: true` — every file written has matching");
   lines.push("  content hashes on both sides. This is the strongest available");
   lines.push("  ground-truth signal: the runs produced byte-identical");
-  lines.push("  artifacts. Say so plainly and stop hedging on artifact");
-  lines.push("  equivalence.");
+  lines.push("  artifacts (or, for partial-replace rows, identical change");
+  lines.push("  requests — see kind caveat below). Say so plainly and stop");
+  lines.push("  hedging on artifact equivalence.");
   lines.push("- `artifacts_identical: false` — at least one file differs, is");
   lines.push("  one-sided, or has unextractable content. List the divergent");
   lines.push("  files with their status (differ / A-only / B-only / unknown).");
   lines.push("- `artifacts_with_extractable_content: N / M` — when N < M,");
-  lines.push("  some edits used diff-style tools (str_replace) where the");
-  lines.push("  export doesn't carry the full new file content; flag those");
-  lines.push("  as un-judgeable here.");
+  lines.push("  some edits used tools whose args don't carry recognizable");
+  lines.push("  content; flag those rows as un-judgeable here.");
+  lines.push("- **Read the `Kind` column.** `full-write` ⇒ hash = end-state");
+  lines.push("  file bytes, so identical means the runs produced the same");
+  lines.push("  file. `partial-replace` ⇒ hash = `oldString → newString`,");
+  lines.push("  so identical means both runs proposed the same change at the");
+  lines.push("  same location; the resulting file is only byte-identical if");
+  lines.push("  the pre-edit state matched. Quote `edit_kind_counts` when");
+  lines.push("  framing how strong the equivalence claim is.");
+  lines.push("- If the diff block carries the ⚠ partial-replace/patch caveat,");
+  lines.push("  repeat it once when stating the verdict — do not promote a");
+  lines.push("  partial-replace match to \"byte-identical end state\".");
   lines.push("");
   lines.push("Then use the Behavior diff `same_files_edited` and");
   lines.push("`same_files_referenced` flags. When those agree, say \"both runs");
