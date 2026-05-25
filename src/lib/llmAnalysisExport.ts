@@ -412,6 +412,9 @@ export interface BuildOptions {
   /** When true, omit per-call assistant previews and tool-name arrays even
    * for short sessions. */
   forceCompact?: boolean;
+  /** Reserved for baseline comparison wiring (Compare-view integration).
+   * Currently only the truthy/falsy flag is consumed. */
+  baseline?: { sessionLabel?: string } | null;
 }
 
 export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOptions = {}): string {
@@ -623,7 +626,7 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
   lines.push("");
   lines.push("## Source-of-truth precedence");
   lines.push("");
-  lines.push("The developer-facing JSON keys (`developer_action_summary`, `workflow_classification`, `developer_efficiency_findings`, `developer_levers_detected`, `developer_cost_categories`, `recommended_changes`, `custom_mode_or_agent_analysis`, `ide_tool_configuration_analysis`, `skills_profile_analysis`, `automation_boundary_recommendation`, `model_strategy_recommendation`, `prompt_strategy_recommendation`, `quality_and_validation`, `missing_data`) are the source of truth. The `raw_supporting_telemetry` block is evidence only. If a human-readable supporting section later in this prompt appears to contradict the developer-facing JSON, the JSON wins.");
+  lines.push("The developer-facing JSON keys (`developer_action_summary`, `workflow_classification`, `developer_efficiency_findings`, `developer_levers_detected`, `developer_cost_categories`, `recommended_changes`, `custom_mode_or_agent_analysis`, `ide_tool_configuration_analysis`, `skills_profile_analysis`, `automation_boundary_recommendation`, `model_strategy_recommendation`, `prompt_strategy_recommendation`, `quality_and_validation`, `workflow_phase_analysis`, `agent_loop_efficiency`, `tool_result_size_analysis`, `baseline_comparison`, `missing_data`) are the source of truth. The `raw_supporting_telemetry` block is evidence only. If a human-readable supporting section later in this prompt appears to contradict the developer-facing JSON, the JSON wins.");
   lines.push("");
   lines.push("## Output format");
   lines.push("");
@@ -643,6 +646,17 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
   lines.push("10. **Inline prompt guidance** -- Use `prompt_strategy_recommendation` and `developer_levers_detected.inline_prompt`. 1-3 sentences. If `inline_prompt.priority == \"low\"`, say the inline prompt should provide only session-specific scope, not full workflow instructions. Quote `prompt_strategy_recommendation.example_inline_prompt`.");
   lines.push("11. **Data confidence and missing data** -- List `missing_data` entries. For each, quote `why_it_matters_for_developer_report` so the reader understands what the report cannot prove.");
   lines.push("12. **Suggestions for improving future telemetry** -- Up to 5 bullets. For each item in `missing_data`, summarize `future_instrumentation` in one short sentence.");
+  lines.push("");
+  lines.push("## Cross-cutting analyst guidance");
+  lines.push("");
+  lines.push("- **Iteration-aware analysis.** If `baseline_comparison.available == true`, compare current vs baseline: what improved, what regressed, what stayed the same, what is attributable to user-controlled changes, what is external or fixed. If `baseline_comparison.available == false`, do not invent a comparison.");
+  lines.push("- **Control-surface discipline.** Prioritize recommendations whose `surface` the developer actually controls. Do not keep recommending a lever as the main action if data shows it is outside their control; mention it as fixed or external overhead instead.");
+  lines.push("- **Phase-aware diagnosis.** Use `workflow_phase_analysis.largest_cost_phase` and `largest_context_growth_phase` to target the expensive phase. Do not recommend generic token reductions when one phase clearly dominates.");
+  lines.push("- **Loop-shape diagnosis.** Use `agent_loop_efficiency.call_shape_assessment`. If the shape is `many_model_turns_for_repeatable_workflow` or `hidden_deliberation_spike`, name the specific waste pattern; do not recommend more turns.");
+  lines.push("- **Quality-aware model guidance.** If `quality_and_validation.available == false`, frame cheaper-model and more-automation recommendations as hypotheses to test, never as safe defaults.");
+  lines.push("- **Automation-boundary diagnosis.** If `automation_boundary_recommendation` lists deterministic steps and `tool_result_size_analysis.bloat_assessment` is `moderate` or `high`, recommend moving deterministic work into scripts / linters / data processors and consuming compact intermediate artifacts; keep model-driven work focused on ambiguity, judgment, synthesis, and exception handling.");
+  lines.push("- **Tool-output bloat.** Use `tool_result_size_analysis.largest_turns` to point at specific turns whose combined tool results bloated context. Respect `granularity_caveat`: never attribute bloat to one specific tool invocation -- it is per-chat-call aggregate.");
+  lines.push("- **Generality.** Frame findings in reusable patterns (excessive setup overhead, overly broad tool profile, large prompt/config context, repeated deterministic work, large tool outputs, context accumulation, hidden deliberation spikes, missing quality validation, model choice not validated) rather than workflow-specific narratives.");
   lines.push("");
   lines.push("## Hard rules");
   lines.push("");
@@ -1464,6 +1478,196 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
     confidence: "high",
   });
 
+  // ===================== Generic spec-aligned blocks =====================
+  // These blocks are intentionally workflow-agnostic. They derive only from
+  // measured per-turn data so the same shape works for coding, file
+  // processing, research, debugging, writing, data analysis, and so on.
+
+  // -- Workflow phase analysis (heuristic) --------------------------------
+  // Map each tool family to one of the spec's generic phase names.
+  function phaseForToolFamily(family: string): string {
+    if (family === "search" || family === "code_navigation_refactor") return "information_gathering";
+    if (family === "terminal" || family === "task_automation" || family === "notebook") return "tool_or_command_execution";
+    if (family === "file_editing") return "file_or_artifact_creation";
+    if (family === "image_media") return "data_extraction";
+    return "unknown";
+  }
+  type ChatEvent = CostAnalysisCall & { kind: "llm" };
+  const perTurnEvents: ChatEvent[] = chatEvents as ChatEvent[];
+  const turnPhases = perTurnEvents.map((ev, idx) => {
+    const turn = idx + 1;
+    const tools = ev.producedToolCalls || [];
+    const familyCounts = new Map<string, number>();
+    tools.forEach(tc => {
+      const fam = classifyToolFamily(tc.name);
+      familyCounts.set(fam, (familyCounts.get(fam) || 0) + 1);
+    });
+    const phaseWeights = new Map<string, number>();
+    familyCounts.forEach((cnt, fam) => {
+      const phase = phaseForToolFamily(fam);
+      phaseWeights.set(phase, (phaseWeights.get(phase) || 0) + cnt);
+    });
+    const visible = ev.visibleResponseChars || 0;
+    const thinking = ev.thinkingChars || 0;
+    // No tools and a short visible reply on the first turn = task_understanding.
+    // No tools and a long visible reply = final_response / review_or_synthesis.
+    if (tools.length === 0) {
+      if (turn === 1) phaseWeights.set("task_understanding", 1);
+      else if (visible >= 800) phaseWeights.set("review_or_synthesis", 1);
+      else if (visible > 0) phaseWeights.set("final_response", 1);
+      else phaseWeights.set("unknown", 1);
+    }
+    // Heavy hidden reasoning relative to tool count = planning weight.
+    if (thinking >= 4000 && tools.length <= 2) {
+      phaseWeights.set("planning", (phaseWeights.get("planning") || 0) + 1);
+    }
+    const totalWeight = Array.from(phaseWeights.values()).reduce((a, b) => a + b, 0) || 1;
+    const phaseMix = Array.from(phaseWeights.entries())
+      .map(([phase, w]) => ({ phase, weight: Number((w / totalWeight).toFixed(2)) }))
+      .sort((a, b) => b.weight - a.weight)
+      .slice(0, 2);
+    const primary = phaseMix[0]?.phase || "unknown";
+    return {
+      turn,
+      primary_phase: primary,
+      phase_mix: phaseMix,
+      cost_usd: Number((ev.cost || 0).toFixed(4)),
+      chat_calls: 1,
+      tool_calls: tools.length,
+      output_tokens: ev.output || 0,
+      thinking_chars: thinking,
+      tool_result_chars: ev.componentChars?.tool_results || 0,
+    };
+  });
+  // Aggregate per-phase totals across the session.
+  const phaseAggregate = new Map<string, { phase: string; turns: number[]; cost_usd: number; chat_calls: number; tool_calls: number; output_tokens: number; thinking_chars: number; tool_result_chars: number }>();
+  turnPhases.forEach(t => {
+    const key = t.primary_phase;
+    const cur = phaseAggregate.get(key) || { phase: key, turns: [], cost_usd: 0, chat_calls: 0, tool_calls: 0, output_tokens: 0, thinking_chars: 0, tool_result_chars: 0 };
+    cur.turns.push(t.turn);
+    cur.cost_usd += t.cost_usd;
+    cur.chat_calls += t.chat_calls;
+    cur.tool_calls += t.tool_calls;
+    cur.output_tokens += t.output_tokens;
+    cur.thinking_chars += t.thinking_chars;
+    cur.tool_result_chars += t.tool_result_chars;
+    phaseAggregate.set(key, cur);
+  });
+  const phaseList = Array.from(phaseAggregate.values()).map(p => ({
+    ...p,
+    cost_usd: Number(p.cost_usd.toFixed(4)),
+  })).sort((a, b) => b.cost_usd - a.cost_usd);
+  const largestCostPhase = phaseList[0]?.phase || null;
+  const largestContextGrowthPhase = (() => {
+    let best: { phase: string; chars: number } | null = null;
+    phaseAggregate.forEach(p => {
+      const chars = p.tool_result_chars + p.thinking_chars;
+      if (!best || chars > best.chars) best = { phase: p.phase, chars };
+    });
+    return best ? (best as { phase: string; chars: number }).phase : null;
+  })();
+  const workflowPhaseAnalysis = perTurnEvents.length > 0 ? {
+    available: true,
+    phase_detection_method: "heuristic_tool_family_plus_visible_reply",
+    per_turn: turnPhases,
+    phases: phaseList,
+    largest_cost_phase: largestCostPhase,
+    largest_context_growth_phase: largestContextGrowthPhase,
+    confidence: "medium",
+    caveats: [
+      "Phases are inferred from tool families and visible-reply size. A turn often mixes phases; `phase_mix` shows the top-2 phases with weights.",
+      "If `primary_phase == \"unknown\"`, the heuristic could not classify the turn.",
+    ],
+  } : { available: false, reason: "No chat calls in this session." };
+
+  // -- Agent-loop efficiency ---------------------------------------------
+  const noToolCalls = perTurnEvents.filter(ev => (ev.producedToolCalls || []).length === 0);
+  const noToolNoVisibleOutputCalls = noToolCalls.filter(ev => (ev.visibleResponseChars || 0) < 40);
+  const visibleReplyEmptyOrTinyCalls = perTurnEvents.filter(ev => (ev.visibleResponseChars || 0) < 40).length;
+  const longInternalProcessingCalls = perTurnEvents
+    .map((ev, idx) => ({
+      turn: idx + 1,
+      thinking_chars: ev.thinkingChars || 0,
+      output_tokens: ev.output || 0,
+      cost_usd: Number((ev.cost || 0).toFixed(4)),
+    }))
+    .filter(t => t.thinking_chars >= 6000 || (t.output_tokens >= 4000 && t.cost_usd >= 0.05));
+  const chatCallsForShape = perTurnEvents.length;
+  const callShapeAssessment = chatCallsForShape === 0 ? "not_enough_data"
+    : chatCallsForShape <= 2 ? "efficient_single_pass"
+    : longInternalProcessingCalls.length >= 2 ? "hidden_deliberation_spike"
+    : chatCallsForShape >= 10 && noToolNoVisibleOutputCalls.length >= 3 ? "many_model_turns_for_repeatable_workflow"
+    : totals.toolCalls >= chatCallsForShape * 1.5 ? "tool_heavy_but_expected"
+    : "reasonable_interactive_session";
+  const recommendedTargetShape = callShapeAssessment === "many_model_turns_for_repeatable_workflow"
+    ? { chat_calls: "3-5", description: "Workflow looks repeatable. Move deterministic steps to scripts so the model only handles ambiguity and final review." }
+    : callShapeAssessment === "hidden_deliberation_spike"
+    ? { chat_calls: String(chatCallsForShape), description: "Call count is fine; reduce per-call deliberation. Lower reasoning effort, instruct the model to think briefly, or split into smaller sub-tasks." }
+    : callShapeAssessment === "tool_heavy_but_expected"
+    ? { chat_calls: String(chatCallsForShape), description: "Tool-heavy shape is appropriate for this workflow." }
+    : { chat_calls: String(chatCallsForShape), description: "Current loop shape looks reasonable for an interactive session." };
+  const agentLoopEfficiency = {
+    chat_calls: chatCallsForShape,
+    tool_calls: totals.toolCalls,
+    no_tool_calls: noToolCalls.length,
+    visible_reply_empty_or_tiny_calls: visibleReplyEmptyOrTinyCalls,
+    no_tool_no_visible_output_calls: noToolNoVisibleOutputCalls.length,
+    long_internal_processing_calls: longInternalProcessingCalls.slice(0, 5),
+    call_shape_assessment: callShapeAssessment,
+    recommended_target_shape: recommendedTargetShape,
+    confidence: "measured",
+  };
+
+  // -- Tool result size analysis (per-turn aggregate) --------------------
+  // We only have per-CHAT-CALL aggregates of all tool results combined, not
+  // per-individual-tool-call stdout/stderr. State that limitation here so
+  // the analyst does not overclaim ("turn X's combined tool results", not
+  // "tool Y returned").
+  function operationKindForTools(tools: string[]): string {
+    if (tools.length === 0) return "unknown";
+    const fams = tools.map(classifyToolFamily);
+    if (fams.includes("file_editing")) return "artifact_creation";
+    if (fams.includes("terminal")) return "terminal_command";
+    if (fams.includes("search")) return "search";
+    if (fams.includes("code_navigation_refactor")) return "data_extraction";
+    if (fams.includes("notebook")) return "data_transformation";
+    if (fams.includes("image_media")) return "data_extraction";
+    return "unknown";
+  }
+  const perTurnToolResults = perTurnEvents.map((ev, idx) => {
+    const tools = (ev.producedToolCalls || []).map(tc => tc.name);
+    return {
+      turn: idx + 1,
+      tool_names: tools,
+      operation_kind: operationKindForTools(tools),
+      tool_result_chars: ev.componentChars?.tool_results || 0,
+      carried_into_context: (ev.componentChars?.tool_results || 0) > 0,
+    };
+  });
+  const largestToolResultTurns = [...perTurnToolResults]
+    .filter(t => t.tool_result_chars > 0)
+    .sort((a, b) => b.tool_result_chars - a.tool_result_chars)
+    .slice(0, 5);
+  const totalToolResultChars = perTurnToolResults.reduce((a, t) => a + t.tool_result_chars, 0);
+  const avgToolResultChars = perTurnToolResults.length > 0 ? Math.round(totalToolResultChars / perTurnToolResults.length) : 0;
+  const bloatAssessment = avgToolResultChars >= 5000 ? "high" : avgToolResultChars >= 1500 ? "moderate" : "low";
+  const toolResultSizeAnalysis = {
+    available: true,
+    granularity: "per_chat_call_aggregate",
+    granularity_caveat: "Tool result chars are summed across all tool calls inside a single chat call. We cannot attribute bloat to one specific tool invocation. See missing_data.per_command_tool_output_size.",
+    per_turn: perTurnToolResults,
+    largest_turns: largestToolResultTurns,
+    total_tool_result_chars: totalToolResultChars,
+    avg_tool_result_chars_per_chat_call: avgToolResultChars,
+    bloat_assessment: bloatAssessment,
+    confidence: "measured",
+  };
+
+  // -- Baseline comparison (placeholder until UI wiring) -----------------
+  const baselineComparison = opts.baseline
+    ? { available: true, reason: "Baseline wiring not yet implemented; placeholder for future Compare-view integration." }
+    : { available: false, reason: "No baseline session was provided. To enable iteration-aware analysis, pass a second session through the Compare view (planned)." };
+
   const facts = {
     // ===================== Developer-facing layer =====================
     session_metadata: {
@@ -1501,6 +1705,10 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
     model_strategy_recommendation: modelStrategyRecommendation,
     prompt_strategy_recommendation: promptStrategyRecommendation,
     quality_and_validation: qualityAndValidation,
+    workflow_phase_analysis: workflowPhaseAnalysis,
+    agent_loop_efficiency: agentLoopEfficiency,
+    tool_result_size_analysis: toolResultSizeAnalysis,
+    baseline_comparison: baselineComparison,
     missing_data: [
       firstChatMode ? {
         field: "custom_chat_mode_full_prompt_or_summary",

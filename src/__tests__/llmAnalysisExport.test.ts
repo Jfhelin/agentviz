@@ -158,6 +158,10 @@ describe("buildLlmAnalysisPrompt", () => {
     expect(facts).toHaveProperty("model_strategy_recommendation");
     expect(facts).toHaveProperty("prompt_strategy_recommendation");
     expect(facts).toHaveProperty("quality_and_validation");
+    expect(facts).toHaveProperty("workflow_phase_analysis");
+    expect(facts).toHaveProperty("agent_loop_efficiency");
+    expect(facts).toHaveProperty("tool_result_size_analysis");
+    expect(facts).toHaveProperty("baseline_comparison");
     expect(facts).toHaveProperty("missing_data");
     expect(Array.isArray(facts.missing_data)).toBe(true);
     expect(facts.missing_data.length).toBeGreaterThan(0);
@@ -179,5 +183,51 @@ describe("buildLlmAnalysisPrompt", () => {
     // Missing_data entries use the new field shape.
     expect(facts.missing_data[0]).toHaveProperty("why_it_matters_for_developer_report");
     expect(facts.missing_data[0]).toHaveProperty("future_instrumentation");
+  });
+
+  it("includes generic spec-aligned blocks: workflow phases, agent loop, tool result size, baseline placeholder", () => {
+    const out = buildLlmAnalysisPrompt(analysis);
+    const match = out.match(/## Structured facts \(JSON\)[\s\S]*?```json\n([\s\S]*?)\n```/);
+    const facts = JSON.parse(match![1]);
+    // Workflow phase analysis.
+    expect(facts.workflow_phase_analysis).toHaveProperty("available");
+    if (facts.workflow_phase_analysis.available) {
+      expect(facts.workflow_phase_analysis).toHaveProperty("per_turn");
+      expect(facts.workflow_phase_analysis).toHaveProperty("phases");
+      expect(facts.workflow_phase_analysis).toHaveProperty("largest_cost_phase");
+      expect(facts.workflow_phase_analysis).toHaveProperty("phase_detection_method");
+      // Per-turn entries must have phase_mix (top-2 phases with weights).
+      const sample = facts.workflow_phase_analysis.per_turn[0];
+      expect(sample).toHaveProperty("primary_phase");
+      expect(sample).toHaveProperty("phase_mix");
+      expect(Array.isArray(sample.phase_mix)).toBe(true);
+    }
+    // Agent loop efficiency.
+    expect(facts.agent_loop_efficiency).toHaveProperty("chat_calls");
+    expect(facts.agent_loop_efficiency).toHaveProperty("no_tool_no_visible_output_calls");
+    expect(facts.agent_loop_efficiency).toHaveProperty("call_shape_assessment");
+    expect(facts.agent_loop_efficiency).toHaveProperty("recommended_target_shape");
+    // Tool result size analysis with explicit granularity caveat.
+    expect(facts.tool_result_size_analysis).toHaveProperty("granularity");
+    expect(facts.tool_result_size_analysis).toHaveProperty("granularity_caveat");
+    expect(facts.tool_result_size_analysis).toHaveProperty("per_turn");
+    expect(facts.tool_result_size_analysis).toHaveProperty("largest_turns");
+    expect(facts.tool_result_size_analysis).toHaveProperty("bloat_assessment");
+    // Baseline comparison placeholder (no baseline supplied).
+    expect(facts.baseline_comparison).toHaveProperty("available");
+    expect(facts.baseline_comparison.available).toBe(false);
+    expect(facts.baseline_comparison).toHaveProperty("reason");
+  });
+
+  it("includes cross-cutting analyst guidance (iteration, control surface, phase, quality, automation, generality)", () => {
+    const out = buildLlmAnalysisPrompt(analysis);
+    expect(out).toContain("Cross-cutting analyst guidance");
+    expect(out).toContain("Iteration-aware analysis");
+    expect(out).toContain("Control-surface discipline");
+    expect(out).toContain("Phase-aware diagnosis");
+    expect(out).toContain("Loop-shape diagnosis");
+    expect(out).toContain("Quality-aware model guidance");
+    expect(out).toContain("Automation-boundary diagnosis");
+    expect(out).toContain("Generality");
   });
 });
