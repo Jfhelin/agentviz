@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { theme, alpha } from "../lib/theme.js";
 import { compareRunsCost, BUCKETS } from "../lib/compareCost";
-import { formatComparisonAsMarkdown, buildComparisonLlmPrompt } from "../lib/exportComparison";
+import { buildComparisonLlmPrompt } from "../lib/exportComparison";
 import { prettifyRunName } from "../lib/runDisplayName";
 
 // A = primary blue, B = system purple. Matches the convention used elsewhere
@@ -1062,12 +1062,6 @@ function ExportButtons({ cmp, nameA, nameB, experimentPlan }) {
     : "Copy the comparison wrapped in analyst instructions. Paste into ChatGPT/Claude/Copilot to get a focused report on what changed, what caused it, warnings, and what to validate next.";
   return (
     <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end", gap: 8 }}>
-      <CopyButton
-        label="Copy summary as markdown"
-        copiedLabel="Summary copied"
-        title="Copy a structured markdown summary of this comparison for paste-into-chat. Useful when discussing the result with someone."
-        build={() => formatComparisonAsMarkdown(cmp, { nameA, nameB })}
-      />
       <CopyButton
         label={plan ? "Copy for LLM analysis (with plan)" : "Copy for LLM analysis"}
         copiedLabel="Analysis prompt copied"

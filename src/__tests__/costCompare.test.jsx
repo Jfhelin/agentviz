@@ -109,7 +109,7 @@ describe("CostCompare", function () {
     await act(async function () { root.unmount(); });
   });
 
-  it("exposes copy-summary and LLM-analysis export buttons", async function () {
+  it("exposes the LLM-analysis export button", async function () {
     var container = document.createElement("div");
     document.body.appendChild(container);
     var root = createRoot(container);
@@ -118,7 +118,6 @@ describe("CostCompare", function () {
 
     await act(async function () { root.render(<CostCompare sessionA={a} sessionB={b} />); });
 
-    expect(findByText(container, "Copy summary as markdown")).not.toBeNull();
     expect(findByText(container, "Copy for LLM analysis")).not.toBeNull();
 
     await act(async function () { root.unmount(); });
