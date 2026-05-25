@@ -4,7 +4,7 @@
 
 **See what your AI agents actually do.**
 
-Drop a Claude Code, VS Code Copilot Chat, Copilot CLI, Copilot prompt export, or ATIF / Harbor session file and explore the agent's reasoning, tool calls, turn flow, output, token spend, and context buildup through replay, tracks, waterfall, graph, stats, and cost views. Or run it from the CLI for a live view that updates as your session unfolds.
+Drop a Claude Code, VS Code Copilot Chat, Copilot CLI, Copilot prompt export, or ATIF / Harbor session file and review the run as a workflow: find the session, triage health, investigate evidence, analyze behavior, compare approaches, and improve the next prompt or configuration. Or run it from the CLI for a live view that updates as your session unfolds.
 
 [![CI](https://github.com/jayparikh/agentviz/actions/workflows/ci.yml/badge.svg)](https://github.com/jayparikh/agentviz/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/agentviz?color=blue&logo=npm)](https://www.npmjs.com/package/agentviz)
@@ -160,7 +160,22 @@ AGENTVIZ now defaults to the task-oriented workflow shell. The same parser and s
 | Compare | Inline comparison using the existing scorecard and tools chart |
 | Improve | Coach recommendations, next-run checklist, and Session Q&A |
 
-The workflow shell is mounted exclusively by default (`agentviz:v2:enabled`). Click **Classic UI** in the header to use the original replay-first interface, or **Default UI** in Classic UI to return to the workflow shell.
+The redesign changes the top-level model from visualization tabs to user jobs. Instead of choosing between Replay, Tracks, Waterfall, Graph, Stats, Cost, and Coach up front, you start with a health-oriented Review, follow evidence in Investigate, open deeper Analyze panels only when needed, and turn the run into next-run improvements from Improve.
+
+If you know the Classic UI, the old surfaces still exist:
+
+| Classic UI surface | Default workflow home |
+|--------------------|-----------------------|
+| Replay | Investigate |
+| Tracks | Analyze -> Tracks |
+| Waterfall | Analyze -> Waterfall |
+| Graph | Analyze -> Graph |
+| Stats | Analyze -> Stats |
+| Cost | Analyze -> Cost |
+| Coach | Improve |
+| Compare | Compare, or Find multi-select |
+
+The workflow shell is mounted exclusively by default (`agentviz:v2:enabled`). Click **Classic UI** in the header to use the original replay-first interface, or **Default UI** in Classic UI to return to the workflow shell. Classic UI is a fallback, not a separate parser or data path.
 
 ## Session Comparison
 
