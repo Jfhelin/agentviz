@@ -2,7 +2,7 @@ import fs from "fs";
 import os from "os";
 import { join } from "path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { extractVSCodeCustomTitle, extractVSCodeSessionId, clipToLength, filterSessionFiles, isAllowedSessionPath, readCopilotCliSessionPreview, readVSCodeCustomTitle, readVSCodeSessionPreview } from "../../routes/sessions.js";
+import { extractVSCodeCustomTitle, extractVSCodeSessionId, clipToLength, filterSessionFiles, findCodexSessionFiles, isAllowedSessionPath, readCodexSessionPreview, readCopilotCliSessionPreview, readVSCodeCustomTitle, readVSCodeSessionPreview } from "../../routes/sessions.js";
 
 function withTempFile(name, content, fn) {
   var tempDir = fs.mkdtempSync(join(os.tmpdir(), "agentviz-routes-"));
@@ -140,6 +140,48 @@ describe("Copilot CLI session discovery helpers", function () {
   });
 });
 
+describe("Codex session discovery helpers", function () {
+  it("finds rollout JSONL files in the bounded Codex date tree", function () {
+    var tempDir = fs.mkdtempSync(join(os.tmpdir(), "agentviz-codex-"));
+    try {
+      var root = join(tempDir, ".codex", "sessions");
+      var dayDir = join(root, "2026", "05", "25");
+      fs.mkdirSync(dayDir, { recursive: true });
+      var good = join(dayDir, "rollout-2026-05-25T12-00-00-synthetic.jsonl");
+      fs.writeFileSync(good, "{}\n", "utf8");
+      fs.writeFileSync(join(dayDir, "notes.jsonl"), "{}\n", "utf8");
+      fs.mkdirSync(join(root, "cache"), { recursive: true });
+      fs.writeFileSync(join(root, "cache", "rollout-hidden.jsonl"), "{}\n", "utf8");
+
+      expect(findCodexSessionFiles(root)).toEqual([good]);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("reads Codex previews from synthetic rollout records", function () {
+    withTempFile(
+      "rollout-2026-05-25T12-00-00-synthetic.jsonl",
+      [
+        JSON.stringify({ type: "session_meta", payload: { id: "codex-synthetic", cwd: "/workspace/demo", originator: "codex-tui", cli_version: "0.0.0-test" } }),
+        JSON.stringify({ type: "turn_context", payload: { turn_id: "turn-1", model: "gpt-5.3-codex", summary: "Build demo support", cwd: "/workspace/demo" } }),
+        JSON.stringify({ type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "Build demo support" }] } }),
+      ].join("\n"),
+      function (filePath) {
+        expect(readCodexSessionPreview(filePath, fs.statSync(filePath).size)).toEqual({
+          sessionId: "codex-synthetic",
+          title: "Build demo support",
+          summary: "Build demo support",
+          model: "gpt-5.3-codex",
+          cwd: "/workspace/demo",
+          originator: "codex-tui",
+          cliVersion: "0.0.0-test",
+        });
+      }
+    );
+  });
+});
+
 describe("session path restrictions", function () {
   it("allows VS Code chatSessions files", function () {
     var homeDir;
@@ -189,6 +231,19 @@ describe("session path restrictions", function () {
     var homeDir = "/home/tester";
     var sessionPath = "/home/tester/.copilot/session-state/abc-uuid/events.jsonl";
     expect(isAllowedSessionPath(sessionPath, homeDir)).toBe(true);
+  });
+
+  it("allows Codex rollout session files", function () {
+    var homeDir = "/home/tester";
+    var sessionPath = "/home/tester/.codex/sessions/2026/05/25/rollout-2026-05-25T12-00-00-synthetic.jsonl";
+    expect(isAllowedSessionPath(sessionPath, homeDir)).toBe(true);
+  });
+
+  it("rejects non-rollout files under Codex sessions", function () {
+    var homeDir = "/home/tester";
+    expect(isAllowedSessionPath("/home/tester/.codex/sessions/history.jsonl", homeDir)).toBe(false);
+    expect(isAllowedSessionPath("/home/tester/.codex/sessions/2026/05/25/notes.jsonl", homeDir)).toBe(false);
+    expect(isAllowedSessionPath("/home/tester/.codex/sessions/2026/05/25/rollout.txt", homeDir)).toBe(false);
   });
 
   it("rejects paths outside known roots", function () {

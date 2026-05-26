@@ -1,5 +1,6 @@
 export var LANDING_FORMAT_OPTIONS = [
   { id: "all", label: "All clients" },
+  { id: "codex", label: "Codex" },
   { id: "claude-code", label: "Claude Code" },
   { id: "copilot-cli", label: "Copilot CLI" },
   { id: "copilot-prompts", label: "Copilot prompt export" },
@@ -25,6 +26,7 @@ var LOW_SIGNAL_DISCOVERED_BYTES = 16 * 1024;
 export function formatLandingClientLabel(entry) {
   var format = typeof entry === "string" ? entry : (entry && entry.format);
   var isInsiders = typeof entry === "object" && entry && entry.isInsiders;
+  if (format === "codex") return "Codex";
   if (format === "claude-code") return "Claude Code";
   if (format === "copilot-cli") return "Copilot CLI";
   if (format === "copilot-prompts") return "Copilot prompt export";

@@ -1,6 +1,6 @@
 # AGENTVIZ
 
-Session replay visualizer for AI agent workflows. Renders Claude Code, VS Code Copilot Chat, Copilot CLI, Copilot prompt exports, and ATIF / Harbor session logs as interactive timelines, with auto-detection of file format.
+Session replay visualizer for AI agent workflows. Renders Claude Code, Codex, VS Code Copilot Chat, Copilot CLI, Copilot prompt exports, and ATIF / Harbor session logs as interactive timelines, with auto-detection of file format.
 
 ## Stack
 - React 18 + Vite 6
@@ -37,6 +37,7 @@ src/
     theme.d.ts         # TypeScript declarations for theme.js
     constants.js       # SAMPLE_EVENTS data for demo mode
     parser.ts          # parseClaudeCodeJSONL() - Claude Code JSONL parser
+    codexParser.ts     # parseCodexJSONL() - Codex rollout JSONL parser
     copilotCliParser.ts # parseCopilotCliJSONL() - Copilot CLI JSONL parser
     copilotCostParser.ts # parseCopilotPromptsJSON() - Copilot prompt export parser for token/cost analysis
     vscodeSessionParser.ts # parseVSCodeChatJSON() - VS Code Copilot Chat JSON parser
