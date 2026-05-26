@@ -64,6 +64,11 @@ interface EventLike {
   /** Hash of the FULL (un-truncated) system text. Use this in preference to
    * hashing systemPreview when present. */
   systemHash?: string;
+  /** Every top-level `<tag>...</tag>` block extracted from this call's
+   * system prompt. Used by the Compare drift panel to identify which
+   * specific sections differ between two runs. Optional because non-Copilot
+   * Chat parsers don't populate it. */
+  systemBlocks?: SystemBlockLike[];
   argsSummary?: string;
   rawArgs?: string;
   /** "primary" = real user-facing chat call. "overhead" = UI/telemetry side
@@ -71,6 +76,16 @@ interface EventLike {
    * when summarizing per-turn user prompts. */
   category?: "primary" | "overhead";
   kind?: "llm" | "tool";
+}
+
+/** Structural mirror of `SystemBlock` from copilotChatExportParser.ts, kept
+ * local so compareCost stays decoupled from the parser's concrete types. */
+export interface SystemBlockLike {
+  tag: string;
+  attrs: string;
+  key: string;
+  chars: number;
+  bodyPreview: string;
 }
 interface TotalsLike {
   promptTokens: number;
@@ -213,6 +228,11 @@ export interface RunFingerprint {
    * value here means a System prompt drift row of "match" should be qualified
    * as "preview only". */
   systemPromptHashTrusted: boolean;
+  /** Every top-level `<tag>...</tag>` block from the first non-overhead
+   * system prompt. Empty when the parser did not provide block-level data
+   * (e.g. non-Copilot-Chat exports). Used to build the per-section system
+   * prompt diff in the drift panel. */
+  systemBlocks: SystemBlockLike[];
   filesTouched: string[];   // sorted unique paths from any tool args
   filesEdited: string[];    // sorted unique paths from edit/write/create tools
   toolsInvoked: string[];   // sorted unique tool names actually called
@@ -274,6 +294,48 @@ export interface DriftReport {
   hasBlockingDrift: boolean;
   /** True iff any row at all is in "diff" state. */
   hasAnyDrift: boolean;
+  /** Per-section breakdown of how the two runs' system prompts differ.
+   * Populated whenever both fingerprints carry `systemBlocks`; null
+   * otherwise. The view shows it under the System prompt drift row so the
+   * user can see "this `<instruction>` block was present in A but missing
+   * in B" instead of just "hashes differ". */
+  systemPromptDiff: SystemPromptDiff | null;
+}
+
+/** Per-section diff of the two runs' system prompts. */
+export interface SystemPromptDiff {
+  /** Rows ordered by `|delta|` descending: largest absolute byte change first. */
+  rows: SystemPromptDiffRow[];
+  /** Bytes accounted for by `<tag>...</tag>` blocks on each side. The
+   * untracked remainder ("plaintext") is `systemPromptChars - taggedCharsX`. */
+  taggedCharsA: number;
+  taggedCharsB: number;
+  /** Char delta between (sum of all per-block deltas). Excludes plaintext
+   * between tags; the view derives plaintext drift from systemPromptChars. */
+  totalBlockDelta: number;
+  /** True when at least one row is not "identical". When false, the entire
+   * system-prompt delta lives in the untagged plaintext between blocks. */
+  hasBlockDrift: boolean;
+}
+
+export interface SystemPromptDiffRow {
+  /** `tag` when attrs empty, `tag[attrs]` otherwise. */
+  key: string;
+  /** Bare tag name for tooltips/labels. */
+  tag: string;
+  /** Empty when the block has no attributes. */
+  attrs: string;
+  /** "identical" = same key + same chars; "chars-differ" = same key, chars
+   * mismatch; "only-A" / "only-B" = present on one side only. */
+  status: "identical" | "chars-differ" | "only-A" | "only-B";
+  /** Char count on each side (0 when the block is absent on that side). */
+  charsA: number;
+  charsB: number;
+  /** Signed char delta (B - A). */
+  delta: number;
+  /** Short body preview (~200 chars) for tooltips; sourced from whichever
+   * side has the block. */
+  preview: string;
 }
 
 export interface CostComparison {
@@ -941,6 +1003,7 @@ function buildFingerprint(ca: CostAnalysisLike | null | undefined, summary: RunS
     firstUserPrompt: "", firstUserPromptHash: "00000000",
     systemPromptText: "", systemPromptChars: 0, systemPromptHash: "00000000",
     systemPromptHashTrusted: false,
+    systemBlocks: [],
     filesTouched: [], filesEdited: [], toolsInvoked: [], editArtifacts: [],
   };
   if (!ca || !Array.isArray(ca.prompts) || ca.prompts.length === 0) return empty;
@@ -971,6 +1034,7 @@ function buildFingerprint(ca: CostAnalysisLike | null | undefined, summary: RunS
   let systemPromptChars = 0;
   let systemPromptHash = "00000000";
   let systemPromptHashTrusted = false;
+  let systemBlocks: SystemBlockLike[] = [];
   for (const p of ca.prompts) {
     let found = false;
     for (const ev of p.events || []) {
@@ -987,6 +1051,7 @@ function buildFingerprint(ca: CostAnalysisLike | null | undefined, summary: RunS
       systemPromptChars = typeof ev.systemChars === "number" && ev.systemChars >= 0
         ? ev.systemChars
         : systemPromptText.length;
+      if (Array.isArray(ev.systemBlocks)) systemBlocks = ev.systemBlocks;
       found = true;
       break;
     }
@@ -1031,6 +1096,7 @@ function buildFingerprint(ca: CostAnalysisLike | null | undefined, summary: RunS
     systemPromptChars,
     systemPromptHash,
     systemPromptHashTrusted,
+    systemBlocks,
     filesTouched: Array.from(filesTouched).sort(),
     filesEdited: Array.from(filesEdited).sort(),
     toolsInvoked: Array.from(toolsInvoked).sort(),
@@ -1165,7 +1231,61 @@ function buildDriftReport(fa: RunFingerprint, fb: RunFingerprint): DriftReport {
 
   const hasAnyDrift = rows.some((r) => r.status === "diff");
   const hasBlockingDrift = rows.some((r) => r.status === "diff" && r.blocking);
-  return { rows, hasBlockingDrift, hasAnyDrift };
+  const systemPromptDiff = buildSystemPromptDiff(fa.systemBlocks, fb.systemBlocks);
+  return { rows, hasBlockingDrift, hasAnyDrift, systemPromptDiff };
+}
+
+/** Build a per-section diff of the system prompts. Returns null when either
+ * side lacks block-level data (e.g. non-Copilot-Chat parsers). The view
+ * renders this under the System prompt drift row to show the user exactly
+ * which `<tag>` blocks differ. */
+export function buildSystemPromptDiff(
+  blocksA: SystemBlockLike[],
+  blocksB: SystemBlockLike[],
+): SystemPromptDiff | null {
+  if (!blocksA || !blocksB || (blocksA.length === 0 && blocksB.length === 0)) return null;
+  const mapA = new Map<string, SystemBlockLike>();
+  const mapB = new Map<string, SystemBlockLike>();
+  for (const b of blocksA) mapA.set(b.key, b);
+  for (const b of blocksB) mapB.set(b.key, b);
+  const allKeys = new Set<string>([...mapA.keys(), ...mapB.keys()]);
+  const rows: SystemPromptDiffRow[] = [];
+  let taggedCharsA = 0;
+  let taggedCharsB = 0;
+  let totalBlockDelta = 0;
+  for (const key of allKeys) {
+    const a = mapA.get(key);
+    const b = mapB.get(key);
+    const charsA = a ? a.chars : 0;
+    const charsB = b ? b.chars : 0;
+    taggedCharsA += charsA;
+    taggedCharsB += charsB;
+    const delta = charsB - charsA;
+    totalBlockDelta += delta;
+    let status: SystemPromptDiffRow["status"];
+    if (a && b) status = a.chars === b.chars ? "identical" : "chars-differ";
+    else if (a) status = "only-A";
+    else status = "only-B";
+    const sample = a || b!;
+    rows.push({
+      key,
+      tag: sample.tag,
+      attrs: sample.attrs,
+      status,
+      charsA,
+      charsB,
+      delta,
+      preview: (sample.bodyPreview || "").slice(0, 200),
+    });
+  }
+  rows.sort((x, y) => Math.abs(y.delta) - Math.abs(x.delta));
+  return {
+    rows,
+    taggedCharsA,
+    taggedCharsB,
+    totalBlockDelta,
+    hasBlockDrift: rows.some((r) => r.status !== "identical"),
+  };
 }
 
 function truncate(s: string, n: number): string {

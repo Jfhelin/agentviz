@@ -294,7 +294,7 @@ VS Code Copilot Chat exports (`copilot_all_prompts_*.json`) carry the richest da
 <img src="docs/screenshots/cost-view.png" alt="Cost View" width="800" />
 </div>
 
-The **Compare view** gains a dedicated **Cost tab** when both compared sessions are Copilot Chat exports. It produces a side-by-side cost analysis: headline verdict and tone, A/B/delta cards, per-bucket cost waterfall (sorted by absolute delta), a behavioral KPI table (path-noise-resistant metrics like output tokens, primary assistant turns, and unique tool kinds), cache-pollution warnings, run drift (model / tools / system text hash divergence), and rule-driven recommendations. A **Copy summary as markdown** button writes a self-contained reference of the comparison to the clipboard for paste-into-chat sharing.
+The **Compare view** gains a dedicated **Cost tab** when both compared sessions are Copilot Chat exports. It produces a side-by-side cost analysis: headline verdict and tone, A/B/delta cards, per-bucket cost waterfall (sorted by absolute delta), a behavioral KPI table (path-noise-resistant metrics like output tokens, primary assistant turns, and unique tool kinds), cache-pollution warnings, run drift (model / tools / system text hash divergence, with a **per-section system-prompt diff** that lists exactly which `<tag>` blocks differ between the two runs — e.g. an `<instruction>` block tied to an MCP server that was active in one run but not the other), and rule-driven recommendations. A **Copy summary as markdown** button writes a self-contained reference of the comparison to the clipboard for paste-into-chat sharing.
 
 ### Improve
 

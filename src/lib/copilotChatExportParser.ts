@@ -286,6 +286,29 @@ interface ScaffoldingSection {
   body: string;
 }
 
+/** Generic top-level XML-like block in the system prompt. Unlike
+ * `ScaffoldingSection` (which is restricted to a known leaf-tag list),
+ * `SystemBlock` captures EVERY top-level `<tag>...</tag>` in the system text,
+ * including wrappers (`<instructions>`, `<skills>`) and attribute-bearing
+ * blocks (`<instruction forToolsWithPrefix="mcp_azure">`). Used by the
+ * Compare view's drift panel to surface which system-prompt sections actually
+ * differ between two runs. */
+export interface SystemBlock {
+  /** Tag name only, e.g. `instruction`, `skills`, `securityRequirements`. */
+  tag: string;
+  /** Raw attribute string (everything between the tag name and `>`), trimmed.
+   * Empty when the open tag is bare (`<skills>`). */
+  attrs: string;
+  /** Stable identity for diffing: `tag` when attrs is empty,
+   * `tag[attrs]` otherwise. Two blocks with the same key are treated as the
+   * "same" block between runs. */
+  key: string;
+  /** Length of the block's inner text in chars (excluding the wrapping tags). */
+  chars: number;
+  /** First ~400 chars of the inner body, for diff tooltips. */
+  bodyPreview: string;
+}
+
 interface FileAttachment {
   filePath: string;
   chars: number;
@@ -371,6 +394,11 @@ interface ClassifiedCall {
    * Surfacing them lets the user see how much of the system bucket is fixed
    * Copilot boilerplate vs their custom configuration. */
   scaffoldingSections: ScaffoldingSection[];
+  /** Every top-level `<tag>...</tag>` block in the system prompt (including
+   * attribute-bearing blocks like `<instruction forToolsWithPrefix="...">`).
+   * Used by the Compare view's drift panel to show exactly which system-prompt
+   * sections differ between two runs without re-parsing on the consumer side. */
+  systemBlocks: SystemBlock[];
   /** Non-instruction `<attachment filePath="...">` blocks from the system
    * prompt (e.g. user `#file:foo.ts` references). Instruction files are
    * tracked separately in `instructionAttachments`. */
@@ -505,6 +533,70 @@ function extractScaffolding(systemText: string): ScaffoldingSection[] {
       const body = inner.length > MAX_BODY ? inner.slice(0, MAX_BODY).trim() + "\n…[truncated]" : inner.trim();
       out.push({ tag, chars: inner.length, body });
     }
+  }
+  return out;
+}
+
+/** Walk the system prompt and capture every top-level `<tag>...</tag>` block
+ * (not nested inside another tag), keyed by tag + attributes. Used by the
+ * Compare view's drift panel to identify exactly which sections differ
+ * between two runs (e.g. an MCP server's `<instruction>` block present in
+ * one run and missing in the other).
+ *
+ * Nesting is tracked by counting same-name opens/closes after the initial
+ * match, so a `<skill>` inside `<skills>` is correctly skipped at the outer
+ * level. Tags without matching closes are skipped (open without close is a
+ * malformed prompt, not our diff signal). */
+export function extractSystemBlocks(systemText: string): SystemBlock[] {
+  const out: SystemBlock[] = [];
+  const openRe = /<([a-zA-Z][\w.-]*)(\s[^>]*)?>/g;
+  const PREVIEW_MAX = 400;
+  let i = 0;
+  while (i < systemText.length) {
+    openRe.lastIndex = i;
+    const m = openRe.exec(systemText);
+    if (!m) break;
+    const tag = m[1];
+    const attrs = (m[2] || "").trim();
+    const openEnd = m.index + m[0].length;
+    const sameOpenRe = new RegExp(`<${tag}(\\s[^>]*)?>`, "g");
+    const sameCloseRe = new RegExp(`<\\/${tag}>`, "g");
+    let depth = 1;
+    let pos = openEnd;
+    let closeStart = -1;
+    let closeEnd = -1;
+    while (pos < systemText.length) {
+      sameOpenRe.lastIndex = pos;
+      sameCloseRe.lastIndex = pos;
+      const nextOpen = sameOpenRe.exec(systemText);
+      const nextClose = sameCloseRe.exec(systemText);
+      if (!nextClose) break;
+      if (nextOpen && nextOpen.index < nextClose.index) {
+        depth += 1;
+        pos = nextOpen.index + nextOpen[0].length;
+        continue;
+      }
+      depth -= 1;
+      if (depth === 0) {
+        closeStart = nextClose.index;
+        closeEnd = nextClose.index + nextClose[0].length;
+        break;
+      }
+      pos = nextClose.index + nextClose[0].length;
+    }
+    if (closeStart === -1) {
+      i = openEnd;
+      continue;
+    }
+    const inner = systemText.slice(openEnd, closeStart);
+    out.push({
+      tag,
+      attrs,
+      key: attrs ? `${tag}[${attrs}]` : tag,
+      chars: inner.length,
+      bodyPreview: inner.length > PREVIEW_MAX ? inner.slice(0, PREVIEW_MAX) : inner,
+    });
+    i = closeEnd;
   }
   return out;
 }
@@ -746,6 +838,7 @@ function classifyCall(log: RawLog): ClassifiedCall {
   const instructionAttachments = extractInstructionAttachments(systemText);
   const skills = extractSkills(systemText);
   const scaffoldingSections = extractScaffolding(systemText);
+  const systemBlocks = extractSystemBlocks(systemText);
   const fileAttachments = extractFileAttachments(systemText);
   const environment = extractEnvironment(messages);
 
@@ -776,6 +869,7 @@ function classifyCall(log: RawLog): ClassifiedCall {
     instructionAttachments,
     skills,
     scaffoldingSections,
+    systemBlocks,
     fileAttachments,
     environment,
   };
@@ -914,6 +1008,11 @@ export interface CostAnalysisCall {
   skills: ClassifiedCall["skills"];
   /** Stable Copilot scaffolding sections present in every system prompt. */
   scaffoldingSections: ClassifiedCall["scaffoldingSections"];
+  /** Every top-level `<tag>...</tag>` block in the system prompt. Surfaced to
+   * the Compare view so the drift panel can show exactly which sections
+   * differ between runs (e.g. an `<instruction>` block tied to an MCP server
+   * that was active in one run and not the other). */
+  systemBlocks: ClassifiedCall["systemBlocks"];
   /** Non-instruction file attachments referenced in the system prompt
    * (e.g. user `#file:foo.ts` references). */
   fileAttachments: ClassifiedCall["fileAttachments"];
@@ -1513,6 +1612,7 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
         instructionAttachments: cls.instructionAttachments,
         skills: cls.skills,
         scaffoldingSections: cls.scaffoldingSections,
+        systemBlocks: cls.systemBlocks,
         fileAttachments: cls.fileAttachments,
         environment: cls.environment,
         newImages,

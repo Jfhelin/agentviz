@@ -545,6 +545,114 @@ function BucketWaterfall({ deltas, totalA, totalB }) {
   );
 }
 
+function SystemPromptDiffDetail({ diff, nameA, nameB }) {
+  const [expanded, setExpanded] = useState(false);
+  if (!diff || !diff.rows || diff.rows.length === 0) return null;
+  const changed = diff.rows.filter((r) => r.status !== "identical");
+  if (changed.length === 0) return null;
+  const visible = expanded ? changed : changed.slice(0, 6);
+  const remainder = changed.length - visible.length;
+
+  const onlyA = changed.filter((r) => r.status === "only-A").length;
+  const onlyB = changed.filter((r) => r.status === "only-B").length;
+  const charsDiffer = changed.filter((r) => r.status === "chars-differ").length;
+  const summaryParts = [];
+  if (onlyA) summaryParts.push(onlyA + " only in A");
+  if (onlyB) summaryParts.push(onlyB + " only in B");
+  if (charsDiffer) summaryParts.push(charsDiffer + " size changed");
+
+  return (
+    <div style={{
+      background: theme.bg.raised,
+      border: "1px solid " + theme.border.subtle,
+      borderRadius: theme.radius.sm,
+      padding: "10px 12px",
+      fontFamily: theme.font.mono,
+    }}>
+      <div style={{
+        display: "flex", justifyContent: "space-between", alignItems: "baseline",
+        gap: 8, marginBottom: 8,
+      }}>
+        <div style={{ fontSize: theme.fontSize.xs, color: theme.text.secondary }}>
+          Per-section diff · {summaryParts.join(" · ") || "no block drift"}
+        </div>
+        <div style={{ fontSize: 10, color: theme.text.dim, fontVariantNumeric: "tabular-nums" }}>
+          tagged: <span style={{ color: COLOR_A }}>{diff.taggedCharsA.toLocaleString()}</span>
+          {" / "}
+          <span style={{ color: COLOR_B }}>{diff.taggedCharsB.toLocaleString()}</span> chars
+        </div>
+      </div>
+      <div style={{ display: "grid", rowGap: 2 }}>
+        {visible.map((r) => {
+          const statusColor =
+            r.status === "only-A" ? COLOR_A
+            : r.status === "only-B" ? COLOR_B
+            : theme.semantic.warning;
+          const statusLabel =
+            r.status === "only-A" ? "only A"
+            : r.status === "only-B" ? "only B"
+            : "size";
+          const tooltip = r.preview
+            ? "<" + r.tag + (r.attrs ? " " + r.attrs : "") + ">\n\n" + r.preview + (r.preview.length >= 200 ? "…" : "")
+            : "<" + r.tag + (r.attrs ? " " + r.attrs : "") + ">";
+          return (
+            <div key={r.key} title={tooltip} style={{
+              display: "grid",
+              gridTemplateColumns: "70px 1fr 80px 80px 80px",
+              columnGap: 10, alignItems: "baseline",
+              fontSize: 11, fontVariantNumeric: "tabular-nums",
+              padding: "3px 0",
+              borderBottom: "1px dashed " + theme.border.subtle,
+              cursor: r.preview ? "help" : "default",
+            }}>
+              <div style={{
+                fontSize: 10, fontWeight: 700, color: statusColor,
+                textTransform: "uppercase", letterSpacing: 0.5,
+              }}>{statusLabel}</div>
+              <div style={{
+                color: theme.text.primary,
+                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+              }}>
+                &lt;{r.tag}{r.attrs ? " " + r.attrs : ""}&gt;
+              </div>
+              <div style={{ color: r.charsA ? COLOR_A : theme.text.dim, textAlign: "right" }}>
+                {r.charsA ? r.charsA.toLocaleString() : "—"}
+              </div>
+              <div style={{ color: r.charsB ? COLOR_B : theme.text.dim, textAlign: "right" }}>
+                {r.charsB ? r.charsB.toLocaleString() : "—"}
+              </div>
+              <div style={{
+                color: r.delta === 0 ? theme.text.muted : r.delta > 0 ? theme.semantic.warning : theme.semantic.success || COLOR_A,
+                textAlign: "right", fontWeight: 600,
+              }}>
+                {r.delta > 0 ? "+" : ""}{r.delta.toLocaleString()}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {remainder > 0 && (
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          style={{
+            marginTop: 6, fontSize: 10, color: theme.text.muted,
+            background: "transparent", border: "none", cursor: "pointer",
+            fontFamily: theme.font.mono, padding: 0,
+          }}
+        >show {remainder} more</button>
+      )}
+      <div style={{ marginTop: 8, fontSize: 10, color: theme.text.dim, lineHeight: 1.5 }}>
+        Each row is a top-level <code style={{ color: theme.text.secondary }}>&lt;tag&gt;</code> block in the
+        system prompt. <span style={{ color: COLOR_A }}>A</span>/<span style={{ color: COLOR_B }}>B</span> columns
+        show chars; the last column is B − A. Hover a row to preview the block body. Untracked plaintext between
+        blocks (e.g. role preamble, env vars) is not shown here; if the System prompt row shows a char delta larger
+        than the per-block totals, the remainder lives in that plaintext.
+      </div>
+    </div>
+  );
+}
+
 function RunDriftPanel({ drift, nameA, nameB }) {
   if (!drift || !drift.rows || drift.rows.length === 0) return null;
   const allMatch = !drift.hasAnyDrift;
@@ -611,6 +719,11 @@ function RunDriftPanel({ drift, nameA, nameB }) {
               {row.detail && (
                 <div style={{ gridColumn: "2 / -1", color: theme.text.muted, fontSize: 11, marginTop: 2, lineHeight: 1.5 }}>
                   {row.detail}
+                </div>
+              )}
+              {row.key === "system_prompt" && drift.systemPromptDiff && drift.systemPromptDiff.hasBlockDrift && (
+                <div style={{ gridColumn: "2 / -1", marginTop: 6 }}>
+                  <SystemPromptDiffDetail diff={drift.systemPromptDiff} nameA={nameA} nameB={nameB} />
                 </div>
               )}
             </div>
