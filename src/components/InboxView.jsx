@@ -330,7 +330,7 @@ export default function InboxView({ entries, onOpenSession, onImport, onLoadSamp
                 cursor: "pointer",
               }}
             >
-              clear
+              Clear
             </button>
           )}
         </div>
@@ -382,7 +382,7 @@ export default function InboxView({ entries, onOpenSession, onImport, onLoadSamp
                       padding: 0,
                     }}
                   >
-                    load a demo session
+                    Load a demo session
                   </button>
                 )}
                 {onLoadSample && (
@@ -402,7 +402,7 @@ export default function InboxView({ entries, onOpenSession, onImport, onLoadSamp
                       padding: 0,
                     }}
                   >
-                    load multi-agent demo
+                    Load multi-agent demo
                   </button>
                 )}
                 {onLoadSample && onStartCompare && (
@@ -425,7 +425,7 @@ export default function InboxView({ entries, onOpenSession, onImport, onLoadSamp
                       padding: 0,
                     }}
                   >
-                    <Icon name="arrow-up-down" size={12} /> compare two sessions
+                    <Icon name="arrow-up-down" size={12} /> Compare two sessions
                   </button>
                 )}
               </div>

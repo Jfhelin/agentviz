@@ -41,7 +41,7 @@ The README references 8 screenshot files in `docs/screenshots/`. All must be kep
 1. Start dev server: `npm run dev`
 2. Navigate to `http://127.0.0.1:3000`, resize to **1400x860**
 3. Capture `landing.png` from the landing page (before loading a session)
-4. Click **"load a demo session"**, then click each tab and capture: replay, tracks, waterfall, graph, stats
+4. Click **"Load a demo session"**, then click each tab and capture: replay, tracks, waterfall, graph, stats
 5. For **Coach**: click the tab, hide the error banner with JS before capturing:
    ```js
    document.querySelectorAll('*').forEach(el => {

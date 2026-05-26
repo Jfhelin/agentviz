@@ -81,28 +81,22 @@ export default function LiveSessionBanner({ session, completed, onReview, onComp
         </div>
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", gap: theme.space.sm, flexShrink: 0 }}>
-        {completed ? (
-          <>
-            <ToolbarButton onClick={onReview} style={{ color: theme.accent.primary, borderColor: theme.accent.primary }}>
-              Review summary
-            </ToolbarButton>
-            <ToolbarButton onClick={onCompare}>
-              Compare
-            </ToolbarButton>
-            <ToolbarButton onClick={onImprove}>
-              Improve
-            </ToolbarButton>
-            <ToolbarButton onClick={onDismiss} aria-label="Dismiss live completion banner">
-              Dismiss
-            </ToolbarButton>
-          </>
-        ) : (
-          <ToolbarButton onClick={onReview} style={{ color: theme.semantic.success, borderColor: theme.semantic.success }}>
-            Go to Review
+      {completed && (
+        <div style={{ display: "flex", alignItems: "center", gap: theme.space.sm, flexShrink: 0 }}>
+          <ToolbarButton onClick={onReview} style={{ color: theme.accent.primary, borderColor: theme.accent.primary }}>
+            Review summary
           </ToolbarButton>
-        )}
-      </div>
+          <ToolbarButton onClick={onCompare}>
+            Compare
+          </ToolbarButton>
+          <ToolbarButton onClick={onImprove}>
+            Improve
+          </ToolbarButton>
+          <ToolbarButton onClick={onDismiss} aria-label="Dismiss live completion banner">
+            Dismiss
+          </ToolbarButton>
+        </div>
+      )}
     </section>
   );
 }

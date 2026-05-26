@@ -17,6 +17,7 @@ import {
 describe("formatLandingClientLabel", function () {
   it("formats known clients", function () {
     expect(formatLandingClientLabel("claude-code")).toBe("Claude Code");
+    expect(formatLandingClientLabel("codex")).toBe("Codex");
     expect(formatLandingClientLabel("copilot-cli")).toBe("Copilot CLI");
     expect(formatLandingClientLabel("copilot-prompts")).toBe("Copilot prompt export");
     expect(formatLandingClientLabel({ format: "vscode-chat", isInsiders: true })).toBe("VS Code Insiders");
@@ -34,9 +35,12 @@ describe("formatLandingClientLabel", function () {
 });
 
 describe("LANDING_FORMAT_OPTIONS", function () {
-  it("includes ATIF and Copilot prompt export entries", function () {
+  it("includes Codex, ATIF, and Copilot prompt export entries", function () {
+    var codex = LANDING_FORMAT_OPTIONS.find(function (o) { return o.id === "codex"; });
     var atif = LANDING_FORMAT_OPTIONS.find(function (o) { return o.id === "atif"; });
     var prompts = LANDING_FORMAT_OPTIONS.find(function (o) { return o.id === "copilot-prompts"; });
+    expect(codex).toBeDefined();
+    expect(codex.label).toBe("Codex");
     expect(atif).toBeDefined();
     expect(atif.label).toBe("ATIF / Harbor");
     expect(prompts).toBeDefined();

@@ -164,7 +164,7 @@ For each artifact that needs updating, make the changes directly. Do not ask for
 
 If visual changes occurred, regenerate all 8 screenshots. Even if you think only one view changed, regenerate all of them -- theme changes affect everything.
 
-> **PRIVACY: Never capture personal session data.** Use `?demo=empty` for the landing page and "load a demo session" for all session views. No real user sessions should appear in screenshots.
+> **PRIVACY: Never capture personal session data.** Use `?demo=empty` for the landing page and "Load a demo session" for all session views. No real user sessions should appear in screenshots.
 
 ### Capture workflow
 
@@ -189,7 +189,7 @@ npm run dev
 
 2. **Load demo session**
    - Navigate to `http://127.0.0.1:3000` (without `?demo=empty`)
-   - Click "load a demo session"
+   - Click "Load a demo session"
    - Wait for the session to load and the replay view to render
 
 3. **Replay** (`replay-view.png`)

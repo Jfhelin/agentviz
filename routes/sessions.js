@@ -2,7 +2,7 @@
  * Session discovery, file serving, and SSE streaming routes.
  *
  * Handles:
- *   GET /api/sessions -- discover Claude Code, VS Code, & Copilot CLI sessions
+ *   GET /api/sessions -- discover Claude Code, Codex, VS Code, & Copilot CLI sessions
  *   GET /api/session  -- serve a single session file from HOME
  *   GET /api/file     -- serve the active watched session file
  *   GET /api/meta     -- return filename & live status
@@ -194,9 +194,142 @@ export function readCopilotCliSessionPreview(filePath, fileSize) {
   }
 }
 
+export function findCodexSessionFiles(root) {
+  var results = [];
+  function listDir(dir) {
+    try {
+      return fs.readdirSync(dir);
+    } catch (e) {
+      return [];
+    }
+  }
+  function isPlainDirectory(dir) {
+    try {
+      var stat = fs.lstatSync(dir);
+      return stat.isDirectory() && !stat.isSymbolicLink();
+    } catch (e) {
+      return false;
+    }
+  }
+  function isPlainFile(filePath) {
+    try {
+      var stat = fs.lstatSync(filePath);
+      return stat.isFile() && !stat.isSymbolicLink();
+    } catch (e) {
+      return false;
+    }
+  }
+
+  if (!isPlainDirectory(root)) return results;
+  listDir(root).forEach(function (year) {
+    if (!/^\d{4}$/.test(year)) return;
+    var yearDir = path.join(root, year);
+    if (!isPlainDirectory(yearDir)) return;
+    listDir(yearDir).forEach(function (month) {
+      if (!/^\d{2}$/.test(month)) return;
+      var monthDir = path.join(yearDir, month);
+      if (!isPlainDirectory(monthDir)) return;
+      listDir(monthDir).forEach(function (day) {
+        if (!/^\d{2}$/.test(day)) return;
+        var dayDir = path.join(monthDir, day);
+        if (!isPlainDirectory(dayDir)) return;
+        listDir(dayDir).forEach(function (fname) {
+          if (!/^rollout-.+\.jsonl$/.test(fname)) return;
+          var filePath = path.join(dayDir, fname);
+          if (isPlainFile(filePath)) results.push(filePath);
+        });
+      });
+    });
+  });
+  return results;
+}
+
+function flattenCodexContent(content) {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content.map(function (part) {
+    if (typeof part === "string") return part;
+    if (!part || typeof part !== "object") return "";
+    return typeof part.text === "string" ? part.text : "";
+  }).filter(Boolean).join("\n");
+}
+
+export function readCodexSessionPreview(filePath, fileSize) {
+  var fd = null;
+  try {
+    fd = fs.openSync(filePath, "r");
+    var headSize = Math.min(fileSize, 128 * 1024);
+    var headBuf = Buffer.alloc(headSize);
+    fs.readSync(fd, headBuf, 0, headSize, 0);
+    var lines = headBuf.toString("utf8").split(/\r?\n/);
+    var meta = {};
+    var summary = null;
+    var firstUserMessage = null;
+    var model = null;
+    var cwd = null;
+
+    for (var index = 0; index < lines.length; index += 1) {
+      var line = lines[index].trim();
+      if (!line) continue;
+      var record;
+      try {
+        record = JSON.parse(line);
+      } catch (e) {
+        continue;
+      }
+      var payload = record && record.payload && typeof record.payload === "object" ? record.payload : {};
+      if (record.type === "session_meta") {
+        meta = payload;
+        if (typeof payload.cwd === "string") cwd = payload.cwd;
+      }
+      if (record.type === "turn_context") {
+        if (!summary && typeof payload.summary === "string") summary = clipToLength(payload.summary, 120);
+        if (!model && typeof payload.model === "string") model = payload.model;
+        if (!cwd && typeof payload.cwd === "string") cwd = payload.cwd;
+      }
+      if (!firstUserMessage && record.type === "response_item" && payload.type === "message" && payload.role === "user") {
+        firstUserMessage = clipToLength(flattenCodexContent(payload.content), 120);
+      }
+      if (!firstUserMessage && record.type === "event_msg" && payload.type === "user_message") {
+        firstUserMessage = clipToLength(payload.message || flattenCodexContent(payload.text_elements), 120);
+      }
+      if (meta.id && (firstUserMessage || summary) && model) break;
+    }
+
+    return {
+      sessionId: typeof meta.id === "string" ? meta.id : null,
+      title: firstUserMessage || summary || null,
+      summary: summary,
+      model: model,
+      cwd: cwd,
+      originator: typeof meta.originator === "string" ? meta.originator : null,
+      cliVersion: typeof meta.cli_version === "string" ? meta.cli_version : null,
+    };
+  } catch (e) {
+    return { sessionId: null, title: null, summary: null, model: null, cwd: null, originator: null, cliVersion: null };
+  } finally {
+    if (fd !== null) {
+      try {
+        fs.closeSync(fd);
+      } catch (closeError) {}
+    }
+  }
+}
+
 function isPathInsideRoot(root, targetPath) {
   var relative = path.relative(root, targetPath);
   return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
+}
+
+function isCodexSessionPath(resolvedSessionPath, homeDir) {
+  var root = path.join(homeDir, ".codex", "sessions");
+  if (!isPathInsideRoot(root, resolvedSessionPath)) return false;
+  var parts = path.relative(root, resolvedSessionPath).split(path.sep).filter(Boolean);
+  return parts.length === 4
+    && /^\d{4}$/.test(parts[0])
+    && /^\d{2}$/.test(parts[1])
+    && /^\d{2}$/.test(parts[2])
+    && /^rollout-.+\.jsonl$/.test(parts[3]);
 }
 
 export function isAllowedSessionPath(resolvedSessionPath, homeDir) {
@@ -204,6 +337,7 @@ export function isAllowedSessionPath(resolvedSessionPath, homeDir) {
 
   if (isPathInsideRoot(path.join(homeDir, ".claude", "projects"), resolvedSessionPath)) return true;
   if (isPathInsideRoot(path.join(homeDir, ".copilot", "session-state"), resolvedSessionPath)) return true;
+  if (isCodexSessionPath(resolvedSessionPath, homeDir)) return true;
 
   return getVSCodeStorageRoots(homeDir).some(function (root) {
     if (!isPathInsideRoot(root, resolvedSessionPath)) return false;
@@ -285,6 +419,39 @@ export function handle(pathname, req, res, ctx) {
         } catch (e) {}
       });
     } catch (e) {}
+
+    // Codex: ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl
+    var codexRoot = path.join(homeDir, ".codex", "sessions");
+    findCodexSessionFiles(codexRoot).forEach(function (filePath) {
+      try {
+        var stat = fs.statSync(filePath);
+        var preview = readCodexSessionPreview(filePath, stat.size);
+        var relative = path.relative(codexRoot, filePath);
+        var project = null;
+        if (preview.cwd) {
+          var cwdParts = preview.cwd.replace(/\\/g, "/").split("/").filter(Boolean);
+          project = cwdParts[cwdParts.length - 1] || null;
+        }
+        results.push({
+          id: "codex:" + relative,
+          path: filePath,
+          filename: path.basename(filePath),
+          file: preview.title || path.basename(filePath),
+          project: project || preview.title || "Codex",
+          projectDir: relative.split(path.sep).slice(0, 3).join(path.sep),
+          sessionId: preview.sessionId,
+          repository: null,
+          branch: null,
+          summary: preview.summary || preview.title,
+          format: "codex",
+          originator: preview.originator,
+          cliVersion: preview.cliVersion,
+          model: preview.model,
+          size: stat.size,
+          mtime: stat.mtime.toISOString(),
+        });
+      } catch (e) {}
+    });
 
     // VS Code Chat: {vscodeUserData}/workspaceStorage/*/chatSessions/*.json|*.jsonl
     var vscodeRoots = getVSCodeStorageRoots(homeDir);

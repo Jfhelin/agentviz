@@ -604,7 +604,7 @@ export default function FindPortfolio({
                   padding: "2px 8px",
                 }}
               >
-                clear tags
+                Clear tags
               </button>
             )}
           </div>
@@ -653,7 +653,7 @@ export default function FindPortfolio({
                 fontSize: theme.fontSize.xs,
               }}
             >
-              clear
+              Clear
             </button>
           </div>
         )}
@@ -713,7 +713,7 @@ export default function FindPortfolio({
                     fontFamily: theme.font.mono,
                   }}
                 >
-                  load a demo session
+                  Load a demo session
                 </button>
               )}
             </div>

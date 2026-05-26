@@ -4,7 +4,7 @@
 
 **See what your AI agents actually do.**
 
-Drop a Claude Code, VS Code Copilot Chat, Copilot CLI, Copilot prompt export, or ATIF / Harbor session file and review the run as a workflow: find the session, triage health, investigate evidence, analyze behavior, compare approaches, and improve the next prompt or configuration. Or run it from the CLI for a live view that updates as your session unfolds.
+Drop a Claude Code, Codex, VS Code Copilot Chat, Copilot CLI, Copilot prompt export, or ATIF / Harbor session file and review the run as a workflow: find the session, triage health, investigate evidence, analyze behavior, compare approaches, and improve the next prompt or configuration. Or run it from the CLI for a live view that updates as your session unfolds.
 
 [![CI](https://github.com/jayparikh/agentviz/actions/workflows/ci.yml/badge.svg)](https://github.com/jayparikh/agentviz/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/agentviz?color=blue&logo=npm)](https://www.npmjs.com/package/agentviz)
@@ -24,7 +24,7 @@ Drop a Claude Code, VS Code Copilot Chat, Copilot CLI, Copilot prompt export, or
 
 ## Why AGENTVIZ?
 
-AI coding agents (Claude Code, VS Code Copilot Chat, Copilot CLI, ATIF / Harbor, etc.) generate dense session logs, but reading raw JSONL is painful. AGENTVIZ turns those logs into something you can actually explore:
+AI coding agents (Claude Code, Codex, VS Code Copilot Chat, Copilot CLI, ATIF / Harbor, etc.) generate dense session logs, but reading raw JSONL is painful. AGENTVIZ turns those logs into something you can actually explore:
 
 - **Replay** sessions like a video, stepping through each tool call and reasoning step
 - **Trace** decision flow in a graph view with expandable turn and tool-call structure
@@ -33,7 +33,7 @@ AI coding agents (Claude Code, VS Code Copilot Chat, Copilot CLI, ATIF / Harbor,
 - **Inspect cost** with per-call token spend, cache reads/writes, context composition, and cache-miss warnings
 - **Debug** failures by jumping directly between errors with one keystroke
 - **Stream live** as a session unfolds -- the view updates in real time
-- **Discover sessions** automatically from Claude Code, Copilot CLI, and VS Code Copilot Chat stores
+- **Discover sessions** automatically from Claude Code, Codex, Copilot CLI, and VS Code Copilot Chat stores
 - **Get AI coaching** on prompt engineering, skills, and MCP setup grounded in best practices
 - **Switch themes** between dark, light, and system-matched modes with one click
 - **Use the default workflow UI**: Find, Review, Investigate, Analyze, Compare, Improve, with Classic UI available as a fallback
@@ -44,7 +44,7 @@ AI coding agents (Claude Code, VS Code Copilot Chat, Copilot CLI, ATIF / Harbor,
 npx agentviz
 ```
 
-Opens AGENTVIZ in your browser. The default workflow UI starts in **Find**, where you can drop a `.jsonl` or `.json` session file or click **load a demo session** to try it instantly. Claude Code, Copilot CLI, and VS Code Copilot Chat sessions are auto-discovered.
+Opens AGENTVIZ in your browser. The default workflow UI starts in **Find**, where you can drop a `.jsonl` or `.json` session file or click **Load a demo session** to try it instantly. Claude Code, Codex, Copilot CLI, and VS Code Copilot Chat sessions are auto-discovered.
 
 ### CLI (live streaming)
 
@@ -66,6 +66,10 @@ ls ~/.claude/projects/
 # Copilot CLI sessions
 ls ~/.copilot/session-state/
 # Each subdirectory is a session UUID containing an events.jsonl file
+
+# Codex sessions
+ls ~/.codex/sessions/
+# Rollout logs live under YYYY/MM/DD/rollout-*.jsonl
 ```
 
 VS Code Copilot Chat sessions live under your VS Code `workspaceStorage/*/chatSessions/` directories. The exact parent path depends on your OS and whether you use the stable or Insiders build.
@@ -128,7 +132,7 @@ Reload VS Code after adding the config. In Copilot Chat, use **Agent mode** and 
 
 `launch_agentviz` will:
 
-1. Auto-detect the most recently active session file from Claude Code, Copilot CLI, or VS Code Copilot Chat storage
+1. Auto-detect the most recently active session file from Claude Code, Codex, Copilot CLI, or VS Code Copilot Chat storage
 2. Start a local HTTP server on a free port
 3. Open the browser with live streaming enabled
 
@@ -143,7 +147,7 @@ To stop it, ask: "Close agentviz"
 
 ## Inbox and AI Coach
 
-When running via the CLI, AGENTVIZ automatically discovers recent Claude Code, Copilot CLI, and VS Code Copilot Chat sessions and shows them on the landing screen in two interchangeable modes: a row-based inbox sorted by review priority and a dashboard card grid with aggregate stats, filters, refresh, and the same one-click open flow.
+When running via the CLI, AGENTVIZ automatically discovers recent Claude Code, Codex, Copilot CLI, and VS Code Copilot Chat sessions and shows them on the landing screen in two interchangeable modes: a row-based inbox sorted by review priority and a dashboard card grid with aggregate stats, filters, refresh, and the same one-click open flow.
 
 Each loaded session can get an AI Coach analysis powered by the `@github/copilot-sdk` (gpt-4o). The coach reads your actual project config (`.github/copilot-instructions.md`, skills, MCP servers) and produces actionable recommendations for prompts, skills, and tooling setup. Recommendations can be applied directly with one click.
 
@@ -183,7 +187,7 @@ Load two agent traces side by side to compare them head to head. Great for bench
 
 ### Entry points
 
-- **Landing screen** -- click "compare two sessions" below the drop zone
+- **Landing screen** -- click **Compare two sessions** below the drop zone
 - **Single-session header** -- click **Compare** while viewing any session to add a second trace for comparison
 - **Find zone** -- select two sessions and click **Compare selected**
 - **Compare landing** -- drop Session A and Session B independently; the view opens once both are loaded
@@ -305,10 +309,10 @@ AI-powered session coaching available directly from any session. Improve combine
 | **Track Filters** | Toggle visibility per track type with filter chips in the header. |
 | **Playback Control** | Play/pause with variable speed (0.5x to 8x). Seek with arrow keys. |
 | **Diff Viewer** | Inline unified diff with dual-gutter line numbers for file-editing tool calls. |
-| **Auto-detect Format** | Supports Claude Code JSONL, Copilot CLI JSONL, VS Code Copilot Chat JSON or JSONL, Copilot prompt export JSON, and ATIF / Harbor trajectory JSON. Auto-detected. |
+| **Auto-detect Format** | Supports Claude Code JSONL, Codex rollout JSONL, Copilot CLI JSONL, VS Code Copilot Chat JSON or JSONL, Copilot prompt export JSON, and ATIF / Harbor trajectory JSON. Auto-detected. |
 | **Session Comparison** | Load two traces side by side. Scorecard and tool-usage chart with delta badges. |
 | **HTML Export** | One-click export of any session or comparison to a self-contained shareable `.html` file. |
-| **Inbox Auto-discovery** | Automatically finds recent Claude Code, Copilot CLI, and VS Code Copilot Chat sessions and ranks them by review priority. |
+| **Inbox Auto-discovery** | Automatically finds recent Claude Code, Codex, Copilot CLI, and VS Code Copilot Chat sessions and ranks them by review priority. |
 | **Inbox Refresh** | Rescan session directories with a one-click refresh button. Reconciles evicted content and prunes dead entries. |
 | **File Path Tooltips** | Hover over inbox or Find session rows to see the full file path or reconstructed session location. Opened sessions loaded from discovery or CLI expose a header path control for copying the source path. |
 | **Static Manifest Mode** | Deploy as a pure static site with `?manifest=URL` pointing to a JSON manifest of sessions. Tag-based filtering, no backend required. |
@@ -363,10 +367,13 @@ Modals, drawers, and overlay panels render keyboard hints with a shared `<kbd>` 
 | Format | File type | Auto-detected by |
 |--------|-----------|-----------------|
 | Claude Code | `.jsonl` from `~/.claude/projects/` | Default fallback |
+| Codex | `.jsonl` rollout logs from `~/.codex/sessions/YYYY/MM/DD/` | `session_meta` with Codex origin metadata |
 | VS Code Copilot Chat | `.json` or `.jsonl` from VS Code `workspaceStorage/*/chatSessions/` | `version` + `requests` + `sessionId` fields |
 | Copilot CLI | `.jsonl` event traces | `session.start` with `producer: "copilot-agent"` |
 | Copilot prompt export | `.json` prompt export arrays or wrappers | Prompt calls with `request.messages` and `response.usage` |
 | ATIF / Harbor | `.json` trajectory from the Harbor framework | Top-level `schema_version: "ATIF-v1.6"` with `agent` and `steps` |
+
+Codex sessions are discovered from rollout logs only. AGENTVIZ intentionally ignores `~/.codex/history.jsonl`, sqlite logs, auth/config files, caches, shell snapshots, and plugin temp data.
 
 ATIF (Agent Trajectory Interchange Format) sessions are loaded via drag-and-drop, a positional CLI path, or `?manifest=` URLs. Auto-discovery is not wired up because Harbor has no canonical output directory.
 
@@ -429,6 +436,7 @@ src/
   lib/
     parseSession.ts      # Auto-detect format router
     parser.ts            # Claude Code JSONL parser
+    codexParser.ts       # Codex rollout JSONL parser
     copilotCliParser.ts  # Copilot CLI JSONL parser
     copilotCostParser.ts # Copilot prompt export JSON parser for token/cost analysis
     vscodeSessionParser.ts # VS Code Copilot Chat JSON parser

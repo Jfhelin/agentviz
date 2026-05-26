@@ -2,15 +2,18 @@
  * Auto-detect session file format and route to the correct parser.
  *
  * Supported formats:
+ *   - Codex rollout JSONL (producer: codex-* under ~/.codex/sessions)
  *   - Copilot CLI JSONL (producer: "copilot-agent")
  *   - VS Code Copilot Chat JSON (version + requests + sessionId)
  *   - VS Code Copilot prompt exports (copilot_all_prompts_*.json)
+ *   - ATIF / Harbor trajectory JSON (schema_version: "ATIF-*")
  *   - Claude Code JSONL (default fallback)
  *
  * Returns: { events, turns, metadata } or null
  */
 
 import { detectAtif, parseAtifJSON } from "./atifParser";
+import { detectCodexJSONL, parseCodexJSONL } from "./codexParser";
 import { detectCopilotCli, parseCopilotCliJSONL } from "./copilotCliParser";
 import { detectCopilotPrompts, parseCopilotPromptsJSON } from "./copilotCostParser";
 import { parseClaudeCodeJSONL } from "./parser";
@@ -19,6 +22,7 @@ import type { ParsedSession, SessionFormat } from "./sessionTypes";
 
 export function detectFormat(text: string): SessionFormat {
   if (detectAtif(text)) return "atif";
+  if (detectCodexJSONL(text)) return "codex";
   if (detectCopilotCli(text)) return "copilot-cli";
   if (detectVSCodeChat(text)) return "vscode-chat";
   if (detectCopilotPrompts(text)) return "copilot-prompts";
@@ -30,6 +34,7 @@ export function parseSession(text: string): ParsedSession | null {
 
   let parsed: ParsedSession | null;
   if (format === "atif") parsed = parseAtifJSON(text);
+  else if (format === "codex") parsed = parseCodexJSONL(text);
   else if (format === "copilot-cli") parsed = parseCopilotCliJSONL(text);
   else if (format === "vscode-chat") parsed = parseVSCodeChatJSON(text);
   else if (format === "copilot-prompts") parsed = parseCopilotPromptsJSON(text);
@@ -54,8 +59,10 @@ function pairToolCallsWithResults(parsed: ParsedSession): void {
     const event = events[index];
     if (event.track !== "context") continue;
     const raw = event.raw as Record<string, unknown> | null | undefined;
-    if (!raw) continue;
-    const candidates = [raw.tool_use_id, raw.toolCallId, raw.tool_call_id, raw.source_call_id];
+    const rawPayload = raw && raw.payload && typeof raw.payload === "object" ? raw.payload as Record<string, unknown> : null;
+    const candidates = raw
+      ? [event.toolCallId, raw.tool_use_id, raw.toolCallId, raw.tool_call_id, raw.source_call_id, raw.call_id, rawPayload && rawPayload.call_id]
+      : [event.toolCallId];
     for (let candidateIndex = 0; candidateIndex < candidates.length; candidateIndex += 1) {
       const id = candidates[candidateIndex];
       if (typeof id === "string" && id.length > 0 && typeof event.text === "string" && event.text.length > 0) {
