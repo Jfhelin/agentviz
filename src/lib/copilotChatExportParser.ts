@@ -952,6 +952,12 @@ export interface CostAnalysisCall {
    * call. These count as output tokens (structured assistant message
    * payload) but are not part of either visible response text or thinking. */
   toolArgsChars: number;
+  /** Character count of fenced ``` code blocks in the visible response. */
+  codeChars: number;
+  /** Per-language breakdown of fenced code chars in the response. */
+  codeCharsByLang: { lang: string; chars: number }[];
+  /** Per-tool breakdown of tool-call arg JSON chars emitted on this call. */
+  toolArgCharsByName: { name: string; chars: number }[];
   cost: number;
   prevPt: number;
   /** prompt_tokens of the previous call ON THE SAME MODEL, even when
@@ -1073,6 +1079,12 @@ export interface CostAnalysisToolCall {
     promptChars: number;
     promptTokensEst: number;
     modelName?: string;
+    /** Verbatim `args.prompt` string passed to the subagent — the
+     * subagent's first user message. Used to deterministically link
+     * a parent's `runSubagent` toolCall to the spawned subagent's
+     * own top-level prompt entry in the export (which carries the
+     * same text in its `prompt` field). */
+    argsPrompt?: string;
   };
 }
 
@@ -1083,6 +1095,14 @@ export type CostAnalysisEvent =
 export interface CostAnalysisPrompt {
   index: number;
   promptId: string;
+  /** The `name` field of this prompt's first request log. Identifies the
+   * agent surface that owns this thread:
+   *   - `panel/editAgent`, `panel/request`, … → main agent (user turn)
+   *   - `tool/runSubagent`                    → spawned subagent thread
+   *   - `title`, `promptCategorization`, …    → overhead
+   * Used by `buildAgentThreads()` to group prompts into agent identities.
+   * Empty string when the prompt has no `request` log (defensive). */
+  name: string;
   label: string;
   /** Full user message text for this prompt (untruncated). `label` is a
    * short preview of the same string. Used by exports that need to ship
@@ -1122,8 +1142,43 @@ export interface CostAnalysis {
     cacheWrite: number;
     fresh: number;
     cost: number;
+    /** Per-bucket cost decomposition. Each is the dollar cost of one component
+     *  of the prompt (fresh = uncached input, cached = cache reads, cacheWrite
+     *  = cache misses written, output = completion). Sum equals `cost`. Useful
+     *  for KPI subtext like "$0.305 · 30 cr" next to the token counts. */
+    freshCost: number;
+    cachedCost: number;
+    cacheWriteCost: number;
+    outputCost: number;
+    /** Sum of visible response chars (assistant text + tool-call arg JSON)
+     *  across all primary calls. Used together with `thinkingChars` to split
+     *  the output bucket into visible vs thinking for models that don't
+     *  report reasoning_tokens (Claude). */
+    visibleResponseChars: number;
+    thinkingChars: number;
+    /** Sum of JSON char lengths of tool-call arguments the model emitted
+     *  across all primary calls. Tool args bill as output tokens, so this
+     *  lets the Output KPI break out a "tool-args" slice from the visible
+     *  response prose. */
+    toolArgChars: number;
+    /** Sum of characters inside fenced ``` code blocks in the visible
+     *  response text. Subset of `visibleResponseChars`. Used to break the
+     *  visible slice into prose vs code in the Output KPI tooltip. */
+    codeChars: number;
     llmCalls: number;
     toolCalls: number;
+    /** All tool names by invocation count, sorted descending. Empty if no
+     *  tools were called. UI typically renders only the top 2 in the KPI
+     *  subtext with an ellipsis when more exist; the full list backs the
+     *  tooltip. */
+    topTools: { name: string; count: number }[];
+    /** Tool-args chars attributed to each tool name, sorted desc. Used to
+     *  break down the tool-args output slice in the Output KPI tooltip. */
+    toolArgCharsByName: { name: string; chars: number }[];
+    /** Fenced code chars by language tag (lowercased; "" for untagged blocks),
+     *  sorted desc. Used to break down the visible-code subslice in the
+     *  Output KPI tooltip. */
+    codeCharsByLang: { lang: string; chars: number }[];
     cacheHitRate: number;
     unexpectedMissCount: number;
     unexpectedMissCost: number;
@@ -1176,6 +1231,7 @@ function extractSubagent(log: RawLog): CostAnalysisToolCall["subagent"] | undefi
     // ~25% but it's the best we can do without per-subagent usage data.
     promptTokensEst: Math.ceil(prompt.length / 4),
     modelName: meta?.modelName,
+    argsPrompt: prompt || undefined,
   };
 }
 
@@ -1245,6 +1301,41 @@ function visibleResponseChars(response: unknown): number {
     }
   }
   return n;
+}
+
+/** Sum of characters inside fenced ``` code blocks in the response text,
+ *  plus a per-language breakdown. Used to split the "visible" output bucket
+ *  into prose vs code (and code by language) in the Cost view tooltip.
+ *  Inline backtick spans are NOT counted because they are typically file
+ *  paths and identifiers, not "the model wrote code". */
+const FENCE_RE = /```([a-zA-Z0-9_+\-.]*)\n([\s\S]*?)```/g;
+function fencedCodeStats(response: unknown): { total: number; byLang: Map<string, number> } {
+  const byLang = new Map<string, number>();
+  if (response == null) return { total: 0, byLang };
+  let text = "";
+  if (typeof response === "string") text = response;
+  else if (typeof response === "object") {
+    const obj = response as Record<string, unknown>;
+    if (Array.isArray(obj.message)) {
+      for (const m of obj.message as unknown[]) {
+        if (typeof m === "string") text += m + "\n";
+        else if (m && typeof m === "object" && typeof (m as { text?: unknown }).text === "string") {
+          text += (m as { text: string }).text + "\n";
+        }
+      }
+    }
+  }
+  if (!text) return { total: 0, byLang };
+  let n = 0;
+  let mt: RegExpExecArray | null;
+  FENCE_RE.lastIndex = 0;
+  while ((mt = FENCE_RE.exec(text))) {
+    const lang = (mt[1] || "").toLowerCase();
+    const chars = mt[2].length;
+    n += chars;
+    byLang.set(lang, (byLang.get(lang) || 0) + chars);
+  }
+  return { total: n, byLang };
 }
 
 function callUsage(log: RawLog): { prompt_tokens: number; cached_tokens: number; cache_write: number; completion_tokens: number; reasoning_tokens: number } {
@@ -1320,7 +1411,18 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
   const turns: SessionTurn[] = [];
   let cumCost = 0;
   let cumPt = 0, cumOut = 0, cumCached = 0, cumCwrite = 0, cumFresh = 0, cumReasoning = 0;
+  // Per-bucket cost accumulators. Sum component costs across all calls so the
+  // Kpi card subtext can show e.g. "$0.305 · 30 cr" for the Output total.
+  let cumFreshCost = 0, cumCachedCost = 0, cumCwriteCost = 0, cumOutputCost = 0;
+  // Output character accumulators for the smart visible-vs-thinking split.
+  // Mirrors the per-call anatomy logic (visibleResponseChars + thinkingChars
+  // ratio) so Claude sessions that report reasoning_tokens=0 still get a
+  // realistic breakdown estimated from text length.
+  let cumVisChars = 0, cumThinkChars = 0, cumToolArgChars = 0, cumCodeChars = 0;
+  const cumCodeByLang = new Map<string, number>();
+  const cumToolArgsByName = new Map<string, number>();
   let totalLlm = 0, totalTool = 0;
+  const toolFreq = new Map<string, number>();
   let totalUnexpectedMissCount = 0, totalUnexpectedMissCost = 0;
   let timeCursor = 0;
   // Per-model set of image URLs already sent in a prior call's prompt.
@@ -1397,6 +1499,7 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
         pendingToolCalls.push(tc);
         pTool += 1;
         totalTool += 1;
+        toolFreq.set(tc.name, (toolFreq.get(tc.name) ?? 0) + 1);
 
         const idx = events.length;
         events.push({
@@ -1447,6 +1550,15 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
         cacheRead: usage.cached_tokens,
         cacheWrite: usage.cache_write,
       }, model);
+      // Per-bucket cost decomposition: re-call estimateCost with one bucket
+      // populated at a time so accumulators stay honest across mixed-model
+      // sessions. estimateCost returns 0 for unknown models -- those drop out
+      // of the per-bucket totals but stay in cumCost via the call above only
+      // when their pricing is known, so totals stay consistent.
+      cumFreshCost += estimateCost({ inputTokens: fresh, outputTokens: 0, cacheRead: 0, cacheWrite: 0 }, model);
+      cumCachedCost += estimateCost({ inputTokens: 0, outputTokens: 0, cacheRead: usage.cached_tokens, cacheWrite: 0 }, model);
+      cumCwriteCost += estimateCost({ inputTokens: 0, outputTokens: 0, cacheRead: 0, cacheWrite: usage.cache_write }, model);
+      cumOutputCost += estimateCost({ inputTokens: 0, outputTokens: out_t, cacheRead: 0, cacheWrite: 0 }, model);
       cumCost += cost;
       cumPt += usage.prompt_tokens; cumOut += out_t; cumReasoning += usage.reasoning_tokens;
       cumCached += usage.cached_tokens; cumCwrite += usage.cache_write; cumFresh += fresh;
@@ -1501,20 +1613,58 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
           }
           // Tool-call args (JSON the model emitted) count as output tokens.
           // Sum raw arg length to attribute the structured-output portion of
-          // completion_tokens.
-          if (typeof next.args === "string") toolArgsChars += next.args.length;
+          // completion_tokens. Also track per-tool so the Output tooltip can
+          // break tool-args down by which tool consumed the budget.
+          let argLen = 0;
+          if (typeof next.args === "string") argLen = next.args.length;
           else if (next.args && typeof next.args === "object") {
-            try { toolArgsChars += JSON.stringify(next.args).length; } catch { /* ignore */ }
+            try { argLen = JSON.stringify(next.args).length; } catch { /* ignore */ }
+          }
+          if (argLen > 0) {
+            toolArgsChars += argLen;
+            const tname = next.tool ?? "";
+            cumToolArgsByName.set(tname, (cumToolArgsByName.get(tname) || 0) + argLen);
+          }
+        }
+      }
+      // Track per-event per-tool args and per-language code so prompt-level
+      // breakdowns can aggregate without re-walking raw responses.
+      const callToolArgsByName = new Map<string, number>();
+      for (let lookIdx2 = logIdx + 1; lookIdx2 < c.logs.length; lookIdx2++) {
+        const next = c.logs[lookIdx2];
+        if (next.kind === "request") break;
+        if (next.kind === "toolCall") {
+          let argLen2 = 0;
+          if (typeof next.args === "string") argLen2 = next.args.length;
+          else if (next.args && typeof next.args === "object") {
+            try { argLen2 = JSON.stringify(next.args).length; } catch { /* ignore */ }
+          }
+          if (argLen2 > 0) {
+            const tname = next.tool ?? "";
+            callToolArgsByName.set(tname, (callToolArgsByName.get(tname) || 0) + argLen2);
           }
         }
       }
       const visResp = visibleResponseChars(log.response);
+      cumVisChars += visResp;
+      const fenced = fencedCodeStats(log.response);
+      cumCodeChars += fenced.total;
+      fenced.byLang.forEach((chars, lang) => {
+        cumCodeByLang.set(lang, (cumCodeByLang.get(lang) || 0) + chars);
+      });
+      cumThinkChars += thinkingChars;
+      cumToolArgChars += toolArgsChars;
 
       // Compute which images are newly added on this call vs. prior same-model
       // history. Re-sending the same imageUrl on subsequent calls is part of
       // the cached prefix and should not be flagged as new content. A model
       // switch resets the per-model cache, so all images become new again.
+      // Cross-thread reset (see comment below): if the current call carries
+      // fewer images than the accumulated set, we've entered a new thread
+      // (e.g. main thread resuming after subagent ran) -- treat all of this
+      // call's images as new.
       let prevImgSet = ca.modelSwitched ? new Set<string>() : (prevImageUrlsByModel.get(model) ?? new Set<string>());
+      if (cls.images.length < prevImgSet.size) prevImgSet = new Set<string>();
       const newImages = cls.images.filter((img) => !prevImgSet.has(img.url));
       const updatedSet = new Set<string>(prevImgSet);
       for (const img of cls.images) updatedSet.add(img.url);
@@ -1523,8 +1673,18 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
       // History and tool-results are append-only across calls in a chat
       // session. The "new" suffix is everything past the previous same-model
       // call's message count. A model switch resets this baseline.
-      const prevHistCount = ca.modelSwitched ? 0 : (prevHistoryCountByModel.get(model) ?? 0);
-      const prevTrCount = ca.modelSwitched ? 0 : (prevToolResultCountByModel.get(model) ?? 0);
+      //
+      // Cross-thread reset: subagents run as isolated conversations but share
+      // the same model name. When the walker enters a new thread (e.g. a
+      // subagent thread or the main thread resuming after a subagent), the
+      // current call's `historyMsgs` / `toolResultMsgs` lists are SHORTER
+      // than the cursor we accumulated from the sibling thread. Detect that
+      // shrink and reset the cursor to 0 so the new thread's content is
+      // correctly flagged as new instead of dimmed as historical.
+      let prevHistCount = ca.modelSwitched ? 0 : (prevHistoryCountByModel.get(model) ?? 0);
+      let prevTrCount = ca.modelSwitched ? 0 : (prevToolResultCountByModel.get(model) ?? 0);
+      if (cls.historyMsgs.length < prevHistCount) prevHistCount = 0;
+      if (cls.toolResultMsgs.length < prevTrCount) prevTrCount = 0;
       const newHistoryMsgs = cls.historyMsgs.slice(prevHistCount);
       const newToolResultMsgs = cls.toolResultMsgs.slice(prevTrCount);
       prevHistoryCountByModel.set(model, cls.historyMsgs.length);
@@ -1587,6 +1747,13 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
         visibleResponseChars: visResp,
         thinkingChars,
         toolArgsChars,
+        codeChars: fenced.total,
+        codeCharsByLang: Array.from(fenced.byLang.entries())
+          .sort((a, b) => b[1] - a[1])
+          .map(([lang, chars]) => ({ lang, chars })),
+        toolArgCharsByName: Array.from(callToolArgsByName.entries())
+          .sort((a, b) => b[1] - a[1])
+          .map(([name, chars]) => ({ name, chars })),
         cost,
         prevPt: ca.prevPt,
         priorSameModelPt: ca.priorSameModelPt,
@@ -1667,6 +1834,7 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
     costPrompts.push({
       index: pi,
       promptId,
+      name: (root.prompts[pi].logs || []).find(l => l.kind === "request")?.name ?? "",
       label: promptText.slice(0, 200),
       userMessage: promptText,
       events: costEvents,
@@ -1711,8 +1879,25 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
       cacheWrite: cumCwrite,
       fresh: cumFresh,
       cost: cumCost,
+      freshCost: cumFreshCost,
+      cachedCost: cumCachedCost,
+      cacheWriteCost: cumCwriteCost,
+      outputCost: cumOutputCost,
+      visibleResponseChars: cumVisChars,
+      thinkingChars: cumThinkChars,
+      toolArgChars: cumToolArgChars,
+      codeChars: cumCodeChars,
       llmCalls: totalLlm,
       toolCalls: totalTool,
+      topTools: Array.from(toolFreq.entries())
+        .sort((a, b) => b[1] - a[1])
+        .map(([name, count]) => ({ name, count })),
+      toolArgCharsByName: Array.from(cumToolArgsByName.entries())
+        .sort((a, b) => b[1] - a[1])
+        .map(([name, chars]) => ({ name, chars })),
+      codeCharsByLang: Array.from(cumCodeByLang.entries())
+        .sort((a, b) => b[1] - a[1])
+        .map(([lang, chars]) => ({ lang, chars })),
       cacheHitRate: totalDenom > 0 ? cumCached / totalDenom : 0,
       unexpectedMissCount: totalUnexpectedMissCount,
       unexpectedMissCost: totalUnexpectedMissCost,

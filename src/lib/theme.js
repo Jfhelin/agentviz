@@ -101,6 +101,13 @@ var DARK_THEME = {
     assistant: "#6475e8",
     system: "#a78bfa",
   },
+  agentThread: {
+    main: "#94a3b8",
+    subA: "#3b9eff",
+    subB: "#a78bfa",
+    subC: "#10d97a",
+    subD: "#f4b340",
+  },
   agentType: {
     explore: "#3b9eff",
     task: "#10d97a",
@@ -208,6 +215,13 @@ var LIGHT_THEME = {
     user: "#70788d",
     assistant: "#6475e8",
     system: "#8b5cf6",
+  },
+  agentThread: {
+    main: "#64748b",
+    subA: "#2563eb",
+    subB: "#8b5cf6",
+    subC: "#0ea86b",
+    subD: "#ca8a04",
   },
   agentType: {
     explore: "#2563eb",
@@ -368,6 +382,7 @@ defineThemeSection(theme, "agentType");
 defineThemeSection(theme, "track");
 defineThemeSection(theme, "shadow");
 defineThemeSection(theme, "cost");
+defineThemeSection(theme, "agentThread");
 theme.font = SHARED_THEME.font;
 theme.fontSize = SHARED_THEME.fontSize;
 theme.space = SHARED_THEME.space;

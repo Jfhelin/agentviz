@@ -144,10 +144,11 @@ function pickAlternatives(chosenModel: string | undefined): GitHubModelInfo[] {
   return out.slice(0, 4);
 }
 
-function detectUnusedTools(prompts: CostAnalysisPrompt[]): {
+export function detectUnusedTools(prompts: CostAnalysisPrompt[]): {
   offeredAll: Set<string>;
   used: Set<string>;
   unused: string[];
+  unusedTokensPerCall: number;
   unusedDefTokensTotal: number;
   callsWithDefs: number;
 } {
@@ -180,6 +181,7 @@ function detectUnusedTools(prompts: CostAnalysisPrompt[]): {
     offeredAll: offered,
     used,
     unused,
+    unusedTokensPerCall,
     unusedDefTokensTotal: unusedTokensPerCall * callsWithDefs,
     callsWithDefs,
   };
@@ -231,7 +233,7 @@ function detectUsedSkills(
   return used;
 }
 
-function aggregateSkillCarry(prompts: CostAnalysisPrompt[]): {
+export function aggregateSkillCarry(prompts: CostAnalysisPrompt[]): {
   skillCount: number;
   skillTokensPerCall: number;
   totalSkillTokens: number;
@@ -2241,6 +2243,80 @@ export function buildLlmAnalysisPrompt(analysis: CostAnalysis, opts: BuildOption
       total_billed_input_tokens: totals.promptTokens,
       total_cached_input_tokens: totals.cached,
       total_output_tokens: totals.output,
+      output_composition: (function () {
+        // Estimated split of total_output_tokens into the three buckets the
+        // Cost view's Output KPI shows: thinking (extended reasoning),
+        // visible (response text the user sees), and tool_args (JSON the
+        // model emits to invoke tools). Estimates use the same char-ratio
+        // method as the UI: reasoning_tokens when reported, else proportional
+        // to visibleResponseChars / thinkingChars / toolArgChars. JSON
+        // tokenizes denser than prose, so tool_args is likely understated.
+        const out = totals.output || 0;
+        if (out <= 0) return null;
+        const visCh = totals.visibleResponseChars || 0;
+        const thinkCh = totals.thinkingChars || 0;
+        const argCh = totals.toolArgChars || 0;
+        const codeCh = totals.codeChars || 0;
+        let thinkTok = 0, argTok = 0, visTok = out;
+        let method = "none";
+        if (totals.reasoning > 0) {
+          thinkTok = totals.reasoning;
+          const remain = Math.max(0, out - thinkTok);
+          const remCh = visCh + argCh;
+          if (remCh > 0) {
+            argTok = Math.round(remain * (argCh / remCh));
+            visTok = remain - argTok;
+          } else {
+            argTok = 0; visTok = remain;
+          }
+          method = "reasoning_tokens + char_ratio";
+        } else {
+          const totCh = visCh + thinkCh + argCh;
+          if (totCh > 0) {
+            thinkTok = Math.round(out * (thinkCh / totCh));
+            argTok = Math.round(out * (argCh / totCh));
+            visTok = Math.max(0, out - thinkTok - argTok);
+            method = "char_ratio";
+          }
+        }
+        let proseTok = visTok, codeTok = 0;
+        if (visCh > 0 && visTok > 0 && codeCh > 0) {
+          codeTok = Math.round(visTok * (codeCh / visCh));
+          proseTok = Math.max(0, visTok - codeTok);
+        }
+        return {
+          thinking_tokens: thinkTok,
+          visible_tokens: visTok,
+          tool_args_tokens: argTok,
+          visible_prose_tokens: proseTok,
+          visible_code_tokens: codeTok,
+          thinking_pct: Math.round((thinkTok / out) * 100),
+          visible_pct: Math.round((visTok / out) * 100),
+          tool_args_pct: Math.round((argTok / out) * 100),
+          tool_args_by_tool: (function () {
+            // Top tools by tool-args token share, so the LLM can pinpoint
+            // which tool drove the tool-args cost (bulk generation via
+            // create_file looks very different from todo churn via
+            // manage_todo_list).
+            const arr = totals.toolArgCharsByName || [];
+            if (arr.length === 0 || argCh === 0 || argTok === 0) return [];
+            return arr.slice(0, 10).map(t => ({
+              tool: t.name,
+              est_tokens: Math.round(argTok * (t.chars / argCh)),
+            }));
+          })(),
+          visible_code_by_language: (function () {
+            const arr = totals.codeCharsByLang || [];
+            if (arr.length === 0 || codeCh === 0 || codeTok === 0) return [];
+            return arr.slice(0, 5).map(L => ({
+              language: L.lang || "(no lang)",
+              est_tokens: Math.round(codeTok * (L.chars / codeCh)),
+            }));
+          })(),
+          estimation_method: method,
+          caveat: "JSON tool_args tokenize denser than prose; tool_args share may be understated when using char_ratio. tool_args_by_tool/visible_code_by_language shares are computed from char counts.",
+        };
+      })(),
       custom_chat_mode_used: !!firstChatMode,
       custom_agent_used: false,
       custom_skill_used: skillCarry.usedCount > 0,

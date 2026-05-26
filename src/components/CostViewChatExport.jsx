@@ -2,7 +2,8 @@ import React, { useState, useMemo, useEffect } from "react";
 import { theme } from "../lib/theme.js";
 import { estimateCost, hasModelPricing, getModelPrice } from "../lib/pricing.js";
 import { estimateImageTokens, imageDollarCost } from "../lib/imageTokenEstimate.js";
-import { buildLlmAnalysisPrompt } from "../lib/llmAnalysisExport";
+import { buildLlmAnalysisPrompt, detectUnusedTools, aggregateSkillCarry } from "../lib/llmAnalysisExport";
+import { buildAgentThreads } from "../lib/agentThreads";
 import usePersistentState from "../hooks/usePersistentState.js";
 
 // Display unit for $ amounts. Module-level so the dozens of fmt$ call sites
@@ -407,6 +408,7 @@ function StackBar(props) {
   var labels = props.labels;
   var maxVal = props.maxVal;
   var withLabel = props.withLabel;
+  var formatFn = props.formatFn;
   var sum = keys.reduce(function (a, k) { return a + (parts[k] || 0); }, 0);
   if (sum === 0) {
     return (
@@ -416,7 +418,8 @@ function StackBar(props) {
     );
   }
   var fillPct = 100 * sum / maxVal;
-  var lab = (maxVal < 1) ? fmt$(sum) : fmtT(sum);
+  var fmt = formatFn || ((maxVal < 1) ? fmt$ : fmtT);
+  var lab = fmt(sum);
   return (
     <div style={{ position: "relative", width: "100%", height: 18, background: theme.bg.base, borderRadius: 2, overflow: "hidden" }}>
       <div style={{ display: "flex", height: "100%", width: fillPct + "%" }}>
@@ -424,7 +427,7 @@ function StackBar(props) {
           var v = parts[k] || 0;
           if (v === 0) return null;
           var w = 100 * v / sum;
-          var valStr = (maxVal < 1) ? fmt$(v) : fmtT(v);
+          var valStr = formatFn ? formatFn(v) : ((maxVal < 1) ? fmt$(v) : fmtT(v));
           return (
             <div key={k}
               title={labels[k] + " · " + valStr + " (" + (100 * v / sum).toFixed(1) + "% of bar)"}
@@ -1065,23 +1068,28 @@ function LLMDetail(props) {
               var thinkCh = ev.thinkingChars || 0;
               var argsCh = ev.toolArgsChars || 0;
               var sumCh = visCh + thinkCh + argsCh;
+              var perTok = (hasPx && ev.output > 0) ? outputCost / ev.output : 0;
+              var costStr = function (tok) {
+                return perTok > 0 ? " · " + fmt$(tok * perTok) : "";
+              };
               if (sumCh > 0 && ev.output > 0) {
                 var estVis = Math.round(visCh / 4);
                 var estThink = Math.round(thinkCh / 4);
                 var estArgs = Math.round(argsCh / 4);
                 var resid = Math.max(0, ev.output - estVis - estThink - estArgs);
                 var rows = [];
-                if (estVis > 0) rows.push(<div key="v">~{fmtT(estVis)} visible to user</div>);
-                if (estThink > 0) rows.push(<div key="t">~{fmtT(estThink)} thinking</div>);
-                if (estArgs > 0) rows.push(<div key="a">~{fmtT(estArgs)} tool-call args</div>);
-                if (resid > 0) rows.push(<div key="r" style={{ color: theme.text.muted }}>~{fmtT(resid)} unattributed</div>);
+                if (estVis > 0) rows.push(<div key="v">~{fmtT(estVis)} visible to user{costStr(estVis)}</div>);
+                if (estThink > 0) rows.push(<div key="t">~{fmtT(estThink)} thinking{costStr(estThink)}</div>);
+                if (estArgs > 0) rows.push(<div key="a">~{fmtT(estArgs)} tool-call args{costStr(estArgs)}</div>);
+                if (resid > 0) rows.push(<div key="r" style={{ color: theme.text.muted }}>~{fmtT(resid)} unattributed{costStr(resid)}</div>);
                 return rows;
               }
               if (ev.reasoningTokens > 0) {
+                var visTok = ev.output - ev.reasoningTokens;
                 return (
                   <>
-                    <div>~{fmtT(ev.output - ev.reasoningTokens)} visible to user</div>
-                    <div>~{fmtT(ev.reasoningTokens)} thinking</div>
+                    <div>~{fmtT(visTok)} visible to user{costStr(visTok)}</div>
+                    <div>~{fmtT(ev.reasoningTokens)} thinking{costStr(ev.reasoningTokens)}</div>
                   </>
                 );
               }
@@ -1690,6 +1698,15 @@ function computePromptCostByBucket(p) {
     byBucket.output.visibleChars = (byBucket.output.visibleChars || 0) + (ev.visibleResponseChars || 0);
     byBucket.output.thinkingChars = (byBucket.output.thinkingChars || 0) + (ev.thinkingChars || 0);
     byBucket.output.toolArgsChars = (byBucket.output.toolArgsChars || 0) + (ev.toolArgsChars || 0);
+    byBucket.output.codeChars = (byBucket.output.codeChars || 0) + (ev.codeChars || 0);
+    if (!byBucket.output.codeByLang) byBucket.output.codeByLang = new Map();
+    (ev.codeCharsByLang || []).forEach(function (L) {
+      byBucket.output.codeByLang.set(L.lang, (byBucket.output.codeByLang.get(L.lang) || 0) + L.chars);
+    });
+    if (!byBucket.output.argsByName) byBucket.output.argsByName = new Map();
+    (ev.toolArgCharsByName || []).forEach(function (A) {
+      byBucket.output.argsByName.set(A.name, (byBucket.output.argsByName.get(A.name) || 0) + A.chars);
+    });
     totalOutputTok += ev.output || 0;
   });
 
@@ -1762,32 +1779,35 @@ function computePromptCostByBucket(p) {
     ? "Estimated vision input tokens from model + detail field.\nAlready included in billed prompt_tokens; shown here so reused images on cached calls are visible."
     : "";
 
-  // Output: model's response totals. We have three honest char-based signals
-  // we can attribute (visible response text, thinking text, tool-call args)
-  // plus an "unattributed" residual that catches whatever completion_tokens
-  // are left over (typically Claude's encrypted/redacted reasoning or model
-  // overhead). Falls back to reasoning_tokens or a single output line when
-  // chars data is missing.
+  // Output: model's response totals. The detailed bucket breakdown below
+  // covers the attribution; the inline sample line would just repeat it.
+  // Keep a minimal call-count sample as a fallback for when chars data is
+  // missing entirely.
   var totalReasoning = byBucket.output.reasoningTok || 0;
   var visCh = byBucket.output.visibleChars || 0;
   var thinkCh = byBucket.output.thinkingChars || 0;
   var argsCh = byBucket.output.toolArgsChars || 0;
   var anyChars = visCh + thinkCh + argsCh;
-  if (totalOutputTok > 0) {
+  if (totalOutputTok > 0 && anyChars > 0) {
+    // Build a one-line summary of the 3 output categories so the collapsed
+    // bucket row shows the cost attribution without expanding.
+    var perTokSum = byBucket.output.outputCost / totalOutputTok;
+    var thinkTokS = totalReasoning > 0
+      ? totalReasoning
+      : Math.round(totalOutputTok * (thinkCh / anyChars));
+    var remainS = Math.max(0, totalOutputTok - thinkTokS);
+    var visArgChS = visCh + argsCh;
+    var argTokS = visArgChS > 0 ? Math.round(remainS * (argsCh / visArgChS)) : 0;
+    var visTokS = Math.max(0, remainS - argTokS);
+    var partsS = [];
+    if (visTokS > 0) partsS.push("visible " + fmt$(visTokS * perTokSum));
+    if (thinkTokS > 0) partsS.push("thinking " + fmt$(thinkTokS * perTokSum));
+    if (argTokS > 0) partsS.push("tool-args " + fmt$(argTokS * perTokSum));
+    byBucket.output.sample = partsS.join(" · ");
+  } else if (totalOutputTok > 0 && anyChars === 0) {
     var nLlm = llmEvents.length;
     var callStr = nLlm + " call" + (nLlm === 1 ? "" : "s");
-    if (anyChars > 0) {
-      var estVisH = Math.round(visCh / 4);
-      var estThinkH = Math.round(thinkCh / 4);
-      var estArgsH = Math.round(argsCh / 4);
-      var estResidH = Math.max(0, totalOutputTok - estVisH - estThinkH - estArgsH);
-      var parts = [];
-      if (estVisH > 0) parts.push("~" + fmtT(estVisH) + " visible");
-      if (estThinkH > 0) parts.push("~" + fmtT(estThinkH) + " thinking");
-      if (estArgsH > 0) parts.push("~" + fmtT(estArgsH) + " tool-args");
-      if (estResidH > 0) parts.push("~" + fmtT(estResidH) + " unattributed");
-      byBucket.output.sample = "across " + callStr + " · " + parts.join(" · ") + " tok";
-    } else if (totalReasoning > 0) {
+    if (totalReasoning > 0) {
       byBucket.output.sample = "model wrote " + fmtT(totalOutputTok - totalReasoning)
         + " visible + " + fmtT(totalReasoning) + " thinking tok across " + callStr;
     } else {
@@ -1863,27 +1883,54 @@ function PromptCostBreakdown(props) {
               var thinkCh2 = b.thinkingChars || 0;
               var argsCh2 = b.toolArgsChars || 0;
               var sumCh = visCh2 + thinkCh2 + argsCh2;
+              var perTok = b.outputCost / b.outputTok;
               if (sumCh > 0) {
-                // Attribute output tokens via char share, with a residual for
-                // what's left (typically Claude's encrypted/redacted thinking
-                // or model overhead).
-                var estVisTok = Math.round(visCh2 / 4);
-                var estThinkTok = Math.round(thinkCh2 / 4);
-                var estArgsTok = Math.round(argsCh2 / 4);
-                var attrTok = estVisTok + estThinkTok + estArgsTok;
-                var residTok = Math.max(0, b.outputTok - attrTok);
-                var perTok = b.outputCost / b.outputTok;
-                if (estVisTok > 0) seg.push({ label: "visible to user", tok: estVisTok, cost: estVisTok * perTok, color: theme.cost.fresh });
-                if (estThinkTok > 0) seg.push({ label: "thinking", tok: estThinkTok, cost: estThinkTok * perTok, color: theme.cost.output });
-                if (estArgsTok > 0) seg.push({ label: "tool-call args", tok: estArgsTok, cost: estArgsTok * perTok, color: theme.cost.ctxToolDefs });
-                if (residTok > 0) seg.push({ label: "unattributed", tok: residTok, cost: residTok * perTok, color: theme.text.muted });
+                // Proportional allocation: parts sum exactly to outputTok.
+                var thinkTok2 = (b.reasoningTok || 0) > 0
+                  ? b.reasoningTok
+                  : Math.round(b.outputTok * (thinkCh2 / sumCh));
+                var remainTok = Math.max(0, b.outputTok - thinkTok2);
+                var visArgCh = visCh2 + argsCh2;
+                var argTok2 = visArgCh > 0 ? Math.round(remainTok * (argsCh2 / visArgCh)) : 0;
+                var visTok2 = Math.max(0, remainTok - argTok2);
+                if (visTok2 > 0) {
+                  var codeCh2 = b.codeChars || 0;
+                  var codeTok2 = visCh2 > 0 ? Math.round(visTok2 * (codeCh2 / visCh2)) : 0;
+                  var proseTok2 = Math.max(0, visTok2 - codeTok2);
+                  var visParts = [];
+                  if (proseTok2 > 0) visParts.push("prose " + fmtT(proseTok2));
+                  if (codeTok2 > 0) visParts.push("fenced code " + fmtT(codeTok2));
+                  seg.push({
+                    label: "visible to user", tok: visTok2, cost: visTok2 * perTok, color: theme.cost.fresh,
+                    detail: visParts.join(" · "),
+                  });
+                }
+                if (thinkTok2 > 0) {
+                  seg.push({ label: "thinking", tok: thinkTok2, cost: thinkTok2 * perTok, color: theme.cost.output, detail: "" });
+                }
+                if (argTok2 > 0) {
+                  var argDetail = "";
+                  var byName = b.argsByName;
+                  if (byName && byName.size > 0 && argsCh2 > 0) {
+                    var argArr = Array.from(byName.entries()).sort(function (a, b) { return b[1] - a[1]; });
+                    var parts = argArr.map(function (A) {
+                      var aTok = Math.round(argTok2 * (A[1] / argsCh2));
+                      return aTok > 0 ? (A[0] + " " + fmtT(aTok)) : null;
+                    }).filter(Boolean);
+                    argDetail = parts.join(" · ");
+                  }
+                  seg.push({
+                    label: "tool-call args", tok: argTok2, cost: argTok2 * perTok, color: theme.cost.ctxToolDefs,
+                    detail: argDetail,
+                  });
+                }
               } else {
                 var rTok = b.reasoningTok || 0;
                 var visTok = b.outputTok - rTok;
                 var rCost = b.outputTok > 0 ? b.outputCost * rTok / b.outputTok : 0;
                 var visCost = b.outputCost - rCost;
-                if (visTok > 0) seg.push({ label: "visible output", tok: visTok, cost: visCost, color: theme.cost.fresh });
-                if (rTok > 0) seg.push({ label: "thinking", tok: rTok, cost: rCost, color: theme.cost.output });
+                if (visTok > 0) seg.push({ label: "visible output", tok: visTok, cost: visCost, color: theme.cost.fresh, detail: "" });
+                if (rTok > 0) seg.push({ label: "thinking", tok: rTok, cost: rCost, color: theme.cost.output, detail: "" });
               }
             }
           } else {
@@ -1918,36 +1965,38 @@ function PromptCostBreakdown(props) {
               {seg.length > 0 ? (
                 <div style={{
                   marginLeft: 26, marginTop: 6, paddingBottom: 4,
-                  display: "flex", flexWrap: "wrap", gap: "4px 14px",
+                  display: "flex", flexDirection: "column", gap: 3,
                   fontSize: theme.fontSize.xs, color: theme.text.muted,
                   fontVariantNumeric: "tabular-nums",
                 }}
                   title={"Per-bucket cost is estimated by allocating each call's prompt_tokens to buckets in proportion to their character share."}>
                   {seg.map(function (s, i) {
+                    var subPct = total > 0 ? (s.cost / total) * 100 : 0;
                     return (
-                      <span key={i}>
+                      <div key={i} style={{
+                        display: "grid",
+                        gridTemplateColumns: "140px 90px 56px minmax(0,1fr)",
+                        gap: 10, alignItems: "baseline",
+                      }}>
                         <span style={{ color: s.color, fontWeight: 500 }}>{s.label}</span>
-                        {" "}
-                        <span>{fmtT(s.tok)} tok</span>
-                        {" · "}
-                        <span style={{ color: theme.text.secondary }}>{fmt$(s.cost)}</span>
-                      </span>
+                        <span style={{ color: theme.text.primary }}>{fmt$(s.cost)}</span>
+                        <span style={{ color: theme.text.muted }}>{subPct.toFixed(0)}%</span>
+                        <span style={{
+                          color: theme.text.muted, opacity: 0.8,
+                          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                        }} title={s.detail || ""}>{s.detail || ""}</span>
+                      </div>
                     );
                   })}
                   {b.savings > 0 ? (
-                    <span>
+                    <div style={{ marginTop: 2 }}>
                       <span style={{ color: theme.cost.cached, fontWeight: 500 }}>saved</span>
                       {" "}
                       <span style={{ color: theme.cost.cached }}>{fmt$(b.savings)}</span>
                       {" vs uncached"}
-                    </span>
-                  ) : null}
-                  <span style={{ fontStyle: "italic", opacity: 0.7 }}>(est.)</span>
-                  {k === "output" ? (
-                    <div style={{ flexBasis: "100%", marginTop: 4, fontSize: theme.fontSize.xs, color: theme.text.muted, opacity: 0.8 }}>
-                      Output tokens are billed at the output rate when generated, but the response text becomes conversation history that IS eligible for caching on subsequent calls (counted in the Conversation bucket).
                     </div>
                   ) : null}
+                  <div style={{ fontStyle: "italic", opacity: 0.6, marginTop: 2 }}>(est.)</div>
                 </div>
               ) : null}
             </details>
@@ -2032,19 +2081,249 @@ function Kpis(props) {
     }
   }
   var totalCostItem = { l: "Total cost", v: fmt$(t.cost), notes: notes };
+  var inputCost = (t.freshCost || 0) + (t.cachedCost || 0);
+  var freshTok = Math.max(0, (t.promptTokens || 0) - (t.cached || 0) - (t.cacheWrite || 0));
   var items = [
     totalCostItem,
-    { l: "Billed input", v: fmtT(t.promptTokens), d: fmtT(t.cached) + " cached (" + (100 * t.cacheHitRate).toFixed(0) + "%)" },
-    { l: "Output", v: fmtT(t.output) },
-    { l: "LLM calls", v: "" + t.llmCalls },
-    { l: "Tool calls", v: "" + t.toolCalls },
+    {
+      l: "Billed input",
+      v: inputCost > 0 ? fmt$(inputCost) : fmtT(t.promptTokens),
+      m: inputCost > 0 ? fmtT(t.promptTokens) + " tok" : null,
+      d: fmtT(t.cached) + " cached · " + fmtT(freshTok) + " fresh · " + (100 * t.cacheHitRate).toFixed(0) + "% hit",
+      dColor: theme.text.muted,
+      dTitle: "Input split: cached (cheap rate) + fresh (full rate). Cache hit rate shows what fraction of input tokens were served from cache.",
+    },
+    (function () {
+      // Split output cost into thinking, visible (response text), and tool-args
+      // (JSON the model emits to invoke tools). All bill at the same output
+      // rate, so split proportionally by char share when reasoning_tokens are
+      // not reported directly (Claude).
+      //
+      // Tooltip breaks the visible slice further into prose vs fenced code
+      // blocks by regex-scanning the visible response text. Inline `code`
+      // (backtick spans) is folded into prose because it's typically file
+      // paths and identifiers, not "the model wrote code".
+      if (!(t.outputCost > 0) || !(t.output > 0)) {
+        return { l: "Output", v: fmtT(t.output) };
+      }
+      var visCh = t.visibleResponseChars || 0;
+      var thinkCh = t.thinkingChars || 0;
+      var argCh = t.toolArgChars || 0;
+      var perTok = t.outputCost / t.output;
+      var thinkTok, visTok, argTok, source;
+      if (t.reasoning > 0) {
+        // OpenAI o-series: trust reasoning_tokens for thinking, then split
+        // the remainder between visible response and tool-args by char share.
+        thinkTok = t.reasoning;
+        var remainTok = Math.max(0, t.output - thinkTok);
+        var remCh = visCh + argCh;
+        if (remCh > 0) {
+          argTok = Math.round(remainTok * (argCh / remCh));
+          visTok = remainTok - argTok;
+        } else {
+          argTok = 0; visTok = remainTok;
+        }
+        source = "reasoning_tokens + char-ratio";
+      } else {
+        var totCh = visCh + thinkCh + argCh;
+        if (totCh > 0) {
+          thinkTok = Math.round(t.output * (thinkCh / totCh));
+          argTok = Math.round(t.output * (argCh / totCh));
+          visTok = Math.max(0, t.output - thinkTok - argTok);
+          source = "char-ratio";
+        } else {
+          thinkTok = 0; argTok = 0; visTok = t.output;
+          source = "none";
+        }
+      }
+      var thinkCost = thinkTok * perTok;
+      var visCost = visTok * perTok;
+      var argCost = argTok * perTok;
+      var d = (
+        <>
+          <div style={{ fontVariantNumeric: "tabular-nums" }}>thinking {fmt$(thinkCost)}</div>
+          <div style={{ fontVariantNumeric: "tabular-nums" }}>visible {fmt$(visCost)}</div>
+          <div style={{ fontVariantNumeric: "tabular-nums" }}>tool-args {fmt$(argCost)}</div>
+        </>
+      );
+      // Tooltip: just the breakdowns. No explanatory prose.
+      var codeCh = t.codeChars || 0;
+      var visBreak = "";
+      if (visCh > 0 && visTok > 0) {
+        var codeTok = Math.round(visTok * (codeCh / visCh));
+        var proseTok = Math.max(0, visTok - codeTok);
+        var proseCost = proseTok * perTok;
+        var codeCost = codeTok * perTok;
+        var visLines = [
+          "  prose " + fmt$(proseCost),
+          "  fenced code " + fmt$(codeCost),
+        ];
+        var langs = Array.isArray(t.codeCharsByLang) ? t.codeCharsByLang : [];
+        if (langs.length > 0 && codeCh > 0 && codeTok > 0) {
+          langs.slice(0, 5).forEach(function (L) {
+            var share = L.chars / codeCh;
+            var lTok = Math.round(codeTok * share);
+            var lCost = lTok * perTok;
+            var label = L.lang || "(no lang)";
+            visLines.push("    " + label + " " + fmt$(lCost));
+          });
+          if (langs.length > 5) visLines.push("    ...");
+        }
+        visBreak = "Visible (" + fmt$(visCost) + ")\n" + visLines.join("\n");
+      }
+      var argBreak = "";
+      var argsByName = Array.isArray(t.toolArgCharsByName) ? t.toolArgCharsByName : [];
+      if (argsByName.length > 0 && argCh > 0 && argTok > 0) {
+        var argLines = argsByName.slice(0, 8).map(function (A) {
+          var share = A.chars / argCh;
+          var aTok = Math.round(argTok * share);
+          var aCost = aTok * perTok;
+          return "  " + A.name + " " + fmt$(aCost);
+        });
+        if (argsByName.length > 8) argLines.push("  ...");
+        argBreak = "Tool-args (" + fmt$(argCost) + ")\n" + argLines.join("\n");
+      }
+      var sections = [];
+      if (visBreak) sections.push(visBreak);
+      if (argBreak) sections.push(argBreak);
+      var title = sections.length > 0 ? sections.join("\n\n") : null;
+      return {
+        l: "Output",
+        v: fmt$(t.outputCost),
+        m: fmtT(t.output) + " tok",
+        d: d,
+        dColor: theme.text.muted,
+        dTitle: title,
+      };
+    })(),
+    (function () {
+      var ohc = sa.overheadCount || 0;
+      var primary = Math.max(0, t.llmCalls - ohc);
+      var d = ohc > 0
+        ? primary + " primary · " + ohc + " overhead"
+        : null;
+      return {
+        l: "LLM calls",
+        v: "" + t.llmCalls,
+        d: d,
+        dColor: theme.text.muted,
+        dTitle: ohc > 0
+          ? "Primary calls are real chat turns the agent ran. Overhead calls are background bookkeeping (e.g. title generation, prompt categorization) Copilot makes for UI features -- still billed."
+          : null,
+      };
+    })(),
+    (function () {
+      var all = Array.isArray(t.topTools) ? t.topTools : [];
+      var top = all.slice(0, 3);
+      var hasMore = all.length > 3;
+      var sub = top.length > 0
+        ? (
+          <>
+            {top.map(function (x, i) {
+              return (
+                <div key={i} style={{ fontVariantNumeric: "tabular-nums" }}>
+                  {x.name} {x.count}
+                </div>
+              );
+            })}
+            {hasMore && <div>...</div>}
+          </>
+        )
+        : null;
+      var title = all.length > 0
+        ? "Top tools by invocation count: " + all.map(function (x) { return x.name + " (" + x.count + ")"; }).join(", ")
+        : undefined;
+      return { l: "Tool calls", v: "" + t.toolCalls, d: sub, dColor: theme.text.muted, dTitle: title };
+    })(),
   ];
   if (t.cacheWrite > 0) {
-    items.splice(3, 0, { l: "Cache write", v: fmtT(t.cacheWrite) });
+    items.splice(3, 0, {
+      l: "Cache write",
+      v: t.cacheWriteCost > 0 ? fmt$(t.cacheWriteCost) : fmtT(t.cacheWrite),
+      m: t.cacheWriteCost > 0 ? fmtT(t.cacheWrite) + " tok" : null,
+      vTitle: "Cost of cache-write tokens (typically ~1.25x the fresh input rate). Pays once per chunk; subsequent calls hit at the cache-read rate.",
+    });
   }
   if (t.unexpectedMissCount > 0) {
     items.push({ l: "⚠ Unexpected misses", v: "" + t.unexpectedMissCount, d: "wasted ~" + fmt$(t.unexpectedMissCost), warn: true });
   }
+  // Setup overhead: tools and skills that were attached to every call but
+  // never invoked / opened. Cost is computed at the cached-input rate
+  // (these prefix tokens hit cache on calls 2..N), which honestly reflects
+  // what the user is actually paying for the dead weight. Unused MCP servers
+  // are intentionally excluded -- they ship zero tool defs to the model, so
+  // they add zero LLM tokens. The standalone MCP reachability callout below
+  // surfaces them separately.
+  var setup = (function () {
+    var analysis = props.analysis;
+    if (!analysis || !Array.isArray(analysis.prompts)) return null;
+    var unusedTools, skillCarry;
+    try {
+      unusedTools = detectUnusedTools(analysis.prompts);
+      skillCarry = aggregateSkillCarry(analysis.prompts);
+    } catch (_) { return null; }
+    var toolsUnused = unusedTools.unused.length;
+    var skillsUnused = skillCarry.unusedCount || 0;
+    var totalUnused = toolsUnused + skillsUnused;
+    if (totalUnused === 0) return null;
+    var wastedTokPerCall = (unusedTools.unusedTokensPerCall || 0) + (skillCarry.unusedTokensPerCall || 0);
+    var calls = unusedTools.callsWithDefs || 0;
+    var wastedTokTotal = wastedTokPerCall * calls;
+    // Per-token cached input rate, derived from observed cached spend. Falls
+    // back to ~10% of the fresh rate (Anthropic / OpenAI cache discount).
+    var perTokCached = 0;
+    if (t.cached > 0 && t.cachedCost > 0) {
+      perTokCached = t.cachedCost / t.cached;
+    } else {
+      var freshTokK = Math.max(0, (t.promptTokens || 0) - (t.cached || 0) - (t.cacheWrite || 0));
+      if (freshTokK > 0 && t.freshCost > 0) perTokCached = (t.freshCost / freshTokK) * 0.1;
+    }
+    var wastedCost = wastedTokTotal * perTokCached;
+    var toolsTokPerCall = unusedTools.unusedTokensPerCall || 0;
+    var skillsTokPerCall = skillCarry.unusedTokensPerCall || 0;
+    var toolsCost = toolsTokPerCall * calls * perTokCached;
+    var skillsCost = skillsTokPerCall * calls * perTokCached;
+    var lines = [];
+    if (toolsUnused > 0) {
+      lines.push({
+        text: toolsUnused + " unused " + (toolsUnused === 1 ? "tool" : "tools"),
+        cost: toolsCost,
+      });
+    }
+    if (skillsUnused > 0) {
+      lines.push({
+        text: skillsUnused + " unused " + (skillsUnused === 1 ? "skill" : "skills"),
+        cost: skillsCost,
+      });
+    }
+    var sub = (
+      <>
+        {lines.map(function (line, i) {
+          return (
+            <div key={i} style={{ fontVariantNumeric: "tabular-nums" }}>
+              {line.text}{line.cost > 0 ? " ~" + fmt$(line.cost) : ""}
+            </div>
+          );
+        })}
+      </>
+    );
+    var unusedToolList = unusedTools.unused.slice(0, 12).join(", ") + (unusedTools.unused.length > 12 ? ", ..." : "");
+    var title = "Tools and skills attached to every LLM call but never invoked or opened. "
+      + "These ship in the (cache-discounted) system prefix on every call. "
+      + "Disable them in your config to reduce per-call overhead. "
+      + (toolsUnused > 0 ? ("Unused tools: " + unusedToolList + ". ") : "")
+      + ("Estimated " + fmtT(wastedTokPerCall) + " wasted tok / call × " + calls + " calls.");
+    return {
+      l: "Setup overhead",
+      v: wastedCost > 0 ? "~" + fmt$(wastedCost) : "" + totalUnused,
+      m: wastedTokPerCall > 0 ? "~" + fmtT(wastedTokPerCall) + " tok / call" : null,
+      d: sub,
+      dColor: theme.text.muted,
+      dTitle: title,
+      vTitle: wastedCost > 0 ? title : null,
+    };
+  })();
+  if (setup) items.push(setup);
   return (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(" + items.length + ", 1fr)", gap: 12, marginBottom: 28 }}>
       {items.map(function (k, i) {
@@ -2053,10 +2332,25 @@ function Kpis(props) {
             background: theme.bg.surface,
             border: "1px solid " + (k.warn ? theme.cost.missBorder : theme.border.default),
             borderRadius: theme.radius.md, padding: "12px 14px",
+            minWidth: 0,
           }}>
             <div style={{ color: theme.text.muted, fontSize: theme.fontSize.xs, textTransform: "uppercase", letterSpacing: 0.6 }}>{k.l}</div>
-            <div style={{ fontSize: theme.fontSize.xl, fontWeight: 600, color: k.warn ? theme.cost.missText : theme.text.primary, marginTop: 4, fontVariantNumeric: "tabular-nums" }}>{k.v}</div>
-            {k.d && <div style={{ color: theme.semantic.success, fontSize: theme.fontSize.xs, marginTop: 2 }}>{k.d}</div>}
+            <div title={k.vTitle || undefined} style={{ fontSize: theme.fontSize.xl, fontWeight: 600, color: k.warn ? theme.cost.missText : theme.text.primary, marginTop: 4, fontVariantNumeric: "tabular-nums", cursor: k.vTitle ? "help" : "default" }}>{k.v}</div>
+            {k.m && <div style={{ color: theme.text.secondary, fontSize: theme.fontSize.sm, marginTop: 2, fontVariantNumeric: "tabular-nums" }}>{k.m}</div>}
+            {k.d && <div title={k.dTitle || undefined} style={{
+              color: k.dColor || theme.semantic.success,
+              fontSize: theme.fontSize.xs,
+              marginTop: 2,
+              cursor: k.dTitle ? "help" : "default",
+              lineHeight: 1.4,
+              ...(k.dTruncate ? {
+                display: "-webkit-box",
+                WebkitLineClamp: 3,
+                WebkitBoxOrient: "vertical",
+                overflow: "hidden",
+                wordBreak: "break-word",
+              } : null),
+            }}>{k.d}</div>}
             {k.notes && k.notes.map(function (n, ni) {
               return (
                 <div key={ni} title={n.title} style={{ color: n.color, fontSize: theme.fontSize.xs, marginTop: 2, cursor: n.title ? "help" : "default", lineHeight: 1.35 }}>
@@ -2327,11 +2621,101 @@ function McpReachabilityCallout(props) {
   );
 }
 
+// Resolve a thread's colorKey to the actual theme hex. Centralized so the
+// pill, badge, and per-row left border all use the same color for a given
+// agent. Colors live under theme.agentThread.* (defined in theme.js).
+function agentColor(colorKey) {
+  return theme.agentThread[colorKey] || theme.agentThread.main;
+}
+
+// Row of agent cards rendered above the timeline. Each card shows the
+// agent's identity (color dot + label + optional task snippet), its real
+// cost and call counts, and clicking it toggles a filter on the timeline
+// below. Renders nothing when the session has only one agent (the main
+// thread) since there's nothing to compare or filter.
+function AgentThreadsRow(props) {
+  var threads = props.threads || [];
+  var selected = props.selected;
+  var onToggle = props.onToggle;
+  var onSelectAll = props.onSelectAll;
+  if (threads.length <= 1) return null;
+  var isAll = !selected || selected.size === 0 || selected.size === threads.length;
+  return (
+    <div style={{ margin: "0 0 18px" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+        <div style={{ color: theme.text.primary, fontSize: theme.fontSize.sm, fontWeight: 600, letterSpacing: 0.4, textTransform: "uppercase" }}>
+          Agent threads in this session ({threads.length})
+        </div>
+        <button
+          onClick={onSelectAll}
+          style={{
+            background: isAll ? theme.bg.raised : "transparent",
+            border: "1px solid " + (isAll ? theme.border.default : theme.border.subtle),
+            color: isAll ? theme.text.primary : theme.text.secondary,
+            fontFamily: theme.font.mono,
+            fontSize: theme.fontSize.xs,
+            padding: "4px 10px",
+            borderRadius: 3,
+            cursor: "pointer",
+            transition: "all " + theme.transition.fast,
+          }}
+          title="Show all agents in the timeline"
+        >
+          {isAll ? "✓ all" : "show all"}
+        </button>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 10 }}>
+        {threads.map(function (t) {
+          var on = !selected || selected.size === 0 || selected.has(t.id);
+          var color = agentColor(t.colorKey);
+          return (
+            <button
+              key={t.id}
+              onClick={function () { onToggle(t.id); }}
+              style={{
+                textAlign: "left",
+                background: on ? theme.bg.raised : theme.bg.surface,
+                border: "1px solid " + (on ? color + "55" : theme.border.subtle),
+                borderLeft: "4px solid " + (on ? color : color + "55"),
+                padding: "10px 12px",
+                borderRadius: 3,
+                cursor: "pointer",
+                fontFamily: theme.font.mono,
+                opacity: on ? 1 : 0.55,
+                transition: "all " + theme.transition.fast,
+              }}
+              title={t.slot === "sub" ? "Subagent " + t.letter + (t.taskSnippet ? " · " + t.taskSnippet : "") : "Main agent (all user-initiated turns)"}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                <span style={{ display: "inline-block", width: 10, height: 10, background: color, borderRadius: 2, flex: "0 0 auto" }} />
+                <span style={{ color: theme.text.primary, fontSize: theme.fontSize.sm, fontWeight: 600 }}>{t.label}</span>
+              </div>
+              {t.slot === "sub" && t.taskSnippet ? (
+                <div style={{ color: theme.text.secondary, fontSize: theme.fontSize.xs, marginBottom: 6, lineHeight: 1.4, fontStyle: "italic" }}>
+                  &ldquo;{t.taskSnippet}&rdquo;
+                </div>
+              ) : null}
+              <div style={{ display: "flex", gap: 12, color: theme.text.muted, fontSize: theme.fontSize.xs, fontVariantNumeric: "tabular-nums" }}>
+                <span><b style={{ color: theme.text.secondary }}>{t.llmCount}</b> LLM</span>
+                <span><b style={{ color: theme.text.secondary }}>{t.toolCount}</b> tools</span>
+                <span style={{ marginLeft: "auto", color: theme.text.primary, fontWeight: 600 }}>{fmt$(t.totalCost)}</span>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function CostView(props) {
   var analysis = props.analysis;
   var [openRow, setOpenRow] = useState({});
   var [showOverhead, setShowOverhead] = useState(false);
   var [unit, setUnit] = usePersistentState("agentviz.cost.unit", "credits");
+  // Per-view (not persisted) filter for agent threads. null = all visible.
+  // Stored as a Set<string> of selected thread ids.
+  var [selectedAgents, setSelectedAgents] = useState(null);
   // Keep the module-level fmt$ helper in sync. Use a layout-time effect so the
   // very first render after a unit change already formats with the new unit.
   setCostUnit(unit);
@@ -2416,6 +2800,29 @@ export default function CostView(props) {
 
   var globalEventIdx = 0;
 
+  // Group prompts into agent threads (main + N subagents) so the user can
+  // see per-agent cost cards and filter the timeline below by agent.
+  var agentInfo = useMemo(function () { return buildAgentThreads(analysis.prompts); }, [analysis]);
+  var threadOf = function (promptId) {
+    var tid = agentInfo.promptIdToThreadId.get(promptId);
+    return agentInfo.threads.find(function (x) { return x.id === tid; }) || null;
+  };
+  var toggleAgent = function (id) {
+    setSelectedAgents(function (prev) {
+      var next = new Set(prev || agentInfo.threads.map(function (t) { return t.id; }));
+      if (next.has(id)) next.delete(id); else next.add(id);
+      // If everything is selected, normalize back to null (all visible).
+      if (next.size === 0 || next.size === agentInfo.threads.length) return null;
+      return next;
+    });
+  };
+  var clearAgentFilter = function () { setSelectedAgents(null); };
+  var isAgentVisible = function (promptId) {
+    if (!selectedAgents) return true;
+    var tid = agentInfo.promptIdToThreadId.get(promptId);
+    return selectedAgents.has(tid);
+  };
+
   return (
     <div style={{ height: "100%", overflowY: "auto", overflowX: "hidden", background: theme.bg.base }}>
     <div style={{ maxWidth: 1700, margin: "0 auto", padding: "32px 28px 80px", fontFamily: theme.font.mono, fontSize: theme.fontSize.md, color: theme.text.primary }}>
@@ -2428,11 +2835,17 @@ export default function CostView(props) {
 
       <ExportPromptButton analysis={analysis} sessionLabel={props.sessionLabel || null} />
 
-      <Kpis totals={analysis.totals} subagentEst={subagentEst} />
+      <Kpis totals={analysis.totals} subagentEst={subagentEst} analysis={analysis} />
       <ModelBreakdown prompts={analysis.prompts} />
       <Glossary />
       <Legend />
       <McpReachabilityCallout reachability={analysis.mcpReachability} />
+      <AgentThreadsRow
+        threads={agentInfo.threads}
+        selected={selectedAgents}
+        onToggle={toggleAgent}
+        onSelectAll={clearAgentFilter}
+      />
 
       <div style={{
         display: "flex", alignItems: "center", gap: 12, margin: "0 0 12px",
@@ -2518,6 +2931,12 @@ export default function CostView(props) {
           return analysis.prompts.map(function (p, pi) {
           var cachedPct = 100 * p.cacheHitRate;
           var pa = p.prompt;
+          // Hide prompts whose agent is filtered out. Advance the cumulative
+          // state cursor so other prompts stay aligned with their cumStates.
+          if (!isAgentVisible(p.promptId)) {
+            globalEventIdx += p.events.length;
+            return null;
+          }
           // When hiding overhead calls, prompts whose only LLM activity is
           // overhead (e.g. background `title` / `promptCategorization` calls)
           // become empty. Skip rendering them entirely, but advance the
@@ -2538,6 +2957,15 @@ export default function CostView(props) {
           }
           visiblePromptOrdinal += 1;
           var displayOrdinal = visiblePromptOrdinal;
+          var thread = threadOf(p.promptId);
+          var tColor = thread ? agentColor(thread.colorKey) : null;
+          var parentOrdinal = null;
+          if (thread && thread.slot === "sub" && thread.parentPromptId) {
+            // 1-based ordinal of the parent prompt in the unfiltered list,
+            // for a "spawned by prompt #N" hint on the subagent header.
+            var pidx = analysis.prompts.findIndex(function (x) { return x.promptId === thread.parentPromptId; });
+            if (pidx >= 0) parentOrdinal = pidx + 1;
+          }
           return (
             <React.Fragment key={pi}>
               {/* Prompt header spans all 3 columns */}
@@ -2546,6 +2974,7 @@ export default function CostView(props) {
                 background: theme.bg.raised,
                 borderTop: pi > 0 ? "1px solid " + theme.border.default : "none",
                 borderBottom: "1px solid " + theme.border.default,
+                borderLeft: tColor ? "4px solid " + tColor : undefined,
                 padding: "14px 18px",
                 display: "grid",
                 gridTemplateColumns: "48px 1fr 220px auto",
@@ -2557,6 +2986,24 @@ export default function CostView(props) {
                   prompt
                 </div>
                 <div>
+                  {thread && agentInfo.threads.length > 1 ? (
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, fontSize: theme.fontSize.xs }}>
+                      <span style={{
+                        display: "inline-flex", alignItems: "center", gap: 5,
+                        background: tColor + "1f",
+                        color: tColor,
+                        border: "1px solid " + tColor + "55",
+                        padding: "2px 7px", borderRadius: 3, fontWeight: 600,
+                        letterSpacing: 0.3,
+                      }}>
+                        <span style={{ display: "inline-block", width: 7, height: 7, background: tColor, borderRadius: 2 }} />
+                        {thread.slot === "sub" ? "SUB " + thread.letter : "MAIN"}
+                      </span>
+                      {parentOrdinal != null ? (
+                        <span style={{ color: theme.text.muted }}>spawned by prompt #{parentOrdinal}</span>
+                      ) : null}
+                    </div>
+                  ) : null}
                   <div style={{ color: theme.text.primary, fontSize: theme.fontSize.md, fontWeight: 500, lineHeight: 1.4 }}>{p.label || "(empty)"}</div>
                   <div style={{ color: theme.text.secondary, fontSize: theme.fontSize.sm, marginTop: 6, display: "grid", gap: 4 }}>
                     <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "baseline" }}>
@@ -2796,7 +3243,7 @@ export default function CostView(props) {
                       </div>
                     </div>
                     <div style={{ padding: "8px 12px", borderBottom: "1px solid " + theme.border.subtle, background: cellBg, borderLeft: "1px solid " + theme.border.default, display: "flex", alignItems: "center" }}>
-                      <StackBar parts={cumState} keys={["fresh", "cwrite", "cached", "output"]} colors={COST_COLORS} labels={COST_LABELS} maxVal={maxCost} withLabel />
+                      <StackBar parts={cumState} keys={["fresh", "cwrite", "cached", "output"]} colors={COST_COLORS} labels={COST_LABELS} maxVal={maxCost} formatFn={fmt$} withLabel />
                     </div>
                     <div style={{ padding: "8px 12px", borderBottom: "1px solid " + theme.border.subtle, background: cellBg, borderLeft: "1px solid " + theme.border.default, display: "flex", alignItems: "center" }}>
                       {isLLM

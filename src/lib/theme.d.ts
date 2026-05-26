@@ -54,6 +54,13 @@ export interface Theme {
     assistant: string;
     system: string;
   };
+  agentThread: {
+    main: string;
+    subA: string;
+    subB: string;
+    subC: string;
+    subD: string;
+  };
   agentType: {
     explore: string;
     task: string;
