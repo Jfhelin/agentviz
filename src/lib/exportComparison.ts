@@ -732,6 +732,32 @@ export function formatComparisonAsMarkdown(
     lines.push("");
   }
 
+  // System prompt per-section diff — emitted whenever the parser surfaced
+  // top-level block data on both sides AND at least one block differs.
+  // Lets the analyst see *which* <tag> blocks moved the system-prompt
+  // hash, instead of just "hashes differ".
+  const spd = cmp.drift.systemPromptDiff;
+  if (spd && spd.hasBlockDrift) {
+    lines.push("## System prompt block diff");
+    lines.push("Per-section breakdown of top-level `<tag>...</tag>` blocks in the system prompt. Char counts are exact; rows sorted by `|delta|` descending. `only-A` / `only-B` rows mark blocks present on one side only (often an MCP server or skill that was active in one run and not the other).");
+    lines.push("");
+    const plaintextA = Math.max(0, (cmp.fingerprintA.systemPromptChars || 0) - spd.taggedCharsA);
+    const plaintextB = Math.max(0, (cmp.fingerprintB.systemPromptChars || 0) - spd.taggedCharsB);
+    lines.push(`- **Tagged chars:** A ${fmtNum(spd.taggedCharsA)} · B ${fmtNum(spd.taggedCharsB)} · Δ ${fmtSignedTok(spd.totalBlockDelta)}`);
+    lines.push(`- **Untagged plaintext between blocks (preamble + interstitial text):** A ${fmtNum(plaintextA)} · B ${fmtNum(plaintextB)} · Δ ${fmtSignedTok(plaintextB - plaintextA)}`);
+    lines.push("");
+    lines.push("| Status | Block | chars A | chars B | Δ chars |");
+    lines.push("|---|---|---:|---:|---:|");
+    for (const r of spd.rows) {
+      const icon = r.status === "identical" ? "✓" : r.status === "chars-differ" ? "≠" : r.status === "only-A" ? "🅰" : "🅱";
+      const sign = r.delta > 0 ? "+" : "";
+      lines.push(`| ${icon} ${r.status} | \`<${r.key}>\` | ${r.charsA ? fmtNum(r.charsA) : "—"} | ${r.charsB ? fmtNum(r.charsB) : "—"} | ${r.charsA && r.charsB ? sign + fmtNum(r.delta) : (r.status === "only-A" ? "−" + fmtNum(r.charsA) : "+" + fmtNum(r.charsB))} |`);
+    }
+    lines.push("");
+    lines.push("> Per-section token counts shown in the UI are pro-rata estimates (`chars / sysChars × sysTok`) and shift between runs even when a section's chars are identical. Use the chars columns above as ground truth when reasoning about content drift.");
+    lines.push("");
+  }
+
   // Pre/post divergence
   const ds = cmp.divergenceSplit;
   lines.push("## Pre- vs post-divergence cost split");
