@@ -44,7 +44,7 @@ AI coding agents (Claude Code, VS Code Copilot Chat, Copilot CLI, ATIF / Harbor,
 npx agentviz
 ```
 
-Opens AGENTVIZ in your browser. The default workflow UI starts in **Find**, where you can drop a `.jsonl` or `.json` session file or click **load a demo session** to try it instantly. Claude Code, Copilot CLI, and VS Code Copilot Chat sessions are auto-discovered.
+Opens AGENTVIZ in your browser. The default workflow UI starts in **Find**, where you can drop a `.jsonl` or `.json` session file or click **Load a demo session** to try it instantly. Claude Code, Copilot CLI, and VS Code Copilot Chat sessions are auto-discovered.
 
 ### CLI (live streaming)
 
@@ -183,7 +183,7 @@ Load two agent traces side by side to compare them head to head. Great for bench
 
 ### Entry points
 
-- **Landing screen** -- click "compare two sessions" below the drop zone
+- **Landing screen** -- click **Compare two sessions** below the drop zone
 - **Single-session header** -- click **Compare** while viewing any session to add a second trace for comparison
 - **Find zone** -- select two sessions and click **Compare selected**
 - **Compare landing** -- drop Session A and Session B independently; the view opens once both are loaded

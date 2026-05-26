@@ -352,7 +352,7 @@ describe("App browser regressions", function () {
   it("loads the demo session and keeps compare session B empty", async function () {
     var app = await renderApp();
 
-    await click(findClickableText(app.container, "load a demo session"));
+    await click(findClickableText(app.container, "Load a demo session"));
     await waitFor(function () {
       return findByText(app.container, "demo-session.jsonl");
     }, "expected demo session to load");
@@ -427,7 +427,7 @@ describe("App browser regressions", function () {
   it("shows the default UI toggle in the active session header", async function () {
     var app = await renderApp();
 
-    await click(findClickableText(app.container, "load a demo session"));
+    await click(findClickableText(app.container, "Load a demo session"));
     await waitFor(function () {
       return findByText(app.container, "demo-session.jsonl");
     }, "expected demo session to load");
@@ -443,7 +443,7 @@ describe("App browser regressions", function () {
   it("updates search results and track filters on the loaded demo session", async function () {
     var app = await renderApp();
 
-    await click(findClickableText(app.container, "load a demo session"));
+    await click(findClickableText(app.container, "Load a demo session"));
     await waitFor(function () {
       return findByText(app.container, "demo-session.jsonl");
     }, "expected demo session to load");
@@ -470,7 +470,7 @@ describe("App browser regressions", function () {
   it("keeps v1 view navigation and command palette working with shared session provider", async function () {
     var app = await renderApp();
 
-    await click(findClickableText(app.container, "load a demo session"));
+    await click(findClickableText(app.container, "Load a demo session"));
     await waitFor(function () {
       return findByText(app.container, "demo-session.jsonl");
     }, "expected demo session to load");
@@ -531,7 +531,7 @@ describe("App browser regressions", function () {
 
     var app = await renderApp();
 
-    await click(findClickableText(app.container, "load a demo session"));
+    await click(findClickableText(app.container, "Load a demo session"));
     await waitFor(function () {
       return findByText(app.container, "demo-session.jsonl");
     }, "expected demo session to load");

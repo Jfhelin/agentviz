@@ -82,7 +82,7 @@ export default function CompareLandingState({ session, sessionB, onLoadSessionA,
           padding: 0,
         }}
       >
-        cancel
+        Cancel
       </button>
     </ShellFrame>
   );
