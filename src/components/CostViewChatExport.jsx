@@ -738,7 +738,7 @@ function renderSystemAnatomy(ev) {
             return (
               <div key={i} style={{ display: "flex", gap: 8, padding: "2px 0", cursor: s.body ? "help" : "default" }} title={s.body ? "<" + s.tag + ">  ·  " + s.chars.toLocaleString() + " chars\n\n" + s.body : "<" + s.tag + ">  ·  " + s.chars.toLocaleString() + " chars"}>
                 <span style={{ color: theme.text.primary }}>&lt;{s.tag}&gt;</span>
-                <span style={{ color: theme.text.muted, marginLeft: "auto" }}>~{fmtT(charsToScaledTok(s.chars))} tok</span>
+                <span style={{ color: theme.text.muted, marginLeft: "auto", fontVariantNumeric: "tabular-nums" }}>{s.chars.toLocaleString()} ch · ~{fmtT(charsToScaledTok(s.chars))} tok</span>
               </div>
             );
           })}
@@ -761,7 +761,7 @@ function renderSystemAnatomy(ev) {
             return (
               <div key={i} style={{ display: "flex", gap: 8, padding: "2px 0", cursor: "help" }} title={tip}>
                 <span style={{ color: theme.cost.kindMcp, fontWeight: 600 }}>{s.name}</span>
-                <span style={{ color: theme.text.muted, marginLeft: "auto" }}>~{fmtT(charsToScaledTok(s.chars))} tok</span>
+                <span style={{ color: theme.text.muted, marginLeft: "auto", fontVariantNumeric: "tabular-nums" }}>{s.chars.toLocaleString()} ch · ~{fmtT(charsToScaledTok(s.chars))} tok</span>
               </div>
             );
           })}
@@ -793,7 +793,7 @@ function renderSystemAnatomy(ev) {
             return (
               <div key={i} style={{ display: "flex", gap: 8, padding: "2px 0", cursor: "help" }} title={tip}>
                 <span style={{ color: theme.text.primary }}>{base}</span>
-                <span style={{ color: theme.text.muted, marginLeft: "auto" }}>~{fmtT(charsToScaledTok(a.chars))} tok</span>
+                <span style={{ color: theme.text.muted, marginLeft: "auto", fontVariantNumeric: "tabular-nums" }}>{a.chars.toLocaleString()} ch · ~{fmtT(charsToScaledTok(a.chars))} tok</span>
               </div>
             );
           })}
@@ -814,7 +814,7 @@ function renderSystemAnatomy(ev) {
             return (
               <div key={i} style={{ display: "flex", gap: 8, padding: "2px 0", cursor: "help" }} title={tip}>
                 <span style={{ color: theme.text.primary }}>{base}</span>
-                <span style={{ color: theme.text.muted, marginLeft: "auto" }}>~{fmtT(charsToScaledTok(a.chars))} tok</span>
+                <span style={{ color: theme.text.muted, marginLeft: "auto", fontVariantNumeric: "tabular-nums" }}>{a.chars.toLocaleString()} ch · ~{fmtT(charsToScaledTok(a.chars))} tok</span>
               </div>
             );
           })}
@@ -844,7 +844,12 @@ function renderSystemAnatomy(ev) {
   return (
     <div>
       <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, marginBottom: 8 }}>
-        {sysChars.toLocaleString()} chars · ~{fmtT(sysTok)} tok · click ▸ to expand any section
+        <div style={{ fontVariantNumeric: "tabular-nums" }}>
+          {sysChars.toLocaleString()} chars · {fmtT(sysTok)} tok (API-reported total) · click ▸ to expand any section
+        </div>
+        <div style={{ marginTop: 4, color: theme.text.dim, fontStyle: "italic" }}>
+          Chars are exact. Per-section <b>tok</b> values are pro-rata estimates of this run's total; they shift between runs when <i>other</i> sections change size, even when this section's chars are identical. Compare <b>chars</b> across runs to see real content changes.
+        </div>
       </div>
       <div style={{ fontFamily: theme.font.mono, fontSize: theme.fontSize.xs }}>
         {rows.map(function (r) {
@@ -853,8 +858,9 @@ function renderSystemAnatomy(ev) {
             <span style={{ display: "flex", alignItems: "center", gap: 8, width: "100%" }}>
               <span style={{ display: "inline-block", width: 10, height: 10, background: r.color, borderRadius: 2, flex: "0 0 auto" }} />
               <span style={{ color: theme.text.primary, flex: "1 1 auto" }}>{r.label}</span>
-              <span style={{ color: theme.text.muted, textAlign: "right", flex: "0 0 auto" }}>~{fmtT(charsToScaledTok(r.chars))} tok</span>
-              <span style={{ color: theme.text.muted, textAlign: "right", flex: "0 0 auto", width: 48 }}>{pctOf(r.chars)}</span>
+              <span style={{ color: theme.text.muted, textAlign: "right", flex: "0 0 auto", fontVariantNumeric: "tabular-nums" }} title="Exact char count from the request body">{r.chars.toLocaleString()} ch</span>
+              <span style={{ color: theme.text.dim, textAlign: "right", flex: "0 0 auto", width: 86, fontVariantNumeric: "tabular-nums" }} title="Pro-rata estimate of this section's share of the run's total prompt tokens. Will shift between runs when other sections change, even when this section's chars are identical.">~{fmtT(charsToScaledTok(r.chars))} tok est</span>
+              <span style={{ color: theme.text.muted, textAlign: "right", flex: "0 0 auto", width: 48, fontVariantNumeric: "tabular-nums" }}>{pctOf(r.chars)}</span>
             </span>
           );
           if (!expandable) {
