@@ -102,4 +102,20 @@ describe("parseCodexJSONL", function () {
     expect(result?.metadata.totalToolCalls).toBe(1);
     expect(result?.metadata.errorCount).toBe(0);
   });
+
+  it("reindexes turns after dropping empty lifecycle turns", function () {
+    const text = [
+      line({ type: "session_meta", timestamp: "2026-05-25T12:00:00.000Z", payload: { id: "synthetic", originator: "codex-tui", source: "synthetic", model_provider: "openai" } }),
+      line({ type: "event_msg", timestamp: "2026-05-25T12:00:01.000Z", payload: { type: "task_started", turn_id: "empty-turn", started_at: "2026-05-25T12:00:01.000Z" } }),
+      line({ type: "event_msg", timestamp: "2026-05-25T12:00:02.000Z", payload: { type: "task_started", turn_id: "real-turn", started_at: "2026-05-25T12:00:02.000Z" } }),
+      line({ type: "turn_context", timestamp: "2026-05-25T12:00:02.100Z", payload: { turn_id: "real-turn", model: "gpt-5.3-codex" } }),
+      line({ type: "response_item", timestamp: "2026-05-25T12:00:03.000Z", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "Run synthetic task" }] } }),
+      line({ type: "response_item", timestamp: "2026-05-25T12:00:04.000Z", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "Synthetic task complete" }] } }),
+    ].join("\n");
+
+    const result = parseCodexJSONL(text);
+    expect(result?.turns).toHaveLength(1);
+    expect(result?.turns[0].index).toBe(0);
+    expect(result?.events.map(function (event) { return event.turnIndex; })).toEqual([0, 0]);
+  });
 });

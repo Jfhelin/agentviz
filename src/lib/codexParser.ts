@@ -400,7 +400,7 @@ function handleEventMessage(record: RawRecord, state: ParseState, events: Normal
   }
 }
 
-function buildEvents(records: RawRecord[], state: ParseState, warnings: string[]): NormalizedEvent[] {
+function buildEvents(records: RawRecord[], state: ParseState): NormalizedEvent[] {
   const events: NormalizedEvent[] = [];
   let syntheticTime = 0;
 
@@ -426,10 +426,6 @@ function buildEvents(records: RawRecord[], state: ParseState, warnings: string[]
     else if (payloadType === "reasoning") pushReasoningEvent(events, record, state, t);
     else if (payloadType === "function_call" || payloadType === "custom_tool_call" || payloadType === "web_search_call") pushToolCallEvent(events, record, state, t);
     else if (payloadType === "function_call_output" || payloadType === "custom_tool_call_output") pushToolOutputEvent(events, record, state, t);
-  }
-
-  if (events.length === 0 && records.some(function (record) { return record.type === "session_meta"; })) {
-    warnings.push("Codex session contained metadata but no displayable events");
   }
 
   events.sort(function (left, right) { return left.t - right.t; });
@@ -525,7 +521,15 @@ function buildTurns(events: NormalizedEvent[], state: ParseState): SessionTurn[]
     if (event.isError) turn.hasError = true;
   }
 
-  return turns.filter(function (turn) { return turn.eventIndices.length > 0; });
+  const activeTurns = turns.filter(function (turn) { return turn.eventIndices.length > 0; });
+  for (let index = 0; index < activeTurns.length; index += 1) {
+    const turn = activeTurns[index];
+    turn.index = index;
+    turn.eventIndices.forEach(function (eventIndex) {
+      events[eventIndex].turnIndex = index;
+    });
+  }
+  return activeTurns;
 }
 
 function getSessionMeta(records: RawRecord[]): Record<string, any> {
@@ -598,7 +602,7 @@ export function parseCodexRecords(records: RawRecord[], malformedLines = 0): Par
   if (records.length === 0) return null;
   const warnings: string[] = [];
   const state: ParseState = { currentTurnId: null, currentModel: null, turnContexts: {}, turns: {} };
-  const events = buildEvents(records, state, warnings);
+  const events = buildEvents(records, state);
   if (events.length === 0) return null;
 
   const minEventTime = events.reduce(function (min, event) { return Math.min(min, event.t); }, events[0].t);

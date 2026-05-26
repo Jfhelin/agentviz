@@ -6,6 +6,7 @@
  *   - Copilot CLI JSONL (producer: "copilot-agent")
  *   - VS Code Copilot Chat JSON (version + requests + sessionId)
  *   - VS Code Copilot prompt exports (copilot_all_prompts_*.json)
+ *   - ATIF / Harbor trajectory JSON (schema_version: "ATIF-*")
  *   - Claude Code JSONL (default fallback)
  *
  * Returns: { events, turns, metadata } or null
