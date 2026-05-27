@@ -3760,30 +3760,22 @@ export default function CostView(props) {
                                     : null;
                                 })()}
                             {!isLLM && !ev.subagent && ev.resultTokens > 0 && (
-                              <>
-                                {ev.resultChars > 0 && (
-                                  <span style={{
-                                    fontFamily: theme.font.mono, fontSize: theme.fontSize.xs,
-                                    color: theme.text.muted, marginLeft: "auto",
-                                    fontVariantNumeric: "tabular-nums",
-                                    display: "inline-flex", alignItems: "baseline", gap: 4,
-                                  }} title={ev.resultChars.toLocaleString() + " chars of tool output. On the next LLM call these are sent as a role:'tool' message and counted under the Tool results bucket (distinct from History, which is prior user/assistant turns)."}>
-                                    {ev.resultChars.toLocaleString()} chars →
-                                    <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: 1, background: CTX_COLORS.tool_results, transform: "translateY(-1px)" }} />
-                                    <span style={{ color: theme.text.secondary }}>Tool results</span>
-                                  </span>
-                                )}
+                              <span style={{
+                                fontFamily: theme.font.mono, fontSize: theme.fontSize.xs,
+                                color: theme.text.muted, marginLeft: "auto",
+                                fontVariantNumeric: "tabular-nums",
+                                display: "inline-flex", alignItems: "baseline", gap: 4,
+                              }} title={"~" + fmtT(ev.resultTokens) + " tok of tool output (" + (ev.resultChars > 0 ? ev.resultChars.toLocaleString() + " chars" : "size unknown") + "). On the next LLM call this is sent as a role:'tool' message and counted under the Tool results bucket (distinct from History, which holds prior user/assistant turns)."}>
                                 <span style={{
-                                  fontFamily: theme.font.mono, fontSize: theme.fontSize.xs, fontWeight: 500,
+                                  fontWeight: 500, color: theme.text.primary,
                                   padding: "1px 6px", borderRadius: 3,
-                                  background: theme.bg.raised, color: theme.text.primary,
+                                  background: theme.bg.raised,
                                   border: "1px solid " + theme.border.subtle,
-                                  marginLeft: ev.resultChars > 0 ? 0 : "auto",
-                                  fontVariantNumeric: "tabular-nums",
-                                }} title={"~" + fmtT(ev.resultTokens) + " tok of tool output, billed on the next LLM call's input (Tool results bucket)"}>
-                                  {fmtT(ev.resultTokens)} tok
-                                </span>
-                              </>
+                                }}>{fmtT(ev.resultTokens)} tok</span>
+                                <span>→</span>
+                                <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: 1, background: CTX_COLORS.tool_results, transform: "translateY(-1px)" }} />
+                                <span style={{ color: theme.text.secondary }}>Tool results</span>
+                              </span>
                             )}
                           </div>
                           {isLLM && isFirstLlmInPrompt && p.invokedBy && (() => {
