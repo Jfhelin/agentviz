@@ -331,14 +331,14 @@ function smartToolHeadline(ev) {
             inProgressTitle = t.title;
           }
         });
-        var parts = [];
-        if (counts["in-progress"]) parts.push(counts["in-progress"] + " in-progress");
-        if (counts.pending) parts.push(counts.pending + " pending");
-        if (counts.completed) parts.push(counts.completed + " done");
-        if (counts.blocked) parts.push(counts.blocked + " blocked");
-        var tail = parts.length ? " \u00b7 " + parts.join(", ") : "";
-        var nowDoing = inProgressTitle ? " \u00b7 now: \u201c" + trunc(inProgressTitle, 60) + "\u201d" : "";
-        return list.length + " todo" + (list.length === 1 ? "" : "s") + tail + nowDoing;
+        var total = list.length;
+        var done = counts.completed || 0;
+        var allDone = total > 0 && done === total;
+        var head = done + "/" + total + " done" + (allDone ? " \u2713" : "");
+        var segs = [head];
+        if (counts.blocked) segs.push(counts.blocked + " blocked");
+        if (inProgressTitle) segs.push("\u25b6 \u201c" + trunc(inProgressTitle, 60) + "\u201d");
+        return segs.join(" \u00b7 ");
       }
     }
 
