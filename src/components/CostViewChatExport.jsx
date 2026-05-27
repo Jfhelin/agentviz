@@ -323,9 +323,13 @@ function smartToolHeadline(ev) {
       var list = Array.isArray(parsed.todoList) ? parsed.todoList : null;
       if (list) {
         var counts = { "in-progress": 0, pending: 0, completed: 0, blocked: 0 };
+        var inProgressTitle = "";
         list.forEach(function (t) {
           var s = (t && t.status) || "pending";
           counts[s] = (counts[s] || 0) + 1;
+          if (s === "in-progress" && !inProgressTitle && t && t.title) {
+            inProgressTitle = t.title;
+          }
         });
         var parts = [];
         if (counts["in-progress"]) parts.push(counts["in-progress"] + " in-progress");
@@ -333,8 +337,23 @@ function smartToolHeadline(ev) {
         if (counts.completed) parts.push(counts.completed + " done");
         if (counts.blocked) parts.push(counts.blocked + " blocked");
         var tail = parts.length ? " \u00b7 " + parts.join(", ") : "";
-        return list.length + " todo" + (list.length === 1 ? "" : "s") + tail;
+        var nowDoing = inProgressTitle ? " \u00b7 now: \u201c" + trunc(inProgressTitle, 60) + "\u201d" : "";
+        return list.length + " todo" + (list.length === 1 ? "" : "s") + tail + nowDoing;
       }
+    }
+
+    if (lname.indexOf("memory") >= 0) {
+      var memAction = parsed.action || parsed.command || parsed.op || "";
+      var memName = parsed.name || parsed.title || parsed.key || parsed.path || parsed.id || "";
+      var memBody = parsed.content || parsed.value || parsed.body || parsed.text || parsed.data || "";
+      var bits = [];
+      if (memAction && typeof memAction === "string") bits.push(memAction);
+      if (memName) bits.push(String(memName));
+      if (memBody && typeof memBody === "string") {
+        var oneLine = memBody.replace(/\s+/g, " ").trim();
+        if (oneLine) bits.push("\u201c" + trunc(oneLine, 70) + "\u201d");
+      }
+      if (bits.length > 0) return bits.join(" \u00b7 ");
     }
 
     if (lname.indexOf("runsubagent") >= 0 || lname === "tool/runsubagent") {
