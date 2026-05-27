@@ -1556,11 +1556,36 @@ function LLMDetail(props) {
         var silent = ev.silentToolCall;
         if (!hasText && calls.length === 0 && reasoning.length === 0 && !silent) return null;
         return (
-          <div style={{ marginTop: 14 }}>
-            <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 5, fontWeight: 600 }}>
-              Response ({fmtT(ev.output)} output tok)
+          <div style={{
+            marginTop: 14,
+            background: theme.bg.surface,
+            border: "1px solid " + theme.border.default,
+            borderRadius: 4,
+            padding: "10px 12px",
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8, fontSize: theme.fontSize.sm }}>
+              <span style={{ color: theme.text.primary, fontWeight: 600 }}>
+                <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 1, marginRight: 6, background: theme.cost.output }} />
+                Response
+              </span>
+              <span style={{ color: theme.text.secondary, fontVariantNumeric: "tabular-nums" }}>
+                {fmtT(ev.output)} output tok
+              </span>
             </div>
-            {hasText && <div style={textBlockStyle()}>{ev.responsePreview}</div>}
+            {hasText && (
+              <div style={{
+                background: theme.bg.base,
+                border: "1px solid " + theme.border.subtle,
+                borderRadius: 3,
+                padding: "8px 10px",
+                color: theme.text.primary,
+                fontSize: theme.fontSize.sm,
+                lineHeight: 1.55,
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+                fontFamily: theme.font.mono,
+              }}>{ev.responsePreview}</div>
+            )}
             {!hasText && calls.length === 0 && silent && (
               <div style={{
                 background: theme.bg.base, border: "1px dashed " + theme.border.default,
@@ -1594,10 +1619,9 @@ function LLMDetail(props) {
               var grouped = groupReasoningBlocks(ev.reasoningBlocks);
               return (
                 <div style={{
-                  background: theme.bg.base,
-                  border: "1px solid " + theme.border.default,
-                  borderLeft: "3px solid " + theme.text.muted,
-                  borderRadius: 3, padding: "8px 10px", marginTop: 6,
+                  marginTop: hasText ? 10 : 0,
+                  paddingTop: hasText ? 10 : 0,
+                  borderTop: hasText ? "1px solid " + theme.border.subtle : "none",
                 }}>
                   <div
                     title={
@@ -1612,6 +1636,7 @@ function LLMDetail(props) {
                       cursor: "help",
                     }}
                   >
+                    <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: 1, background: theme.text.muted }} />
                     <span style={{ borderBottom: "1px dotted " + theme.border.default }}>
                       Reasoning ({ev.reasoningBlocks.length} block{ev.reasoningBlocks.length === 1 ? "" : "s"}{grouped.length !== ev.reasoningBlocks.length ? ", " + grouped.length + " unique" : ""})
                     </span>
@@ -1645,12 +1670,12 @@ function LLMDetail(props) {
             })()}
             {calls.length > 0 && (
               <div style={{
-                background: theme.cost.chipBgBuiltin || theme.bg.base,
-                border: "1px solid " + theme.border.default,
-                borderLeft: "3px solid " + theme.cost.kindBuiltin,
-                borderRadius: 3, padding: "8px 10px", marginTop: hasText ? 6 : 0,
+                marginTop: (hasText || reasoning.length > 0) ? 10 : 0,
+                paddingTop: (hasText || reasoning.length > 0) ? 10 : 0,
+                borderTop: (hasText || reasoning.length > 0) ? "1px solid " + theme.border.subtle : "none",
               }}>
                 <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: 1, background: theme.cost.kindBuiltin }} />
                   <span>Tool calls requested by the model</span>
                   <span style={{ color: theme.text.ghost, fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>
                     LLM → client. Results are fed back on the next call.
