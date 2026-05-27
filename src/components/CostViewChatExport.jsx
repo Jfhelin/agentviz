@@ -322,7 +322,7 @@ function stripRoot(p, root) {
   if (!root) return p;
   if (p === root) return ".";
   var withSlash = root.charAt(root.length - 1) === "/" ? root : root + "/";
-  if (p.indexOf(withSlash) === 0) return p.slice(withSlash.length);
+  if (p.indexOf(withSlash) === 0) return "./" + p.slice(withSlash.length);
   return p;
 }
 
