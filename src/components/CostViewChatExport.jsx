@@ -939,6 +939,80 @@ function renderSystemAnatomy(ev) {
 
 function LLMDetail(props) {
   var ev = props.event;
+
+  // Synthesized rows are reconstructed from a missing `request` log entry.
+  // We only have the response text and dispatched tool calls; token counts,
+  // cost, cache split, and per-bucket breakdowns are simply not recoverable.
+  // Render an honest "data not available" inspector rather than rendering
+  // zeros that look like "this call was free".
+  if (ev.synthesized) {
+    var stripe = "repeating-linear-gradient(45deg, " + theme.bg.surface + " 0 6px, " + theme.bg.base + " 6px 12px)";
+    var hasResp = ev.responsePreview && ev.responsePreview.trim().length > 0;
+    var dispatched = ev.producedToolCalls || [];
+    var unknownBox = function (label, hint) {
+      return (
+        <div style={{
+          background: stripe, border: "1px dashed " + theme.border.default, borderRadius: 5,
+          padding: "10px 12px", opacity: 0.85,
+        }} title={hint || "Not recorded by VS Code's export -- request entry was missing."}>
+          <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 5 }}>{label}</div>
+          <div style={{ fontSize: theme.fontSize.lg, color: theme.text.ghost, fontWeight: 600, fontStyle: "italic" }}>unknown</div>
+          <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, marginTop: 6, lineHeight: 1.4 }}>
+            Not recorded by the export.
+          </div>
+        </div>
+      );
+    };
+    return (
+      <div style={{ gridColumn: "1 / -1", background: theme.bg.base, borderBottom: "1px solid " + theme.border.subtle, padding: "14px 22px" }}>
+        <div style={{
+          background: theme.cost.switchBg, border: "1px solid " + theme.cost.switchBorder, color: theme.cost.switchText,
+          padding: "9px 13px", margin: "0 0 12px", borderRadius: 4, fontSize: theme.fontSize.sm, lineHeight: 1.55,
+        }}>
+          <b style={{ color: theme.text.primary }}>Synthesized row -- request log missing.</b>{" "}
+          VS Code did not write a <code>request</code> entry for this LLM round-trip, so token counts, cost, cache split, and the per-bucket new-input breakdown are not available. The response text and the {dispatched.length} dispatched tool call{dispatched.length === 1 ? "" : "s"} were recovered from the next request's message history.
+        </div>
+        <h4 style={{ margin: "0 0 8px", color: theme.text.primary, fontSize: theme.fontSize.base, fontWeight: 600, letterSpacing: 0.4, textTransform: "uppercase" }}>
+          What we know
+        </h4>
+        <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 1fr", gap: 10, marginBottom: 14 }}>
+          {unknownBox("\u25b6 Prompt sent")}
+          {unknownBox("\u25c0 Reply written")}
+          {unknownBox("$ Cost for this call")}
+        </div>
+        <div style={{
+          background: theme.bg.surface, border: "1px solid " + theme.border.subtle, borderRadius: 5,
+          padding: "9px 12px", marginBottom: 12, fontSize: theme.fontSize.sm, color: theme.text.secondary,
+        }}>
+          <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6, fontWeight: 600 }}>
+            Recovered facts
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "4px 12px", alignItems: "baseline", fontFamily: theme.font.mono, fontSize: theme.fontSize.xs }}>
+            <span style={{ color: theme.text.muted }}>model</span>
+            <span style={{ color: theme.text.primary }}>
+              {ev.model || <span style={{ color: theme.text.ghost, fontStyle: "italic" }}>unknown</span>}
+              {ev.model && <span style={{ color: theme.text.muted, marginLeft: 6 }} title="The request entry was missing, so the model name is inferred from the next request in this prompt. Usually correct, but not guaranteed if a model switch happened mid-turn.">(inferred)</span>}
+            </span>
+            <span style={{ color: theme.text.muted }}>dispatched</span>
+            <span style={{ color: theme.text.primary }}>
+              {dispatched.length > 0
+                ? dispatched.map(function (t, i) { return (i > 0 ? ", " : "") + t.name; }).join("")
+                : <span style={{ color: theme.text.ghost, fontStyle: "italic" }}>none</span>}
+            </span>
+          </div>
+        </div>
+        {hasResp && (
+          <div style={{ marginTop: 14 }}>
+            <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 5, fontWeight: 600 }}>
+              Response text (recovered from next request's history)
+            </div>
+            <div style={textBlockStyle()}>{ev.responsePreview}</div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   var c = ev.components || {};
   var totalIn = CTX_INPUT_KEYS.reduce(function (a, k) { return a + (c[k] || 0); }, 0);
   var pct = function (k) { return 100 * (c[k] || 0) / Math.max(1, totalIn); };

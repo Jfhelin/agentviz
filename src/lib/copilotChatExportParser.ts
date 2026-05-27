@@ -1618,7 +1618,7 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
           producedToolCalls: synthProduced,
           reasoningBlocks: [],
           silentToolCall: null,
-          model: "",
+          model: (nextReq.metadata?.model as string) || "",
           duration: 0,
           promptTokens: 0,
           cached: 0,
