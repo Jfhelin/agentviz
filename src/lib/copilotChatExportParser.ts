@@ -1204,6 +1204,15 @@ export interface CostAnalysisPrompt {
   llmCount: number;
   toolCount: number;
   prompt: PromptAnalysis;
+  /** For subagent prompts (name === "tool/runSubagent"), points back to the
+   * parent's runSubagent tool call so the UI can show "invoked by ..." and
+   * link to the dispatching turn. Matched by the parent's `args.prompt`
+   * text equalling this prompt's `userMessage`. */
+  invokedBy?: {
+    parentPromptIndex: number;
+    parentToolCallId: string;
+    description: string;
+  };
 }
 
 export interface CostAnalysis {
@@ -2076,6 +2085,42 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
       hasError: false,
     });
   });
+
+  // Link subagent prompts back to the parent's runSubagent tool call.
+  // VS Code's export does not store a direct parent reference, but the
+  // parent's runSubagent tool call has an `args.prompt` string that equals
+  // the subagent prompt's user-message text. We match on that.
+  {
+    type ParentEntry = { parentPromptIndex: number; parentToolCallId: string; description: string };
+    const parentByText = new Map<string, ParentEntry>();
+    root.prompts.forEach((rp, parentPi) => {
+      (rp.logs || []).forEach((log) => {
+        if (log.kind !== "toolCall" || log.tool !== "runSubagent" || !log.id) return;
+        let parsed: Record<string, unknown> | null = null;
+        if (typeof log.args === "string") {
+          try { parsed = JSON.parse(log.args); } catch { parsed = null; }
+        } else if (log.args && typeof log.args === "object") {
+          parsed = log.args as Record<string, unknown>;
+        }
+        if (!parsed) return;
+        const childPrompt = typeof parsed.prompt === "string" ? parsed.prompt.trim() : "";
+        const description = typeof parsed.description === "string" ? parsed.description : "";
+        if (!childPrompt) return;
+        // Only set if not already mapped (first match wins; runSubagent
+        // calls with identical prompts in the same session are rare).
+        if (!parentByText.has(childPrompt)) {
+          parentByText.set(childPrompt, { parentPromptIndex: parentPi, parentToolCallId: log.id, description });
+        }
+      });
+    });
+    costPrompts.forEach((cp) => {
+      if (cp.name !== "tool/runSubagent") return;
+      const key = (cp.userMessage || "").trim();
+      if (!key) return;
+      const parent = parentByText.get(key);
+      if (parent) cp.invokedBy = parent;
+    });
+  }
 
   const totalDenom = cumCached + cumFresh + cumCwrite;
   const declaredMcpServers = extractDeclaredMcpServers(root.mcpServers);

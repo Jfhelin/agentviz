@@ -185,6 +185,7 @@ var CALL_NAME_LABELS = {
   "panel/request":        "Chat turn",
   "panel/explain":        "Explain",
   "panel/fix":            "Fix",
+  "tool/runSubagent":     "Subagent turn",
   "title":                "Generate chat title",
   "promptCategorization": "Categorize prompt",
 };
@@ -274,7 +275,7 @@ function summarizeToolArgs(ev) {
 // Names of LLM calls that represent a real agent/chat turn (vs UI overhead
 // like title or promptCategorization). For these we want a richer "what
 // happened" label instead of the static friendlyCallName.
-var AGENT_TURN_NAMES = { "panel/editAgent": true, "panel/request": true };
+var AGENT_TURN_NAMES = { "panel/editAgent": true, "panel/request": true, "tool/runSubagent": true };
 
 function firstLine(text) {
   if (!text) return "";
@@ -3085,6 +3086,15 @@ export default function CostView(props) {
                   return null;
                 }
                 var cellBg = isLLM ? theme.bg.surface : theme.bg.raised;
+                // Whether this is the first LLM event in this prompt's events
+                // (used to anchor the "invoked by" hint for subagent prompts).
+                var isFirstLlmInPrompt = false;
+                if (isLLM && p.invokedBy) {
+                  isFirstLlmInPrompt = true;
+                  for (var fi = 0; fi < ei; fi++) {
+                    if (p.events[fi] && p.events[fi].kind === "llm") { isFirstLlmInPrompt = false; break; }
+                  }
+                }
                 var meta = isLLM ? (
                   <div style={{ color: theme.text.muted, fontSize: theme.fontSize.xs, marginTop: 3, display: "flex", gap: 10, flexWrap: "wrap" }}>
                     <span>{(ev.model || "").split("-").slice(0, 3).join("-")}</span>
@@ -3143,7 +3153,7 @@ export default function CostView(props) {
 
                 return (
                   <React.Fragment key={ei}>
-                    <div onClick={function () { toggle(pi, ei); }}
+                    <div id={"cost-row-" + pi + "-" + ei} onClick={function () { toggle(pi, ei); }}
                       style={{
                         padding: "8px 14px", borderBottom: "1px solid " + theme.border.subtle,
                         background: cellBg, display: "flex", alignItems: "center", minHeight: 38, cursor: "pointer",
@@ -3151,29 +3161,40 @@ export default function CostView(props) {
                       <div style={{ display: "grid", gridTemplateColumns: "18px 78px 1fr", gap: 8, alignItems: "start", width: "100%" }}>
                         <div style={{ color: theme.text.muted, fontSize: theme.fontSize.xs, width: 14, textAlign: "center", marginTop: 3, transition: "transform .15s", transform: open ? "rotate(90deg)" : "none" }}>▶</div>
                         {(function () {
-                          var pillBg, pillFg, pillBorder, pillLabel;
+                          var pillBg, pillFg, pillBorder, pillLabel, pillTitle;
+                          var isSubagentLlm = isLLM && ev.name === "tool/runSubagent";
                           if (isLLM) {
                             if (ev.synthesized) {
                               pillBg = theme.cost.chipBgBuiltin;
                               pillFg = theme.text.muted;
                               pillBorder = theme.border.subtle;
                               pillLabel = "LLM (synth)";
+                              pillTitle = "Synthesized LLM call. VS Code's export omitted the `request` log entry for this round-trip, so token counts and cost are unavailable. The response text was recovered from the next request's message history; producedToolCalls were dispatched by this missing call.";
+                            } else if (isSubagentLlm) {
+                              pillBg = theme.cost.chipBgExtension;
+                              pillFg = theme.cost.kindExtension;
+                              pillBorder = theme.cost.kindExtension + "40";
+                              pillLabel = "Subagent LLM";
+                              pillTitle = "LLM call running inside a spawned subagent (surface = tool/runSubagent). It was dispatched by a runSubagent tool call on the parent thread, not by the model emitting a `runSubagent` request here.";
                             } else {
                               pillBg = theme.cost.chipBgAssistant;
                               pillFg = theme.accent.primary;
                               pillBorder = theme.accent.primary + "40";
                               pillLabel = "LLM call";
+                              pillTitle = "Roundtrip to the model. Billed.";
                             }
                           } else if (ev.subagent) {
                             pillBg = theme.cost.chipBgExtension;
                             pillFg = theme.cost.kindExtension;
                             pillBorder = theme.cost.kindExtension + "40";
                             pillLabel = "Subagent";
+                            pillTitle = "Tool that spawns its own LLM call internally. Has an estimated cost.";
                           } else {
                             pillBg = theme.cost.chipBgBuiltin;
                             pillFg = theme.cost.kindBuiltin;
                             pillBorder = theme.cost.kindBuiltin + "40";
                             pillLabel = "Tool";
+                            pillTitle = "Client-side tool execution. No LLM cost.";
                           }
                           return (
                             <div style={{
@@ -3182,7 +3203,7 @@ export default function CostView(props) {
                               color: pillFg, marginTop: 1, background: pillBg,
                               border: "1px solid " + pillBorder,
                               textTransform: "uppercase", letterSpacing: 0.4, height: 18, whiteSpace: "nowrap",
-                            }} title={isLLM ? (ev.synthesized ? "Synthesized LLM call. VS Code's export omitted the `request` log entry for this round-trip, so token counts and cost are unavailable. The response text was recovered from the next request's message history; producedToolCalls were dispatched by this missing call." : "Roundtrip to the model. Billed.") : ev.subagent ? "Tool that spawns its own LLM call internally. Has an estimated cost." : "Client-side tool execution. No LLM cost."}>{pillLabel}</div>
+                            }} title={pillTitle}>{pillLabel}</div>
                           );
                         })()}
                         <div>
@@ -3294,6 +3315,43 @@ export default function CostView(props) {
                                     : null;
                                 })()}
                           </div>
+                          {isLLM && isFirstLlmInPrompt && p.invokedBy && (() => {
+                            var parentPi = p.invokedBy.parentPromptIndex;
+                            var parentTcId = p.invokedBy.parentToolCallId;
+                            var parentPrompt = analysis.prompts[parentPi];
+                            var parentEi = -1;
+                            if (parentPrompt) {
+                              for (var ji = 0; ji < parentPrompt.events.length; ji++) {
+                                if (parentPrompt.events[ji].id === parentTcId) { parentEi = ji; break; }
+                              }
+                            }
+                            var desc = p.invokedBy.description || "runSubagent";
+                            return (
+                              <div style={{ color: theme.text.muted, fontSize: theme.fontSize.xs, marginTop: 4, display: "flex", gap: 6, alignItems: "baseline" }}
+                                title="This subagent was spawned by a runSubagent tool call on the parent thread. Click to jump to the parent call.">
+                                <span style={{ color: theme.text.ghost }}>← invoked by</span>
+                                {parentEi >= 0 ? (
+                                  <button type="button" onClick={function (e) {
+                                    e.stopPropagation();
+                                    var el = document.getElementById("cost-row-" + parentPi + "-" + parentEi);
+                                    if (el) {
+                                      el.scrollIntoView({ behavior: "smooth", block: "center" });
+                                      var prev = el.style.boxShadow;
+                                      el.style.boxShadow = "inset 0 0 0 2px " + theme.cost.kindExtension;
+                                      setTimeout(function () { el.style.boxShadow = prev; }, 1500);
+                                    }
+                                  }} style={{
+                                    background: "transparent", border: "none", padding: 0,
+                                    color: theme.cost.kindExtension, cursor: "pointer",
+                                    fontFamily: theme.font.mono, fontSize: theme.fontSize.xs,
+                                    textDecoration: "underline",
+                                  }}>prompt {parentPi + 1} · runSubagent ({desc})</button>
+                                ) : (
+                                  <span style={{ fontFamily: theme.font.mono }}>prompt {parentPi + 1} · runSubagent ({desc})</span>
+                                )}
+                              </div>
+                            );
+                          })()}
                           {meta}
                         </div>
                       </div>
