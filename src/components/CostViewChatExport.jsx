@@ -3153,10 +3153,17 @@ export default function CostView(props) {
                         {(function () {
                           var pillBg, pillFg, pillBorder, pillLabel;
                           if (isLLM) {
-                            pillBg = theme.cost.chipBgAssistant;
-                            pillFg = theme.accent.primary;
-                            pillBorder = theme.accent.primary + "40";
-                            pillLabel = "LLM call";
+                            if (ev.synthesized) {
+                              pillBg = theme.cost.chipBgBuiltin;
+                              pillFg = theme.text.muted;
+                              pillBorder = theme.border.subtle;
+                              pillLabel = "LLM (synth)";
+                            } else {
+                              pillBg = theme.cost.chipBgAssistant;
+                              pillFg = theme.accent.primary;
+                              pillBorder = theme.accent.primary + "40";
+                              pillLabel = "LLM call";
+                            }
                           } else if (ev.subagent) {
                             pillBg = theme.cost.chipBgExtension;
                             pillFg = theme.cost.kindExtension;
@@ -3175,7 +3182,7 @@ export default function CostView(props) {
                               color: pillFg, marginTop: 1, background: pillBg,
                               border: "1px solid " + pillBorder,
                               textTransform: "uppercase", letterSpacing: 0.4, height: 18, whiteSpace: "nowrap",
-                            }} title={isLLM ? "Roundtrip to the model. Billed." : ev.subagent ? "Tool that spawns its own LLM call internally. Has an estimated cost." : "Client-side tool execution. No LLM cost."}>{pillLabel}</div>
+                            }} title={isLLM ? (ev.synthesized ? "Synthesized LLM call. VS Code's export omitted the `request` log entry for this round-trip, so token counts and cost are unavailable. The response text was recovered from the next request's message history; producedToolCalls were dispatched by this missing call." : "Roundtrip to the model. Billed.") : ev.subagent ? "Tool that spawns its own LLM call internally. Has an estimated cost." : "Client-side tool execution. No LLM cost."}>{pillLabel}</div>
                           );
                         })()}
                         <div>

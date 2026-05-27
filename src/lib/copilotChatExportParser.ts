@@ -1123,6 +1123,15 @@ export interface CostAnalysisCall {
    * is actually their question vs Copilot scaffolding. */
   currentParts: CurrentPart[];
   cumCostAfter: number;
+  /** True when this is a virtual LLM-call row reconstructed from orphan
+   * `toolCall` log entries that appeared before any `request` log in the
+   * prompt. VS Code's export sometimes omits the `request` entry for the
+   * first round-trip when the model dispatches tools immediately. We
+   * synthesize a row so the timeline still shows what produced those tool
+   * calls; the response text is recovered from the `role===2` assistant
+   * content in the NEXT real request's message history. Token counts and
+   * cost are 0 -- VS Code didn't log usage for the missing call. */
+  synthesized?: boolean;
 }
 
 export interface CostAnalysisToolCall {
@@ -1543,6 +1552,135 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
       });
       eventIndices.push(idx);
       timeCursor += 1;
+    }
+
+    // Detect orphan toolCalls at the start of this prompt: VS Code sometimes
+    // omits the `request` log entry for the first round-trip when the model
+    // dispatches tools immediately, leaving the dispatched `toolCall` logs
+    // with no preceding `request` to attribute them to. We synthesize a
+    // virtual LLM-call row so the timeline shows what produced them; the
+    // response text is recovered from the `role===2` assistant content of
+    // the next real request's message history.
+    let firstReqLogIdx = -1;
+    for (let k = 0; k < c.logs.length; k++) {
+      if (c.logs[k].kind === "request") { firstReqLogIdx = k; break; }
+    }
+    if (firstReqLogIdx > 0) {
+      const orphanLogs = c.logs.slice(0, firstReqLogIdx).filter(l => l.kind === "toolCall");
+      if (orphanLogs.length > 0) {
+        const nextReq = c.logs[firstReqLogIdx];
+        // Walk the next request's message history backwards for the LAST
+        // role=2 (assistant) message; that's the response of the missing
+        // LLM call that produced these orphan tool dispatches.
+        const histMsgs = nextReq.requestMessages?.messages ?? [];
+        let synthText = "";
+        for (let k = histMsgs.length - 1; k >= 0; k--) {
+          const m = histMsgs[k] as { role?: number | string; content?: unknown };
+          const isAssistant = m.role === 2 || m.role === "assistant";
+          if (!isAssistant) continue;
+          if (typeof m.content === "string") { synthText = m.content; break; }
+          if (Array.isArray(m.content)) {
+            const parts: string[] = [];
+            for (const p of m.content) {
+              if (typeof p === "string") parts.push(p);
+              else if (p && typeof p === "object") {
+                const v = (p as { text?: unknown; value?: unknown }).text
+                  ?? (p as { text?: unknown; value?: unknown }).value;
+                if (typeof v === "string") parts.push(v);
+              }
+            }
+            synthText = parts.join("\n").trim();
+            if (synthText) break;
+          }
+        }
+        const synthProduced = orphanLogs.map(l => ({
+          name: l.tool ?? "",
+          argsSummary: shortArgs(l.args),
+          rawArgs: l.args == null ? "" : (typeof l.args === "string" ? l.args : JSON.stringify(l.args)),
+        }));
+        const synthName = (nextReq.name ?? "panel/editAgent");
+        const synthEvent: CostAnalysisCall & { kind: "llm" } = {
+          kind: "llm",
+          id: `p${pi}-call-synth`,
+          index: pLlm,
+          name: synthName,
+          category: categorizeCallName(synthName),
+          responsePreview: synthText,
+          producedToolCalls: synthProduced,
+          reasoningBlocks: [],
+          silentToolCall: null,
+          model: "",
+          duration: 0,
+          promptTokens: 0,
+          cached: 0,
+          cacheWrite: 0,
+          fresh: 0,
+          output: 0,
+          reasoningTokens: 0,
+          visibleResponseChars: synthText.length,
+          thinkingChars: 0,
+          toolArgsChars: 0,
+          codeChars: 0,
+          codeCharsByLang: [],
+          toolArgCharsByName: [],
+          cost: 0,
+          prevPt: 0,
+          priorSameModelPt: 0,
+          deltaVsPrev: 0,
+          modelSwitched: false,
+          newTotal: 0,
+          trulyNew: 0,
+          recommit: 0,
+          unexpectedMiss: false,
+          cacheMissDiag: null,
+          newPerBucket: { system: 0, tool_defs: 0, history: 0, tool_results: 0, current: 0 },
+          components: { system: 0, tool_defs: 0, history: 0, tool_results: 0, current: 0 },
+          componentChars: { system: 0, tool_defs: 0, history: 0, tool_results: 0, current: 0 },
+          imageTokensEst: 0,
+          visionTokensTotal: 0,
+          totalTools: 0,
+          toolGroups: [],
+          toolDefinitionShape: analyzeToolDefinitionShape([], []),
+          historyMsgs: [],
+          toolResultMsgs: [],
+          images: [],
+          chatMode: null,
+          instructionAttachments: [],
+          skills: [],
+          scaffoldingSections: [],
+          systemBlocks: [],
+          fileAttachments: [],
+          subAgents: [],
+          toolPrefixInstructions: [],
+          environment: null,
+          newImages: [],
+          newHistoryMsgs: [],
+          newToolResultMsgs: [],
+          systemPreview: "",
+          systemChars: 0,
+          systemPreamble: "",
+          systemHash: "",
+          currentText: "",
+          currentParts: [],
+          cumCostAfter: cumCost,
+          synthesized: true,
+        };
+        costEvents.push(synthEvent);
+        pLlm += 1;
+        const idxLlm = events.length;
+        events.push({
+          t: timeCursor,
+          agent: "assistant",
+          track: "output",
+          text: synthText ? synthText.slice(0, 160) : "(synthesized: missing request log)",
+          duration: 0,
+          intensity: 1,
+          isError: false,
+          turnIndex: pi,
+        });
+        eventIndices.push(idxLlm);
+        timeCursor += 1;
+      }
     }
 
     for (let logIdx = 0; logIdx < c.logs.length; logIdx++) {
