@@ -272,6 +272,97 @@ function summarizeToolArgs(ev) {
   return ev.argsSummary || "";
 }
 
+// Per-tool human summary for tool-call row headers. Picks the most useful
+// single field for known tools (file basename, query text, todo counts, etc.)
+// and falls back to the first key:value of the args for unknown tools.
+function smartToolHeadline(ev) {
+  if (!ev) return "";
+  var name = ev.name || "";
+  var parsed = null;
+  if (ev.rawArgs) {
+    try { parsed = JSON.parse(ev.rawArgs); } catch (_e) { parsed = null; }
+  }
+
+  var basename = function (p) {
+    if (!p || typeof p !== "string") return "";
+    var clean = p.replace(/[\\/]+$/, "");
+    var i = Math.max(clean.lastIndexOf("/"), clean.lastIndexOf("\\"));
+    return i >= 0 ? clean.slice(i + 1) : clean;
+  };
+  var trunc = function (s, n) {
+    s = String(s == null ? "" : s);
+    return s.length > n ? s.slice(0, n) + "\u2026" : s;
+  };
+
+  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+    var lname = name.toLowerCase();
+
+    if (lname.indexOf("read_file") >= 0 || lname.indexOf("create_file") >= 0
+        || lname.indexOf("edit_file") >= 0 || lname.indexOf("replace_string_in_file") >= 0
+        || lname === "write" || lname === "edit") {
+      var fp = parsed.filePath || parsed.path || parsed.file || parsed.uri || "";
+      if (fp) return basename(fp);
+    }
+
+    if (lname.indexOf("list_dir") >= 0 || lname === "ls") {
+      var dp = parsed.path || parsed.directory || parsed.dir || "";
+      if (dp) return dp;
+    }
+
+    if (lname.indexOf("grep") >= 0 || lname.indexOf("semantic_search") >= 0
+        || lname.indexOf("file_search") >= 0 || lname.indexOf("search") >= 0) {
+      var q = parsed.query || parsed.pattern || parsed.q || "";
+      if (q) return trunc(q, 80);
+    }
+
+    if (typeof parsed.command === "string" && parsed.command.length > 0) {
+      return summarizeShellCommand(parsed.command);
+    }
+
+    if (lname.indexOf("manage_todo_list") >= 0) {
+      var list = Array.isArray(parsed.todoList) ? parsed.todoList : null;
+      if (list) {
+        var counts = { "in-progress": 0, pending: 0, completed: 0, blocked: 0 };
+        list.forEach(function (t) {
+          var s = (t && t.status) || "pending";
+          counts[s] = (counts[s] || 0) + 1;
+        });
+        var parts = [];
+        if (counts["in-progress"]) parts.push(counts["in-progress"] + " in-progress");
+        if (counts.pending) parts.push(counts.pending + " pending");
+        if (counts.completed) parts.push(counts.completed + " done");
+        if (counts.blocked) parts.push(counts.blocked + " blocked");
+        var tail = parts.length ? " \u00b7 " + parts.join(", ") : "";
+        return list.length + " todo" + (list.length === 1 ? "" : "s") + tail;
+      }
+    }
+
+    if (lname.indexOf("runsubagent") >= 0 || lname === "tool/runsubagent") {
+      var agent = parsed.subagent_type || parsed.agent || parsed.agent_name || "";
+      var promptText = parsed.prompt || parsed.description || "";
+      var quoted = promptText ? "\u201c" + trunc(promptText, 60) + "\u201d" : "";
+      if (agent && quoted) return agent + " \u00b7 " + quoted;
+      if (agent) return agent;
+      if (quoted) return quoted;
+    }
+
+    var keys = Object.keys(parsed);
+    if (keys.length > 0) {
+      var k = keys[0];
+      var v = parsed[k];
+      if (typeof v === "string") return k + ": " + trunc(v, 80);
+      if (typeof v === "number" || typeof v === "boolean") return k + ": " + v;
+      if (Array.isArray(v)) return k + ": [" + v.length + "]";
+      if (v && typeof v === "object") {
+        var sub = Object.keys(v);
+        return k + ": {" + (sub.length ? sub[0] + ", \u2026" : "") + "}";
+      }
+    }
+  }
+
+  return ev.argsSummary || "";
+}
+
 // Names of LLM calls that represent a real agent/chat turn (vs UI overhead
 // like title or promptCategorization). For these we want a richer "what
 // happened" label instead of the static friendlyCallName.
@@ -3408,7 +3499,7 @@ export default function CostView(props) {
                       );
                     }
                     return (
-                      <div style={{ color: theme.text.muted, fontSize: theme.fontSize.xs, marginTop: 3, display: "flex", gap: 10 }}>
+                      <div style={{ color: theme.text.muted, fontSize: theme.fontSize.xs, marginTop: 3, display: open ? "flex" : "none", gap: 10 }}>
                         <span>tool call</span>
                         {ev.resultTokens > 0 && <span>→ <b style={{ color: theme.text.primary }}>{fmtT(ev.resultTokens)}</b> tok of result</span>}
                       </div>
@@ -3595,12 +3686,23 @@ export default function CostView(props) {
                             )}
                             {ev.subagent
                               ? (ev.subagent.description && <span style={{ color: theme.text.secondary, fontWeight: 400, marginLeft: 4 }}>· {ev.subagent.description}</span>)
-                              : (function () {
-                                  var smart = summarizeToolArgs(ev) || ev.argsSummary;
+                              : !isLLM && (function () {
+                                  var smart = smartToolHeadline(ev);
                                   return smart
-                                    ? <span style={{ color: theme.text.muted, fontWeight: 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "60%" }} title={ev.rawArgs || smart}>{smart}</span>
+                                    ? <span style={{ color: theme.text.secondary, fontWeight: 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "60%", fontFamily: theme.font.mono }} title={ev.rawArgs || smart}>{smart}</span>
                                     : null;
                                 })()}
+                            {!isLLM && !ev.subagent && ev.resultTokens > 0 && (
+                              <span style={{
+                                fontFamily: theme.font.mono, fontSize: theme.fontSize.xs, fontWeight: 500,
+                                padding: "1px 6px", borderRadius: 3,
+                                background: theme.bg.raised, color: theme.text.primary,
+                                border: "1px solid " + theme.border.subtle,
+                                marginLeft: "auto", fontVariantNumeric: "tabular-nums",
+                              }} title="Tokens returned by this tool (becomes input on the next LLM call)">
+                                {fmtT(ev.resultTokens)} tok
+                              </span>
+                            )}
                           </div>
                           {isLLM && isFirstLlmInPrompt && p.invokedBy && (() => {
                             var parentPi = p.invokedBy.parentPromptIndex;
