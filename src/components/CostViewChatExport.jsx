@@ -275,7 +275,52 @@ function summarizeToolArgs(ev) {
 // Per-tool human summary for tool-call row headers. Picks the most useful
 // single field for known tools (file basename, query text, todo counts, etc.)
 // and falls back to the first key:value of the args for unknown tools.
-function smartToolHeadline(ev) {
+function inferWorkspaceRoot(analysis) {
+  if (!analysis || !analysis.prompts) return "";
+  var paths = [];
+  var keys = ["filePath", "path", "file", "uri", "directory", "dir", "cwd", "workspaceFolder", "rootPath"];
+  analysis.prompts.forEach(function (p) {
+    p.events.forEach(function (e) {
+      if (!e || !e.rawArgs) return;
+      var parsed;
+      try { parsed = JSON.parse(e.rawArgs); } catch (_e) { return; }
+      if (!parsed || typeof parsed !== "object") return;
+      keys.forEach(function (k) {
+        var v = parsed[k];
+        if (typeof v === "string" && v.length > 1 && (v.charAt(0) === "/" || /^[A-Za-z]:[\\/]/.test(v))) {
+          paths.push(v);
+        }
+      });
+    });
+  });
+  if (paths.length < 2) return "";
+  var split = paths.map(function (p) { return p.split(/[\\/]+/); });
+  var common = [];
+  for (var i = 0; ; i++) {
+    var seg = split[0][i];
+    if (seg === undefined) break;
+    var allMatch = split.every(function (s) { return s[i] === seg; });
+    if (!allMatch) break;
+    common.push(seg);
+  }
+  var meaningful = common.filter(function (s) { return s.length > 0; });
+  // Require at least 4 meaningful segments (e.g. /Users/<name>/Code/<repo>)
+  // before we trust the prefix as a workspace root. Below that, stripping
+  // can hide context (e.g. distinguishing /usr/local/bin from /usr/bin).
+  if (meaningful.length < 4) return "";
+  return common.join("/");
+}
+
+function stripRoot(p, root) {
+  if (!p || typeof p !== "string") return p;
+  if (!root) return p;
+  if (p === root) return ".";
+  var withSlash = root.charAt(root.length - 1) === "/" ? root : root + "/";
+  if (p.indexOf(withSlash) === 0) return p.slice(withSlash.length);
+  return p;
+}
+
+function smartToolHeadline(ev, workspaceRoot) {
   if (!ev) return "";
   var name = ev.name || "";
   var parsed = null;
@@ -306,7 +351,7 @@ function smartToolHeadline(ev) {
 
     if (lname.indexOf("list_dir") >= 0 || lname === "ls") {
       var dp = parsed.path || parsed.directory || parsed.dir || "";
-      if (dp) return dp;
+      if (dp) return stripRoot(dp, workspaceRoot);
     }
 
     if (lname.indexOf("grep") >= 0 || lname.indexOf("semantic_search") >= 0
@@ -3158,6 +3203,7 @@ export default function CostView(props) {
 
   // Pre-compute cumulative cost states (one per event in document order).
   var cumStates = useMemo(function () { return buildCumStates(analysis.prompts, showOverhead); }, [analysis, showOverhead]);
+  var workspaceRoot = useMemo(function () { return inferWorkspaceRoot(analysis); }, [analysis]);
   var maxCost = cumStates.length
     ? cumStates[cumStates.length - 1].fresh + cumStates[cumStates.length - 1].cached + cumStates[cumStates.length - 1].cwrite + cumStates[cumStates.length - 1].output
     : 0.0001;
@@ -3708,7 +3754,7 @@ export default function CostView(props) {
                             {ev.subagent
                               ? (ev.subagent.description && <span style={{ color: theme.text.secondary, fontWeight: 400, marginLeft: 4 }}>· {ev.subagent.description}</span>)
                               : !isLLM && (function () {
-                                  var smart = smartToolHeadline(ev);
+                                  var smart = smartToolHeadline(ev, workspaceRoot);
                                   return smart
                                     ? <span style={{ color: theme.text.secondary, fontWeight: 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "60%", fontFamily: theme.font.mono }} title={ev.rawArgs || smart}>{smart}</span>
                                     : null;
