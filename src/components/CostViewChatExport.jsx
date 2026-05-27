@@ -129,12 +129,13 @@ function ToolResultPreview(props) {
 function ToolArgsPreview(props) {
   var ev = props.ev;
   var blockStyle = props.blockStyle;
+  var workspaceRoot = props.workspaceRoot || "";
   if (!ev || !ev.rawArgs) {
     return ev && ev.argsSummary
       ? <div style={blockStyle}>{ev.argsSummary}</div>
       : <div style={{ color: theme.text.ghost, fontStyle: "italic", fontSize: theme.fontSize.sm }}>(no arguments)</div>;
   }
-  var smart = summarizeToolArgs(ev) || ev.argsSummary || "";
+  var smart = smartToolHeadline(ev, workspaceRoot) || summarizeToolArgs(ev) || ev.argsSummary || "";
   var pretty = ev.rawArgs;
   try { pretty = JSON.stringify(JSON.parse(ev.rawArgs), null, 2); } catch (_e) { /* leave raw */ }
   var lines = pretty.split("\n").length;
@@ -376,10 +377,20 @@ function smartToolHeadline(ev, workspaceRoot) {
       return "+" + added + " / -" + removed + " lines";
     };
 
+    // Show file paths as workspace-relative when possible, falling back to
+    // basename when the file lives outside the inferred root (so the path
+    // wouldn't strip cleanly).
+    var fileLabel = function (fp) {
+      var stripped = stripRoot(fp, workspaceRoot);
+      // stripRoot returns the same string back when no root match -- in
+      // that case use basename to avoid showing a useless absolute path.
+      return stripped === fp ? basename(fp) : stripped;
+    };
+
     if (lname.indexOf("read_file") >= 0) {
       var rfp = parsed.filePath || parsed.path || parsed.file || parsed.uri || "";
       if (rfp) {
-        var label = basename(rfp);
+        var label = fileLabel(rfp);
         var startLine = parsed.startLine || parsed.startLineNumber || parsed.start_line;
         var endLine = parsed.endLine || parsed.endLineNumber || parsed.end_line;
         if (startLine && endLine) label += " \u00b7 lines " + startLine + "-" + endLine;
@@ -392,7 +403,7 @@ function smartToolHeadline(ev, workspaceRoot) {
       if (cfp) {
         var body = parsed.content || parsed.text || parsed.code || parsed.fileContents || "";
         var size = fmtSize(body);
-        return basename(cfp) + (size ? " \u00b7 " + size : "");
+        return fileLabel(cfp) + (size ? " \u00b7 " + size : "");
       }
     }
 
@@ -402,7 +413,7 @@ function smartToolHeadline(ev, workspaceRoot) {
         var oldS = parsed.oldString || parsed.old_string || parsed.search || "";
         var newS = parsed.newString || parsed.new_string || parsed.replace || "";
         var d = diffLines(oldS, newS);
-        return basename(rsfp) + (d ? " \u00b7 " + d : "");
+        return fileLabel(rsfp) + (d ? " \u00b7 " + d : "");
       }
     }
 
@@ -411,7 +422,7 @@ function smartToolHeadline(ev, workspaceRoot) {
       if (efp) {
         var ebody = parsed.code || parsed.content || parsed.text || parsed.newString || "";
         var esize = fmtSize(ebody);
-        return basename(efp) + (esize ? " \u00b7 +" + esize : "");
+        return fileLabel(efp) + (esize ? " \u00b7 +" + esize : "");
       }
     }
 
@@ -525,8 +536,10 @@ function smartToolHeadline(ev, workspaceRoot) {
       var pk = entries[pi][0]; var pv = entries[pi][1];
       if (typeof pv === "string" && pv.length > 0 && pathLikeKey(pk)) {
         var stripped = stripRoot(pv, workspaceRoot);
-        // Prefer basename for clearly-file paths (contain a '.'), full
-        // relative for directory-shaped paths.
+        // If stripping made it relative ('./...') keep it -- shows location.
+        // If not stripped (path outside workspace), fall back to basename
+        // for clearly-file paths so we don't show useless absolute prefixes.
+        if (stripped !== pv) return trunc(stripped, 80);
         if (/\.[a-z0-9]{1,8}$/i.test(stripped)) return basename(stripped);
         return trunc(stripped, 80);
       }
@@ -2168,6 +2181,7 @@ function detectResponseShape(preview) {
 
 function ToolDetail(props) {
   var ev = props.event;
+  var workspaceRoot = props.workspaceRoot || "";
   var sectionLabelStyle = {
     fontSize: theme.fontSize.xs,
     color: theme.text.muted,
@@ -2203,7 +2217,7 @@ function ToolDetail(props) {
     });
   };
   var shape = detectResponseShape(ev.resultPreview);
-  var headerSummary = summarizeToolArgs(ev);
+  var headerSummary = smartToolHeadline(ev, workspaceRoot) || summarizeToolArgs(ev);
   return (
     <div style={{ gridColumn: "1 / -1", background: theme.bg.base, borderBottom: "1px solid " + theme.border.subtle, padding: "14px 22px" }}>
       <h4 style={{ margin: "0 0 10px", color: theme.text.primary, fontSize: theme.fontSize.base, fontWeight: 600, letterSpacing: 0.4 }}>
@@ -2252,7 +2266,7 @@ function ToolDetail(props) {
           <span>Arguments sent to <code style={{ color: theme.text.primary }}>{ev.name}</code></span>
         </div>
         {ev.rawArgs || ev.argsSummary
-          ? <ToolArgsPreview ev={ev} blockStyle={blockStyle(theme.cost.fresh)} />
+          ? <ToolArgsPreview ev={ev} blockStyle={blockStyle(theme.cost.fresh)} workspaceRoot={workspaceRoot} />
           : <div style={{ color: theme.text.ghost, fontStyle: "italic", fontSize: theme.fontSize.sm }}>(no arguments)</div>}
       </div>
 
@@ -4038,7 +4052,7 @@ export default function CostView(props) {
                           })()
                         : <span style={{ color: theme.text.ghost, fontSize: theme.fontSize.xs, fontStyle: "italic" }}>→ result lands in next LLM call</span>}
                     </div>
-                    {open && (isLLM ? <LLMDetail event={ev} /> : <ToolDetail event={ev} />)}
+                    {open && (isLLM ? <LLMDetail event={ev} /> : <ToolDetail event={ev} workspaceRoot={workspaceRoot} />)}
                   </React.Fragment>
                 );
               })}
