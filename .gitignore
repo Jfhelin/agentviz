@@ -38,3 +38,4 @@ ag.log
 ag-*.log
 ag.*.log
 *.ag.log
+agentviz-*.tgz
