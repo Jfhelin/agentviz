@@ -476,6 +476,102 @@ function smartToolHeadline(ev, workspaceRoot) {
       if (quoted) return quoted;
     }
 
+    // Generic fallback: probe args for common shapes in priority order.
+    // We try the most informative signals first so unknown tools still get
+    // a readable headline without per-tool wiring.
+    var pathLikeKey = function (k) {
+      var lk = k.toLowerCase();
+      return lk === "path" || lk === "filepath" || lk === "file_path" || lk === "file"
+        || lk === "uri" || lk === "url" || lk === "filename" || lk === "directory"
+        || lk === "dir" || lk === "cwd" || lk.indexOf("path") >= 0 || lk.indexOf("file") >= 0;
+    };
+    var queryLikeKey = function (k) {
+      var lk = k.toLowerCase();
+      return lk === "query" || lk === "q" || lk === "search" || lk === "pattern"
+        || lk === "prompt" || lk === "input" || lk === "text" || lk === "message"
+        || lk === "command" || lk === "cmd";
+    };
+    var bodyLikeKey = function (k) {
+      var lk = k.toLowerCase();
+      return lk === "content" || lk === "body" || lk === "code" || lk === "data"
+        || lk === "value" || lk === "filecontents";
+    };
+    var idLikeKey = function (k) {
+      var lk = k.toLowerCase();
+      return lk === "name" || lk === "id" || lk === "title" || lk === "key" || lk === "label";
+    };
+
+    var entries = Object.entries(parsed);
+
+    // 1. URL-like value (full http(s) URL) -- show host + path
+    for (var ui = 0; ui < entries.length; ui++) {
+      var uv = entries[ui][1];
+      if (typeof uv === "string" && /^https?:\/\//i.test(uv)) {
+        try {
+          var url = new URL(uv);
+          return url.hostname + (url.pathname && url.pathname !== "/" ? url.pathname : "");
+        } catch (_e) { return trunc(uv, 80); }
+      }
+    }
+
+    // 2. Path-like key with absolute or workspace-relative string value
+    for (var pi = 0; pi < entries.length; pi++) {
+      var pk = entries[pi][0]; var pv = entries[pi][1];
+      if (typeof pv === "string" && pv.length > 0 && pathLikeKey(pk)) {
+        var stripped = stripRoot(pv, workspaceRoot);
+        // Prefer basename for clearly-file paths (contain a '.'), full
+        // relative for directory-shaped paths.
+        if (/\.[a-z0-9]{1,8}$/i.test(stripped)) return basename(stripped);
+        return trunc(stripped, 80);
+      }
+    }
+
+    // 3. Action + name pair (manage_*, set_*, update_*, etc.)
+    var actionVal = parsed.action || parsed.command || parsed.op || parsed.operation || parsed.method;
+    var nameVal = null;
+    for (var ni = 0; ni < entries.length; ni++) {
+      var nk = entries[ni][0];
+      if (idLikeKey(nk) && typeof entries[ni][1] === "string") { nameVal = entries[ni][1]; break; }
+    }
+    if (actionVal && nameVal) return actionVal + " \u00b7 " + trunc(nameVal, 60);
+
+    // 4. Query/command-like value
+    for (var qi = 0; qi < entries.length; qi++) {
+      var qk = entries[qi][0]; var qv = entries[qi][1];
+      if (typeof qv === "string" && qv.length > 0 && queryLikeKey(qk)) {
+        return trunc(qv.replace(/\s+/g, " ").trim(), 80);
+      }
+    }
+
+    // 5. Body-like value -- show size signal instead of contents
+    for (var bi = 0; bi < entries.length; bi++) {
+      var bk = entries[bi][0]; var bv = entries[bi][1];
+      if (typeof bv === "string" && bodyLikeKey(bk) && bv.length > 0) {
+        var bChars = bv.length;
+        var bLines = bv.split("\n").length;
+        var cs = bChars >= 1000 ? (bChars / 1000).toFixed(bChars >= 10000 ? 0 : 1) + "k" : String(bChars);
+        return bk + ": " + bLines + " line" + (bLines === 1 ? "" : "s") + ", " + cs + " chars";
+      }
+    }
+
+    // 6. Array of paths/items -- show count + first
+    for (var ai = 0; ai < entries.length; ai++) {
+      var ak = entries[ai][0]; var av = entries[ai][1];
+      if (Array.isArray(av) && av.length > 0) {
+        var first = av[0];
+        if (typeof first === "string") {
+          var firstShown = pathLikeKey(ak) ? basename(stripRoot(first, workspaceRoot)) : trunc(first, 50);
+          if (av.length === 1) return firstShown;
+          return firstShown + " +" + (av.length - 1) + " more";
+        }
+        return ak + " \u00d7 " + av.length;
+      }
+    }
+
+    // 7. Last resort: a string-typed id/name even without an action
+    if (nameVal) return trunc(nameVal, 80);
+
+    // 8. Final fallback -- single key: value
     var keys = Object.keys(parsed);
     if (keys.length > 0) {
       var k = keys[0];
