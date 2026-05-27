@@ -277,6 +277,29 @@ function summarizeToolArgs(ev) {
 // happened" label instead of the static friendlyCallName.
 var AGENT_TURN_NAMES = { "panel/editAgent": true, "panel/request": true, "tool/runSubagent": true };
 
+function stripLeadingMarkdown(line) {
+  return (line || "")
+    .replace(/^#{1,6}\s+/, "")
+    .replace(/^>+\s*/, "")
+    .replace(/^[-*+]\s+/, "")
+    .replace(/^\d+\.\s+/, "")
+    .replace(/^```\w*\s*$/, "")
+    .trim();
+}
+
+function firstVisibleSnippet(text, max) {
+  if (!text) return "";
+  var limit = max || 90;
+  var lines = String(text).split("\n");
+  for (var i = 0; i < lines.length; i++) {
+    var s = stripLeadingMarkdown(lines[i]);
+    if (s.length >= 3) {
+      return s.length > limit ? s.slice(0, limit) + "\u2026" : s;
+    }
+  }
+  return "";
+}
+
 function firstLine(text) {
   if (!text) return "";
   var i = text.indexOf("\n");
@@ -3339,7 +3362,7 @@ export default function CostView(props) {
                 }
                 var meta = isLLM ? (
                   <div style={{ color: theme.text.muted, fontSize: theme.fontSize.xs, marginTop: 3, display: "flex", gap: 10, flexWrap: "wrap" }}>
-                    <span>{(ev.model || "").split("-").slice(0, 3).join("-")}</span>
+                    {open && <span>{(ev.model || "").split("-").slice(0, 3).join("-")}</span>}
                     <span style={{ color: theme.cost.cached, cursor: "help" }}
                           title="Total input sent to the LLM this call (the full prompt). = cached + billed-new.">
                       ⊞ <b style={{ color: theme.cost.cached }}>{fmtT(ev.promptTokens)}</b> ctx
@@ -3460,27 +3483,42 @@ export default function CostView(props) {
                             {(function () {
                               if (!isLLM) return <span>{ev.name}</span>;
                               var isAgentTurn = AGENT_TURN_NAMES[ev.name];
-                              var smart = isAgentTurn ? smartTurnLabel(ev) : "";
-                              if (smart) {
-                                var pos = turnIndexWithinPrompt(p.events, ev);
+                              if (!isAgentTurn) {
                                 return (
                                   <>
-                                    <span title={ev.responsePreview || ev.name}>{smart}</span>
-                                    {pos.total > 1 && (
-                                      <span style={{ color: theme.text.muted, fontWeight: 400, fontSize: theme.fontSize.xs }}>
-                                        Step {pos.index} of {pos.total}
+                                    <span title={ev.name}>{friendlyCallName(ev.name)}</span>
+                                    {open && ev.name && friendlyCallName(ev.name) !== ev.name && (
+                                      <span style={{ color: theme.text.ghost, fontWeight: 400, fontSize: theme.fontSize.xs, fontFamily: theme.font.mono }}>
+                                        {ev.name}
                                       </span>
                                     )}
-                                    <span style={{ color: theme.text.ghost, fontWeight: 400, fontSize: theme.fontSize.xs, fontFamily: theme.font.mono }}>
-                                      {ev.name}
-                                    </span>
                                   </>
                                 );
                               }
+                              var snippet = firstVisibleSnippet(ev.responsePreview, 90);
+                              var toolSummary = summarizeToolCalls(ev.producedToolCalls);
+                              var pos = turnIndexWithinPrompt(p.events, ev);
+                              var primary = snippet
+                                ? <span title={ev.responsePreview}>{"\u201c" + snippet + "\u201d"}</span>
+                                : <span style={{ color: theme.text.muted, fontStyle: "italic", fontWeight: 400 }}
+                                        title="The model emitted no visible text this turn; it spent its output tokens on the tool calls listed next.">
+                                    (no visible reply)
+                                  </span>;
                               return (
                                 <>
-                                  <span title={ev.name}>{friendlyCallName(ev.name)}</span>
-                                  {ev.name && friendlyCallName(ev.name) !== ev.name && (
+                                  {primary}
+                                  {toolSummary && (
+                                    <span style={{ color: theme.text.secondary, fontWeight: 400, fontSize: theme.fontSize.sm, fontFamily: theme.font.mono }}
+                                          title={(ev.producedToolCalls || []).map(function (c) { return c.name; }).join(", ")}>
+                                      → {toolSummary}
+                                    </span>
+                                  )}
+                                  {pos.total > 1 && (
+                                    <span style={{ color: theme.text.muted, fontWeight: 400, fontSize: theme.fontSize.xs }}>
+                                      Step {pos.index} of {pos.total}
+                                    </span>
+                                  )}
+                                  {open && (
                                     <span style={{ color: theme.text.ghost, fontWeight: 400, fontSize: theme.fontSize.xs, fontFamily: theme.font.mono }}>
                                       {ev.name}
                                     </span>
@@ -3488,7 +3526,7 @@ export default function CostView(props) {
                                 </>
                               );
                             })()}
-                            {isLLM && ev.environment && (() => {
+                            {open && isLLM && ev.environment && (() => {
                               var env = ev.environment;
                               var wsName = env.workspaceFolders[0] ? env.workspaceFolders[0].split("/").filter(Boolean).pop() : "";
                               var label = "🖥 " + (env.os || "?") + (wsName ? " · " + wsName : "");
