@@ -1797,12 +1797,21 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
       // role-3 message accumulated in this call's prompt history (i.e., the
       // results of all earlier tool calls across the entire conversation),
       // so pairing by ordinal mis-attributes large old results to fresh
-      // calls. Each role-3 message carries the originating toolCallId; each
-      // pending tool call's id is the same value (toolu_*). Match on that.
-      // Fallback to ordinal only when ids are missing on either side.
+      // calls. Match by the toolu_* id instead.
+      //
+      // Tool-call log ids in this export carry a host-side suffix
+      // ("toolu_bdrk_<id>__vscode-<n>") while role-3 message toolCallIds
+      // are the bare prefix ("toolu_bdrk_<id>"). Normalize both sides by
+      // stripping the suffix before matching.
+      const normalizeToolId = (id: string | undefined): string => {
+        if (!id) return "";
+        const i = id.indexOf("__");
+        return i >= 0 ? id.slice(0, i) : id;
+      };
       const trById = new Map<string, ClassifiedCall["toolResultMsgs"][number]>();
       for (const tr of cls.toolResultMsgs) {
-        if (tr.toolCallId) trById.set(tr.toolCallId, tr);
+        const key = normalizeToolId(tr.toolCallId);
+        if (key) trById.set(key, tr);
       }
       const unmatched: ClassifiedCall["toolResultMsgs"] = [];
       for (const tr of cls.toolResultMsgs) {
@@ -1810,7 +1819,8 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
       }
       let unmatchedIdx = 0;
       pendingToolCalls.forEach((ptc) => {
-        let tr = ptc.id ? trById.get(ptc.id) : undefined;
+        const key = normalizeToolId(ptc.id);
+        let tr = key ? trById.get(key) : undefined;
         if (!tr && unmatchedIdx < unmatched.length) {
           tr = unmatched[unmatchedIdx++];
         }
