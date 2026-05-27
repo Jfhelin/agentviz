@@ -937,6 +937,85 @@ function renderSystemAnatomy(ev) {
   );
 }
 
+function CollapsibleRow(props) {
+  var _a = React.useState(false), open = _a[0], setOpen = _a[1];
+  var stripe = props.accent || theme.border.default;
+  return (
+    <div style={{
+      borderTop: props.first ? "none" : "1px solid " + theme.border.subtle,
+      padding: "4px 0",
+    }}>
+      <div onClick={function () { setOpen(!open); }}
+           style={{
+             display: "grid", gridTemplateColumns: "14px auto 1fr", gap: 6, alignItems: "baseline",
+             cursor: "pointer", padding: "2px 0",
+           }}>
+        <span style={{
+          color: theme.text.muted, fontSize: theme.fontSize.xs, width: 12, textAlign: "center",
+          transition: "transform .12s", display: "inline-block",
+          transform: open ? "rotate(90deg)" : "none",
+        }}>▶</span>
+        {props.label}
+        <span style={{
+          fontFamily: theme.font.mono, fontSize: theme.fontSize.xs,
+          color: theme.text.secondary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+        }} title={props.previewTitle || ""}>{props.preview}</span>
+      </div>
+      {open && (
+        <div style={{
+          marginTop: 4, marginLeft: 18, padding: "8px 10px",
+          background: theme.bg.surface, border: "1px solid " + theme.border.default,
+          borderLeft: "2px solid " + stripe, borderRadius: 3,
+        }}>
+          {props.children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Group identical consecutive reasoning blocks into a single entry with a
+// repeat count. Blocks differ in `tool` association but share the same text
+// content surprisingly often (the model re-emits the same thought before
+// each parallel tool_use).
+function groupReasoningBlocks(blocks) {
+  var out = [];
+  (blocks || []).forEach(function (rb) {
+    var last = out[out.length - 1];
+    if (last && last.text === rb.text && last.tool === rb.tool) {
+      last.count += 1;
+    } else {
+      out.push({ text: rb.text, tool: rb.tool, count: 1 });
+    }
+  });
+  return out;
+}
+
+// Try to pretty-print a tool's args. Returns a string suitable for a <pre>
+// block. Multi-key objects render as 2-space-indented JSON; single-key
+// objects with a long string value render as `key:\nvalue`.
+function prettyToolArgs(tc) {
+  if (!tc) return "";
+  var raw = tc.rawArgs;
+  if (!raw || typeof raw !== "string") return tc.argsSummary || "";
+  try {
+    var parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      var keys = Object.keys(parsed);
+      if (keys.length === 1) {
+        var v = parsed[keys[0]];
+        if (typeof v === "string" && v.length > 40) {
+          return keys[0] + ":\n" + v;
+        }
+      }
+      return JSON.stringify(parsed, null, 2);
+    }
+    return JSON.stringify(parsed, null, 2);
+  } catch (_e) {
+    return raw;
+  }
+}
+
 function LLMDetail(props) {
   var ev = props.event;
 
@@ -1511,56 +1590,59 @@ function LLMDetail(props) {
                 No text reply this turn. The model used its {fmtT(ev.output)} output tokens to request {calls.length} tool execution{calls.length === 1 ? "" : "s"} from the client.
               </div>
             )}
-            {(ev.reasoningBlocks || []).length > 0 && (
-              <div style={{
-                background: theme.bg.base,
-                border: "1px solid " + theme.border.default,
-                borderLeft: "3px solid " + theme.text.muted,
-                borderRadius: 3, padding: "8px 10px", marginTop: 6,
-              }}>
-                <div
-                  title={
-                    "Extended thinking emitted by the model as part of this response, before each tool_use. " +
-                    "Billed as output tokens on this call. For Claude, thinking is discarded after the turn and is not re-sent as input on the next call."
-                  }
-                  style={{
-                    fontSize: theme.fontSize.xs, color: theme.text.muted,
-                    textTransform: "uppercase", letterSpacing: 0.5,
-                    marginBottom: 6, fontWeight: 600,
-                    display: "flex", alignItems: "center", gap: 6,
-                    cursor: "help",
-                  }}
-                >
-                  <span style={{ borderBottom: "1px dotted " + theme.border.default }}>
-                    Reasoning ({ev.reasoningBlocks.length} block{ev.reasoningBlocks.length === 1 ? "" : "s"})
-                  </span>
-                  <span style={{ color: theme.text.ghost, fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>
-                    LLM&apos;s pre-tool thoughts, billed in the {fmtT(ev.output)} output tok above
-                  </span>
-                </div>
-                {ev.reasoningBlocks.map(function (rb, i) {
-                  var preview = rb.text.length > 400 ? rb.text.slice(0, 400) + "\u2026" : rb.text;
-                  return (
-                    <div key={i} style={{ marginTop: i === 0 ? 0 : 8 }}>
-                      {rb.tool && (
+            {(ev.reasoningBlocks || []).length > 0 && (() => {
+              var grouped = groupReasoningBlocks(ev.reasoningBlocks);
+              return (
+                <div style={{
+                  background: theme.bg.base,
+                  border: "1px solid " + theme.border.default,
+                  borderLeft: "3px solid " + theme.text.muted,
+                  borderRadius: 3, padding: "8px 10px", marginTop: 6,
+                }}>
+                  <div
+                    title={
+                      "Extended thinking emitted by the model as part of this response, before each tool_use. " +
+                      "Billed as output tokens on this call. For Claude, thinking is discarded after the turn and is not re-sent as input on the next call."
+                    }
+                    style={{
+                      fontSize: theme.fontSize.xs, color: theme.text.muted,
+                      textTransform: "uppercase", letterSpacing: 0.5,
+                      marginBottom: 6, fontWeight: 600,
+                      display: "flex", alignItems: "center", gap: 6,
+                      cursor: "help",
+                    }}
+                  >
+                    <span style={{ borderBottom: "1px dotted " + theme.border.default }}>
+                      Reasoning ({ev.reasoningBlocks.length} block{ev.reasoningBlocks.length === 1 ? "" : "s"}{grouped.length !== ev.reasoningBlocks.length ? ", " + grouped.length + " unique" : ""})
+                    </span>
+                    <span style={{ color: theme.text.ghost, fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>
+                      LLM&apos;s pre-tool thoughts, billed in the {fmtT(ev.output)} output tok above
+                    </span>
+                  </div>
+                  {grouped.map(function (g, i) {
+                    var firstLine = (g.text || "").split("\n").find(function (l) { return l.trim().length > 0; }) || "";
+                    var label = (
+                      <span style={{ fontFamily: theme.font.mono, fontSize: theme.fontSize.xs, color: theme.text.muted, whiteSpace: "nowrap" }}>
+                        {g.tool ? <>before <span style={{ color: theme.text.primary, fontWeight: 600 }}>{g.tool}</span></> : "thinking"}
+                        {g.count > 1 && <span style={{ color: theme.cost.cwrite, marginLeft: 4 }}>×{g.count} identical</span>}
+                      </span>
+                    );
+                    return (
+                      <CollapsibleRow key={i} first={i === 0} accent={theme.text.muted}
+                                      label={label}
+                                      preview={firstLine}
+                                      previewTitle={g.text}>
                         <div style={{
-                          fontFamily: theme.font.mono, fontSize: theme.fontSize.xs,
-                          color: theme.text.muted, marginBottom: 3,
-                        }}>
-                          before <span style={{ color: theme.text.primary, fontWeight: 600 }}>{rb.tool}</span>
-                        </div>
-                      )}
-                      <div style={{
-                        fontFamily: theme.font.mono, fontSize: theme.fontSize.sm,
-                        color: theme.text.secondary, fontStyle: "italic",
-                        whiteSpace: "pre-wrap", wordBreak: "break-word",
-                        lineHeight: 1.5,
-                      }}>{preview}</div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+                          fontFamily: theme.font.mono, fontSize: theme.fontSize.sm,
+                          color: theme.text.secondary, fontStyle: "italic",
+                          whiteSpace: "pre-wrap", wordBreak: "break-word", lineHeight: 1.5,
+                        }}>{g.text}</div>
+                      </CollapsibleRow>
+                    );
+                  })}
+                </div>
+              );
+            })()}
             {calls.length > 0 && (
               <div style={{
                 background: theme.cost.chipBgBuiltin || theme.bg.base,
@@ -1575,25 +1657,26 @@ function LLMDetail(props) {
                   </span>
                 </div>
                 {calls.map(function (tc, i) {
+                  var smart = summarizeToolArgs(tc) || tc.argsSummary || "";
+                  var pretty = prettyToolArgs(tc);
+                  var label = (
+                    <span style={{
+                      fontFamily: theme.font.mono, fontSize: theme.fontSize.xs, fontWeight: 600,
+                      color: theme.cost.kindBuiltin,
+                      background: theme.bg.base, padding: "1px 6px", borderRadius: 3,
+                      border: "1px solid " + theme.border.subtle, whiteSpace: "nowrap",
+                    }}>{tc.name || "(unnamed tool)"}</span>
+                  );
                   return (
-                    <div key={i} style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: 8, alignItems: "baseline", padding: "3px 0" }}>
-                      <span style={{
-                        fontFamily: theme.font.mono, fontSize: theme.fontSize.xs, fontWeight: 600,
-                        color: theme.cost.kindBuiltin,
-                        background: theme.bg.base, padding: "1px 6px", borderRadius: 3,
-                        border: "1px solid " + theme.border.subtle, whiteSpace: "nowrap",
-                      }}>{tc.name || "(unnamed tool)"}</span>
-                      {(function () {
-                        var smart = summarizeToolArgs(tc) || tc.argsSummary;
-                        if (!smart) return null;
-                        return (
-                          <span style={{
-                            fontFamily: theme.font.mono, fontSize: theme.fontSize.xs,
-                            color: theme.text.secondary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                          }} title={tc.rawArgs || tc.argsSummary}>{smart}</span>
-                        );
-                      })()}
-                    </div>
+                    <CollapsibleRow key={i} first={i === 0} accent={theme.cost.kindBuiltin}
+                                    label={label} preview={smart}
+                                    previewTitle={tc.rawArgs || smart}>
+                      <pre style={{
+                        margin: 0, fontFamily: theme.font.mono, fontSize: theme.fontSize.xs,
+                        color: theme.text.primary, whiteSpace: "pre-wrap", wordBreak: "break-word",
+                        lineHeight: 1.5,
+                      }}>{pretty || "(no args)"}</pre>
+                    </CollapsibleRow>
                   );
                 })}
               </div>
