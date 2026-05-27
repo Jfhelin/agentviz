@@ -3656,14 +3656,16 @@ export default function CostView(props) {
                               );
                             })()}
                             {isLLM && ev.images && ev.images.length > 0 && (() => {
-                              var vis = ev.visionTokensTotal || 0;
                               var newN = (ev.newImages && ev.newImages.length) || 0;
+                              if (newN === 0) return null;
+                              var vis = ev.newImageVisionTokens != null
+                                ? ev.newImageVisionTokens
+                                : (ev.visionTokensTotal || 0);
                               var reusedN = ev.images.length - newN;
-                              var label = "🖼 " + ev.images.length;
+                              var label = "🖼 +" + newN;
                               if (vis > 0) label += " (~" + fmtT(vis) + " tok)";
-                              var tip = ev.images.length + " image" + (ev.images.length === 1 ? "" : "s") + " in this prompt"
-                                + (newN > 0 ? " · " + newN + " new" : "")
-                                + (reusedN > 0 ? " · " + reusedN + " cached from prior call" : "")
+                              var tip = newN + " new image" + (newN === 1 ? "" : "s") + " in this prompt"
+                                + (reusedN > 0 ? " · " + reusedN + " more cached from prior call" : "")
                                 + (vis > 0 ? "\nEstimated vision input ~" + fmtT(vis) + " tokens (from model + detail field)" : "");
                               return (
                                 <span title={tip} style={{
