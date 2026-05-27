@@ -1601,21 +1601,35 @@ function LLMDetail(props) {
               </span>
             </div>
             {hasText && (() => {
-              var firstLine = ev.responsePreview.split("\n").find(function (l) { return l.trim().length > 0; }) || "";
+              var full = ev.responsePreview;
+              var firstLine = full.split("\n").find(function (l) { return l.trim().length > 0; }) || "";
+              var hasMore = full.trim() !== firstLine.trim();
               var label = (
                 <span style={{ fontFamily: theme.font.mono, fontSize: theme.fontSize.xs, color: theme.text.muted, whiteSpace: "nowrap", display: "inline-flex", alignItems: "baseline", gap: 6 }}>
                   <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: 1, background: theme.cost.fresh, transform: "translateY(-1px)" }} />
                   <span style={{ color: theme.text.primary, fontWeight: 600 }}>visible</span>
                 </span>
               );
+              if (!hasMore) {
+                return (
+                  <div style={{ padding: "4px 0", display: "grid", gridTemplateColumns: "14px auto 1fr", gap: 6, alignItems: "baseline" }}>
+                    <span />
+                    {label}
+                    <span style={{
+                      fontFamily: theme.font.mono, fontSize: theme.fontSize.sm,
+                      color: theme.text.primary, whiteSpace: "pre-wrap", wordBreak: "break-word",
+                    }}>{firstLine}</span>
+                  </div>
+                );
+              }
               return (
                 <CollapsibleRow first accent={theme.cost.fresh}
-                                label={label} preview={firstLine} previewTitle={ev.responsePreview}>
+                                label={label} preview={firstLine} previewTitle={full}>
                   <div style={{
                     fontFamily: theme.font.mono, fontSize: theme.fontSize.sm,
                     color: theme.text.primary, whiteSpace: "pre-wrap", wordBreak: "break-word",
                     lineHeight: 1.55,
-                  }}>{ev.responsePreview}</div>
+                  }}>{full}</div>
                 </CollapsibleRow>
               );
             })()}
