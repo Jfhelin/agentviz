@@ -3245,10 +3245,17 @@ export default function CostView(props) {
                               pillLabel = "LLM (synth)";
                               pillTitle = "Synthesized LLM call. VS Code's export omitted the `request` log entry for this round-trip, so token counts and cost are unavailable. The response text was recovered from the next request's message history; producedToolCalls were dispatched by this missing call.";
                             } else if (isSubagentLlm) {
-                              pillBg = theme.cost.chipBgExtension;
-                              pillFg = theme.cost.kindExtension;
-                              pillBorder = theme.cost.kindExtension + "40";
-                              pillLabel = "Subagent LLM";
+                              if (thread && thread.slot === "sub" && tColor) {
+                                pillBg = tColor + "1f";
+                                pillFg = tColor;
+                                pillBorder = tColor + "55";
+                                pillLabel = "Sub " + thread.letter + " LLM";
+                              } else {
+                                pillBg = theme.cost.chipBgExtension;
+                                pillFg = theme.cost.kindExtension;
+                                pillBorder = theme.cost.kindExtension + "40";
+                                pillLabel = "Subagent LLM";
+                              }
                               pillTitle = "LLM call running inside a spawned subagent (surface = tool/runSubagent). It was dispatched by a runSubagent tool call on the parent thread, not by the model emitting a `runSubagent` request here.";
                             } else {
                               pillBg = theme.cost.chipBgAssistant;
