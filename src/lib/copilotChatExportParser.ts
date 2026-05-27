@@ -394,7 +394,7 @@ interface ClassifiedCall {
    * larger than the actual question they typed. */
   currentParts: CurrentPart[];
   historyMsgs: { role: "user" | "assistant"; chars: number; tokens: number; preview: string }[];
-  toolResultMsgs: { chars: number; tokens: number; preview: string; full: string; truncated: boolean; label: string }[];
+  toolResultMsgs: { chars: number; tokens: number; preview: string; full: string; truncated: boolean; label: string; toolCallId?: string }[];
   totalTools: number;
   toolGroups: { source: string; tools: { name: string; chars: number; tokens: number; description?: string; paramSummary?: string }[]; chars: number; tokens: number }[];
   /** Image attachments referenced by this call's request messages. The export
@@ -812,6 +812,7 @@ function classifyCall(log: RawLog): ClassifiedCall {
         full: text.slice(0, 8000),
         truncated: text.length > 8000,
         label,
+        toolCallId: tcId,
       });
     }
   });
@@ -1791,14 +1792,34 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
       pLlm += 1;
       totalLlm += 1;
 
-      // Pair pending tool calls with role-3 tool result messages by ordinal
-      cls.toolResultMsgs.forEach((tr, i) => {
-        if (i < pendingToolCalls.length) {
-          pendingToolCalls[i].resultChars = tr.chars;
-          pendingToolCalls[i].resultTokens = tr.tokens;
-          pendingToolCalls[i].resultPreview = tr.preview;
-          pendingToolCalls[i].resultFull = tr.full;
-          pendingToolCalls[i].resultTruncated = tr.truncated;
+      // Pair pending tool calls with role-3 tool result messages by
+      // toolCallId. The role-3 messages in cls.toolResultMsgs include EVERY
+      // role-3 message accumulated in this call's prompt history (i.e., the
+      // results of all earlier tool calls across the entire conversation),
+      // so pairing by ordinal mis-attributes large old results to fresh
+      // calls. Each role-3 message carries the originating toolCallId; each
+      // pending tool call's id is the same value (toolu_*). Match on that.
+      // Fallback to ordinal only when ids are missing on either side.
+      const trById = new Map<string, ClassifiedCall["toolResultMsgs"][number]>();
+      for (const tr of cls.toolResultMsgs) {
+        if (tr.toolCallId) trById.set(tr.toolCallId, tr);
+      }
+      const unmatched: ClassifiedCall["toolResultMsgs"] = [];
+      for (const tr of cls.toolResultMsgs) {
+        if (!tr.toolCallId) unmatched.push(tr);
+      }
+      let unmatchedIdx = 0;
+      pendingToolCalls.forEach((ptc) => {
+        let tr = ptc.id ? trById.get(ptc.id) : undefined;
+        if (!tr && unmatchedIdx < unmatched.length) {
+          tr = unmatched[unmatchedIdx++];
+        }
+        if (tr) {
+          ptc.resultChars = tr.chars;
+          ptc.resultTokens = tr.tokens;
+          ptc.resultPreview = tr.preview;
+          ptc.resultFull = tr.full;
+          ptc.resultTruncated = tr.truncated;
         }
       });
       pendingToolCalls.length = 0;
