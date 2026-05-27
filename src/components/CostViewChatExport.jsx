@@ -3720,8 +3720,11 @@ export default function CostView(props) {
                                     fontFamily: theme.font.mono, fontSize: theme.fontSize.xs,
                                     color: theme.text.muted, marginLeft: "auto",
                                     fontVariantNumeric: "tabular-nums",
-                                  }} title={ev.resultChars.toLocaleString() + " chars of tool output, added to the next LLM call's input"}>
-                                    {ev.resultChars.toLocaleString()} chars → next call
+                                    display: "inline-flex", alignItems: "baseline", gap: 4,
+                                  }} title={ev.resultChars.toLocaleString() + " chars of tool output. On the next LLM call these are sent as a role:'tool' message and counted under the Tool results bucket (distinct from History, which is prior user/assistant turns)."}>
+                                    {ev.resultChars.toLocaleString()} chars →
+                                    <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: 1, background: CTX_COLORS.tool_results, transform: "translateY(-1px)" }} />
+                                    <span style={{ color: theme.text.secondary }}>Tool results</span>
                                   </span>
                                 )}
                                 <span style={{
@@ -3731,7 +3734,7 @@ export default function CostView(props) {
                                   border: "1px solid " + theme.border.subtle,
                                   marginLeft: ev.resultChars > 0 ? 0 : "auto",
                                   fontVariantNumeric: "tabular-nums",
-                                }} title={"~" + fmtT(ev.resultTokens) + " tok of tool output, billed on the next LLM call's input"}>
+                                }} title={"~" + fmtT(ev.resultTokens) + " tok of tool output, billed on the next LLM call's input (Tool results bucket)"}>
                                   {fmtT(ev.resultTokens)} tok
                                 </span>
                               </>
