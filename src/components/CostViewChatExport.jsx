@@ -1600,20 +1600,25 @@ function LLMDetail(props) {
                 })()}
               </span>
             </div>
-            {hasText && (
-              <div style={{
-                background: theme.bg.base,
-                border: "1px solid " + theme.border.subtle,
-                borderRadius: 3,
-                padding: "8px 10px",
-                color: theme.text.primary,
-                fontSize: theme.fontSize.sm,
-                lineHeight: 1.55,
-                whiteSpace: "pre-wrap",
-                wordBreak: "break-word",
-                fontFamily: theme.font.mono,
-              }}>{ev.responsePreview}</div>
-            )}
+            {hasText && (() => {
+              var firstLine = ev.responsePreview.split("\n").find(function (l) { return l.trim().length > 0; }) || "";
+              var label = (
+                <span style={{ fontFamily: theme.font.mono, fontSize: theme.fontSize.xs, color: theme.text.muted, whiteSpace: "nowrap", display: "inline-flex", alignItems: "baseline", gap: 6 }}>
+                  <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: 1, background: theme.cost.fresh, transform: "translateY(-1px)" }} />
+                  <span style={{ color: theme.text.primary, fontWeight: 600 }}>visible</span>
+                </span>
+              );
+              return (
+                <CollapsibleRow first accent={theme.cost.fresh}
+                                label={label} preview={firstLine} previewTitle={ev.responsePreview}>
+                  <div style={{
+                    fontFamily: theme.font.mono, fontSize: theme.fontSize.sm,
+                    color: theme.text.primary, whiteSpace: "pre-wrap", wordBreak: "break-word",
+                    lineHeight: 1.55,
+                  }}>{ev.responsePreview}</div>
+                </CollapsibleRow>
+              );
+            })()}
             {!hasText && calls.length === 0 && silent && (
               <div style={{
                 background: theme.bg.base, border: "1px dashed " + theme.border.default,
