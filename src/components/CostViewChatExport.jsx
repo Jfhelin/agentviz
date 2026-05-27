@@ -698,7 +698,7 @@ function DetailSection(props) {
           {CTX_LABELS[props.bucket]}
         </span>
         <span style={{ color: theme.text.secondary, fontVariantNumeric: "tabular-nums" }}>
-          {props.valuePrefix || ""}{fmtT(props.value)} tok{props.pctLabel ? " · " + props.pct.toFixed(1) + "% " + props.pctLabel : ""}
+          {props.valuePrefix || ""}{fmtT(props.value)} tok{props.pctLabel === "cached" ? " · cached" : props.pctLabel ? " · " + props.pct.toFixed(1) + "% " + props.pctLabel : ""}
         </span>
       </div>
       {props.children}
@@ -1347,9 +1347,16 @@ function LLMDetail(props) {
       <NewBlock newPerBucket={ev.newPerBucket} newTotal={ev.newTotal} totalIn={ev.promptTokens} label="this call" />
       {(function () {
         var npb = ev.newPerBucket || {};
+        var comps = ev.components || {};
         var newSum = CTX_INPUT_KEYS.reduce(function (a, k) { return a + (npb[k] || 0); }, 0) || 1;
         var newPct = function (k) { return 100 * (npb[k] || 0) / newSum; };
-        var visible = CTX_INPUT_KEYS.filter(function (k) { return (npb[k] || 0) > 0; });
+        // Show any bucket that has either new tokens this call OR cached
+        // content carried over from earlier calls. This way subagent tool
+        // results stay drillable on subsequent steps even though they're
+        // 100% cache hits.
+        var visible = CTX_INPUT_KEYS.filter(function (k) {
+          return (npb[k] || 0) > 0 || (comps[k] || 0) > 0;
+        });
         if (visible.length === 0) {
           return (
             <div style={{ fontSize: theme.fontSize.sm, color: theme.text.muted, fontStyle: "italic", padding: "8px 0" }}>
@@ -1357,6 +1364,7 @@ function LLMDetail(props) {
             </div>
           );
         }
+        var newBucketCount = visible.filter(function (k) { return (npb[k] || 0) > 0; }).length;
         var bodyForBucket = function (k) {
           if (k === "system") return renderSystemAnatomy(ev);
           if (k === "tool_defs") {
@@ -1443,12 +1451,17 @@ function LLMDetail(props) {
         return (
           <>
             <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, textTransform: "uppercase", letterSpacing: 0.5, margin: "4px 0 8px", fontWeight: 600 }}>
-              What's new in this call ({fmtT(ev.newTotal)} tok across {visible.length} bucket{visible.length === 1 ? "" : "s"})
+              Context buildup ({fmtT(ev.newTotal)} new tok across {newBucketCount} bucket{newBucketCount === 1 ? "" : "s"}, {visible.length - newBucketCount} more cached)
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
               {visible.map(function (k) {
-                return (
+                var isNew = (npb[k] || 0) > 0;
+                return isNew ? (
                   <DetailSection key={k} bucket={k} value={npb[k]} pct={newPct(k)} pctLabel="of new" valuePrefix="+">
+                    {bodyForBucket(k)}
+                  </DetailSection>
+                ) : (
+                  <DetailSection key={k} bucket={k} value={comps[k]} pct={0} pctLabel="cached" valuePrefix="">
                     {bodyForBucket(k)}
                   </DetailSection>
                 );
