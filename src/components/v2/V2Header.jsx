@@ -108,7 +108,7 @@ export default function V2Header({ session, activeZone, currentThemeMode, onSetT
                 flexShrink: 0,
               }}
             >
-              path
+              Path
             </button>
           )}
           <span aria-label={"Session status: " + status.label} style={{

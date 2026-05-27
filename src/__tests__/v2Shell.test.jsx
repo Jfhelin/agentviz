@@ -610,7 +610,7 @@ describe("V2 shell routing", function () {
     expect(findExactText(app.container, "Fix authentication flow")).toBeFalsy();
 
     await act(async function () {
-      findExactButton(app.container, "clear tags").click();
+      findExactButton(app.container, "Clear tags").click();
     });
 
     var checkboxes = app.container.querySelectorAll('input[type="checkbox"]');
@@ -1066,7 +1066,6 @@ describe("V2 shell routing", function () {
   });
 
   it("builds and renders live session metrics", async function () {
-    var onReview = vi.fn();
     var stats = buildLiveSessionStats(makeLiveSession());
     expect(stats.events).toBe(3);
     expect(stats.turns).toBe(2);
@@ -1076,18 +1075,12 @@ describe("V2 shell routing", function () {
       <LiveSessionBanner
         session={makeLiveSession()}
         completed={false}
-        onReview={onReview}
       />,
     );
 
     expect(findExactText(app.container, "Live session streaming")).toBeTruthy();
     expect(app.container.textContent).toContain("Compare and Improve stay locked while events are still arriving.");
-    expect(findExactText(app.container, "Go to Review")).toBeTruthy();
-
-    await act(async function () {
-      findExactButton(app.container, "Go to Review").click();
-    });
-    expect(onReview).toHaveBeenCalledTimes(1);
+    expect(findExactText(app.container, "Go to Review")).toBeFalsy();
 
     await app.unmount();
   });

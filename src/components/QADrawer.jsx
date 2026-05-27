@@ -436,7 +436,7 @@ export default function QADrawer({ open, onClose, onDisable, sessionData, onSeek
                   minHeight: 24,
                 }}
               >
-                clear
+                Clear
               </button>
             )}
             <button
