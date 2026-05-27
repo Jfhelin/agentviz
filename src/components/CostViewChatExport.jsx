@@ -710,9 +710,11 @@ function renderSystemAnatomy(ev) {
   var scaff = ev.scaffoldingSections || [];
   var fileAtts = ev.fileAttachments || [];
   var instAtts = ev.instructionAttachments || [];
+  var subAgents = ev.subAgents || [];
+  var toolPrefixInst = ev.toolPrefixInstructions || [];
   var sysTok = (ev.components && ev.components.system) || 0;
   var sysChars = ev.systemChars || 0;
-  if (skills.length === 0 && scaff.length === 0 && fileAtts.length === 0 && !ev.chatMode && instAtts.length === 0) {
+  if (skills.length === 0 && scaff.length === 0 && fileAtts.length === 0 && !ev.chatMode && instAtts.length === 0 && subAgents.length === 0 && toolPrefixInst.length === 0) {
     if (!ev.systemPreview) return null;
     return <div style={textBlockStyle()}>{ev.systemPreview}{ev.systemPreview.length >= 300 ? "…" : ""}</div>;
   }
@@ -724,7 +726,9 @@ function renderSystemAnatomy(ev) {
   var modeChars = (ev.chatMode && ev.chatMode.body) ? ev.chatMode.body.length : 0;
   var instAttsChars = instAtts.reduce(function (a, x) { return a + x.chars; }, 0);
   var fileAttsChars = fileAtts.reduce(function (a, x) { return a + x.chars; }, 0);
-  var classifiedChars = skillsChars + scaffChars + modeChars + instAttsChars + fileAttsChars;
+  var subAgentsChars = subAgents.reduce(function (a, x) { return a + x.chars; }, 0);
+  var toolPrefixChars = toolPrefixInst.reduce(function (a, x) { return a + x.chars; }, 0);
+  var classifiedChars = skillsChars + scaffChars + modeChars + instAttsChars + fileAttsChars + subAgentsChars + toolPrefixChars;
   var otherChars = Math.max(0, sysChars - classifiedChars);
   var pctOf = function (chars) {
     return sysChars > 0 ? (100 * chars / sysChars).toFixed(1) + "%" : "—";
@@ -769,6 +773,51 @@ function renderSystemAnatomy(ev) {
             );
           })}
           <div style={{ marginTop: 6, color: theme.text.muted, fontStyle: "italic", fontFamily: theme.font.sans }}>Hover any skill for file path and full description.</div>
+        </div>
+      ) : null,
+    },
+    {
+      key: "subagents",
+      label: "Sub-agents (" + subAgents.length + ")",
+      chars: subAgentsChars,
+      color: theme.accent.primary,
+      body: subAgents.length > 0 ? (
+        <div style={{ marginTop: 6, fontFamily: theme.font.mono, fontSize: theme.fontSize.xs }}>
+          {subAgents.map(function (a, i) {
+            var tip = a.name +
+              (a.argumentHint ? "\n\nArguments: " + a.argumentHint : "") +
+              "\n~" + fmtT(charsToScaledTok(a.chars)) + " tok · " + a.chars.toLocaleString() + " chars" +
+              (a.description ? "\n\n" + a.description : "");
+            return (
+              <div key={i} style={{ display: "flex", gap: 8, padding: "2px 0", cursor: "help" }} title={tip}>
+                <span style={{ color: theme.accent.primary, fontWeight: 600 }}>{a.name || "(unnamed)"}</span>
+                <span style={{ color: theme.text.muted, marginLeft: "auto", fontVariantNumeric: "tabular-nums" }}>{a.chars.toLocaleString()} ch · ~{fmtT(charsToScaledTok(a.chars))} tok</span>
+              </div>
+            );
+          })}
+          <div style={{ marginTop: 6, color: theme.text.muted, fontStyle: "italic", fontFamily: theme.font.sans }}>Sub-agents the model can launch via the <code>runSubagent</code> tool. Hover for full description.</div>
+        </div>
+      ) : null,
+    },
+    {
+      key: "toolprefix",
+      label: "MCP / tool-prefix instructions (" + toolPrefixInst.length + ")",
+      chars: toolPrefixChars,
+      color: theme.cost.kindMcp,
+      body: toolPrefixInst.length > 0 ? (
+        <div style={{ marginTop: 6, fontFamily: theme.font.mono, fontSize: theme.fontSize.xs }}>
+          {toolPrefixInst.map(function (x, i) {
+            var tip = "<instruction forToolsWithPrefix=\"" + x.prefix + "\">" +
+              "\n~" + fmtT(charsToScaledTok(x.chars)) + " tok · " + x.chars.toLocaleString() + " chars" +
+              "\n\n" + x.body;
+            return (
+              <div key={i} style={{ display: "flex", gap: 8, padding: "2px 0", cursor: "help" }} title={tip}>
+                <span style={{ color: theme.cost.kindMcp, fontWeight: 600 }}>{x.prefix}</span>
+                <span style={{ color: theme.text.muted, marginLeft: "auto", fontVariantNumeric: "tabular-nums" }}>{x.chars.toLocaleString()} ch · ~{fmtT(charsToScaledTok(x.chars))} tok</span>
+              </div>
+            );
+          })}
+          <div style={{ marginTop: 6, color: theme.text.muted, fontStyle: "italic", fontFamily: theme.font.sans }}>Per-tool-prefix instructions injected into the system prompt (typically by MCP servers). Hidden from the MCP server list but billed every call. Hover to see the body.</div>
         </div>
       ) : null,
     },

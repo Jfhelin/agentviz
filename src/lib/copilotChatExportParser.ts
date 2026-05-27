@@ -334,6 +334,29 @@ interface InstructionAttachment {
   chars: number;
 }
 
+/** Sub-agent declared in the system prompt's `<agents>` block. Each entry tells
+ * the main model which `agentName` it can pass to the `runSubagent` tool. */
+interface SubAgent {
+  name: string;
+  description: string;
+  argumentHint: string;
+  /** Length of the entire `<agent>...</agent>` block in chars. */
+  chars: number;
+}
+
+/** Per-tool-prefix instruction injected by an MCP server (or other extension).
+ * Surfaced as `<instruction forToolsWithPrefix="mcp_azure">...</instruction>`
+ * in the system prompt. Each one costs prompt tokens on every call but is
+ * invisible to users in the MCP server list. */
+interface ToolPrefixInstruction {
+  /** The `forToolsWithPrefix` attribute value (e.g. `mcp_azure`). */
+  prefix: string;
+  /** Length of the inner body in chars. */
+  chars: number;
+  /** Inner body, truncated to ~1500 chars for hover preview. */
+  body: string;
+}
+
 export interface CurrentPart {
   /** Either a tag name like `userRequest` / `attachments` / `editorContext`,
    * or the literal `(plaintext)` for text outside any tag. */
@@ -403,6 +426,13 @@ interface ClassifiedCall {
    * prompt (e.g. user `#file:foo.ts` references). Instruction files are
    * tracked separately in `instructionAttachments`. */
   fileAttachments: FileAttachment[];
+  /** Sub-agents declared in the system prompt's `<agents>` block. Empty when
+   * the host doesn't expose `runSubagent` or no agents are configured. */
+  subAgents: SubAgent[];
+  /** Per-tool-prefix instructions injected into the system prompt
+   * (`<instruction forToolsWithPrefix="...">...`). Typically from MCP
+   * servers; each one costs prompt tokens on every call. */
+  toolPrefixInstructions: ToolPrefixInstruction[];
   /** Environment + workspace context extracted from the user-role
    * `<environment_info>` / `<workspace_info>` blocks. Null when neither tag
    * is present. */
@@ -502,6 +532,43 @@ function extractSkills(systemText: string): Skill[] {
     const description = (/<description>([\s\S]*?)<\/description>/i.exec(body)?.[1] ?? "").trim();
     const file = (/<file>([\s\S]*?)<\/file>/i.exec(body)?.[1] ?? "").trim();
     out.push({ name, description, file, chars: m[0].length });
+  }
+  return out;
+}
+
+// Extract sub-agents declared in `<agents>...<agent>...</agent>...</agents>`.
+// The host (VS Code Copilot) injects this block when `runSubagent` is in the
+// tool list so the model knows what `agentName` values are valid.
+function extractSubAgents(systemText: string): SubAgent[] {
+  const out: SubAgent[] = [];
+  const wrap = /<agents>([\s\S]*?)<\/agents>/i.exec(systemText);
+  if (!wrap) return out;
+  const inner = wrap[1];
+  const re = /<agent>([\s\S]*?)<\/agent>/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(inner)) !== null) {
+    const body = m[1];
+    const name = (/<name>([\s\S]*?)<\/name>/i.exec(body)?.[1] ?? "").trim();
+    const description = (/<description>([\s\S]*?)<\/description>/i.exec(body)?.[1] ?? "").trim();
+    const argumentHint = (/<argumentHint>([\s\S]*?)<\/argumentHint>/i.exec(body)?.[1] ?? "").trim();
+    out.push({ name, description, argumentHint, chars: m[0].length });
+  }
+  return out;
+}
+
+// Extract `<instruction forToolsWithPrefix="X">...</instruction>` blocks.
+// MCP servers (and other Copilot extensions) inject these to teach the model
+// how to use their tools. They're invisible in the MCP server list but cost
+// prompt tokens on every call.
+function extractToolPrefixInstructions(systemText: string): ToolPrefixInstruction[] {
+  const out: ToolPrefixInstruction[] = [];
+  const MAX_BODY = 1500;
+  const re = /<instruction\s+forToolsWithPrefix="([^"]+)">([\s\S]*?)<\/instruction>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(systemText)) !== null) {
+    const inner = m[2];
+    const body = inner.length > MAX_BODY ? inner.slice(0, MAX_BODY).trim() + "\n…[truncated]" : inner.trim();
+    out.push({ prefix: m[1], chars: inner.length, body });
   }
   return out;
 }
@@ -840,6 +907,8 @@ function classifyCall(log: RawLog): ClassifiedCall {
   const scaffoldingSections = extractScaffolding(systemText);
   const systemBlocks = extractSystemBlocks(systemText);
   const fileAttachments = extractFileAttachments(systemText);
+  const subAgents = extractSubAgents(systemText);
+  const toolPrefixInstructions = extractToolPrefixInstructions(systemText);
   const environment = extractEnvironment(messages);
 
   return {
@@ -871,6 +940,8 @@ function classifyCall(log: RawLog): ClassifiedCall {
     scaffoldingSections,
     systemBlocks,
     fileAttachments,
+    subAgents,
+    toolPrefixInstructions,
     environment,
   };
 }
@@ -1022,6 +1093,11 @@ export interface CostAnalysisCall {
   /** Non-instruction file attachments referenced in the system prompt
    * (e.g. user `#file:foo.ts` references). */
   fileAttachments: ClassifiedCall["fileAttachments"];
+  /** Sub-agents declared in the system prompt's `<agents>` block. */
+  subAgents: ClassifiedCall["subAgents"];
+  /** Per-tool-prefix instructions (e.g. MCP-injected `<instruction
+   * forToolsWithPrefix="mcp_azure">...`). */
+  toolPrefixInstructions: ClassifiedCall["toolPrefixInstructions"];
   /** Environment + workspace context from `<environment_info>` / `<workspace_info>`. */
   environment: ClassifiedCall["environment"];
   /** Subset of `images` that were NOT present on the previous same-model call.
@@ -1781,6 +1857,8 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
         scaffoldingSections: cls.scaffoldingSections,
         systemBlocks: cls.systemBlocks,
         fileAttachments: cls.fileAttachments,
+        subAgents: cls.subAgents,
+        toolPrefixInstructions: cls.toolPrefixInstructions,
         environment: cls.environment,
         newImages,
         newHistoryMsgs,
