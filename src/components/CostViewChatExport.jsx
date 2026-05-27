@@ -3714,20 +3714,27 @@ export default function CostView(props) {
                                     : null;
                                 })()}
                             {!isLLM && !ev.subagent && ev.resultTokens > 0 && (
-                              <span style={{
-                                fontFamily: theme.font.mono, fontSize: theme.fontSize.xs, fontWeight: 500,
-                                padding: "1px 6px", borderRadius: 3,
-                                background: theme.bg.raised, color: theme.text.primary,
-                                border: "1px solid " + theme.border.subtle,
-                                marginLeft: "auto", fontVariantNumeric: "tabular-nums",
-                              }} title={"Tool returned " + (ev.resultChars > 0 ? ev.resultChars.toLocaleString() + " chars (~" : "~") + fmtT(ev.resultTokens) + " tok). This becomes input on the next LLM call."}>
-                                {fmtT(ev.resultTokens)} tok
+                              <>
                                 {ev.resultChars > 0 && (
-                                  <span style={{ color: theme.text.muted, fontWeight: 400, marginLeft: 6 }}>
-                                    · {ev.resultChars.toLocaleString()} chars → next call
+                                  <span style={{
+                                    fontFamily: theme.font.mono, fontSize: theme.fontSize.xs,
+                                    color: theme.text.muted, marginLeft: "auto",
+                                    fontVariantNumeric: "tabular-nums",
+                                  }} title={ev.resultChars.toLocaleString() + " chars of tool output, added to the next LLM call's input"}>
+                                    {ev.resultChars.toLocaleString()} chars → next call
                                   </span>
                                 )}
-                              </span>
+                                <span style={{
+                                  fontFamily: theme.font.mono, fontSize: theme.fontSize.xs, fontWeight: 500,
+                                  padding: "1px 6px", borderRadius: 3,
+                                  background: theme.bg.raised, color: theme.text.primary,
+                                  border: "1px solid " + theme.border.subtle,
+                                  marginLeft: ev.resultChars > 0 ? 0 : "auto",
+                                  fontVariantNumeric: "tabular-nums",
+                                }} title={"~" + fmtT(ev.resultTokens) + " tok of tool output, billed on the next LLM call's input"}>
+                                  {fmtT(ev.resultTokens)} tok
+                                </span>
+                              </>
                             )}
                           </div>
                           {isLLM && isFirstLlmInPrompt && p.invokedBy && (() => {
