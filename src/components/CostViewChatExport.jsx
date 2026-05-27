@@ -3720,8 +3720,13 @@ export default function CostView(props) {
                                 background: theme.bg.raised, color: theme.text.primary,
                                 border: "1px solid " + theme.border.subtle,
                                 marginLeft: "auto", fontVariantNumeric: "tabular-nums",
-                              }} title="Tokens returned by this tool (becomes input on the next LLM call)">
+                              }} title={"Tool returned " + (ev.resultChars > 0 ? ev.resultChars.toLocaleString() + " chars (~" : "~") + fmtT(ev.resultTokens) + " tok). This becomes input on the next LLM call."}>
                                 {fmtT(ev.resultTokens)} tok
+                                {ev.resultChars > 0 && (
+                                  <span style={{ color: theme.text.muted, fontWeight: 400, marginLeft: 6 }}>
+                                    · {ev.resultChars.toLocaleString()} chars → next call
+                                  </span>
+                                )}
                               </span>
                             )}
                           </div>
