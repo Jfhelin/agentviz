@@ -747,37 +747,62 @@ function ToolGroups(props) {
   );
 }
 
+function CachedRowsHeader(props) {
+  return (
+    <button onClick={props.onClick} style={{
+      display: "flex", alignItems: "center", gap: 6, width: "100%",
+      background: "transparent", border: "none", padding: "4px 0",
+      borderBottom: "1px dashed " + theme.border.subtle,
+      fontFamily: theme.font.mono, fontSize: theme.fontSize.xs,
+      color: theme.text.muted, cursor: "pointer", textAlign: "left",
+      marginBottom: props.open ? 4 : 0,
+    }} title={props.open ? "Hide cached entries" : "Show cached entries (reused from prior calls, not billed this call)"}>
+      <span style={{ display: "inline-block", width: 10, color: theme.text.dim }}>{props.open ? "\u25bc" : "\u25b6"}</span>
+      <span>{props.count} cached {props.noun}{props.count === 1 ? "" : "s"} {props.open ? "(hide)" : "(show)"}</span>
+      <span style={{ marginLeft: "auto", color: theme.text.dim }}>reused from prior calls</span>
+    </button>
+  );
+}
+
 function HistoryList(props) {
   var msgs = props.msgs || [];
   var newCount = typeof props.newCount === "number" ? props.newCount : msgs.length;
   if (!msgs.length) return <div style={{ color: theme.text.ghost, fontSize: theme.fontSize.xs, fontStyle: "italic" }}>no prior conversation</div>;
   var cachedCount = msgs.length - newCount;
+  var [showCached, setShowCached] = React.useState(false);
+  var renderRow = function (m, i) {
+    var isCached = i < cachedCount;
+    var raw = (m.preview || "").replace(/\s+/g, " ").trim();
+    var summary = raw.length > 90 ? raw.slice(0, 90) + "\u2026" : raw;
+    var tip = (m.role || "?") + " \u00b7 " + (m.chars || 0).toLocaleString() + " chars \u00b7 ~" + fmtT(m.tokens || 0) + " tok"
+      + (isCached ? " \u00b7 cached from prior call" : " \u00b7 new this call")
+      + (m.preview ? "\n\n" + m.preview : "");
+    var rowOpacity = isCached ? 0.55 : 1;
+    return (
+      <div key={i}
+        title={tip}
+        style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 8, fontSize: theme.fontSize.sm, padding: "3px 0", alignItems: "baseline", borderTop: i === 0 ? "none" : "1px solid " + theme.border.subtle, opacity: rowOpacity, cursor: m.preview ? "help" : "default" }}>
+        <span style={{
+          fontSize: theme.fontSize.xs, padding: "1px 5px", borderRadius: 9, fontWeight: 600, letterSpacing: 0.4,
+          background: m.role === "user" ? theme.cost.chipBgExtension : theme.cost.chipBgAssistant,
+          color: m.role === "user" ? theme.cost.cwrite : theme.cost.fresh,
+        }}>{m.role}</span>
+        <span style={{ color: isCached ? theme.text.muted : theme.text.secondary, fontStyle: "italic", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{summary}</span>
+        <span style={{ color: isCached ? theme.text.muted : theme.text.primary, fontVariantNumeric: "tabular-nums", textAlign: "right" }}>{fmtT(m.tokens || 0)}</span>
+      </div>
+    );
+  };
+  var cachedMsgs = msgs.slice(0, cachedCount);
+  var newMsgs = msgs.slice(cachedCount);
   return (
     <div>
-      {msgs.map(function (m, i) {
-        var isCached = i < cachedCount;
-        // Compact single-line summary: first non-empty line of the preview,
-        // hard-capped so the row never wraps. Full text available on hover.
-        var raw = (m.preview || "").replace(/\s+/g, " ").trim();
-        var summary = raw.length > 90 ? raw.slice(0, 90) + "…" : raw;
-        var tip = (m.role || "?") + " · " + (m.chars || 0).toLocaleString() + " chars · ~" + fmtT(m.tokens || 0) + " tok"
-          + (isCached ? " · cached from prior call" : " · new this call")
-          + (m.preview ? "\n\n" + m.preview : "");
-        var rowOpacity = isCached ? 0.55 : 1;
-        return (
-          <div key={i}
-            title={tip}
-            style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 8, fontSize: theme.fontSize.sm, padding: "3px 0", alignItems: "baseline", borderTop: i === 0 ? "none" : "1px solid " + theme.border.subtle, opacity: rowOpacity, cursor: m.preview ? "help" : "default" }}>
-            <span style={{
-              fontSize: theme.fontSize.xs, padding: "1px 5px", borderRadius: 9, fontWeight: 600, letterSpacing: 0.4,
-              background: m.role === "user" ? theme.cost.chipBgExtension : theme.cost.chipBgAssistant,
-              color: m.role === "user" ? theme.cost.cwrite : theme.cost.fresh,
-            }}>{m.role}</span>
-            <span style={{ color: isCached ? theme.text.muted : theme.text.secondary, fontStyle: "italic", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{summary}</span>
-            <span style={{ color: isCached ? theme.text.muted : theme.text.primary, fontVariantNumeric: "tabular-nums", textAlign: "right" }}>{fmtT(m.tokens || 0)}</span>
-          </div>
-        );
-      })}
+      {cachedCount > 0 && (
+        <>
+          <CachedRowsHeader count={cachedCount} noun="message" open={showCached} onClick={function () { setShowCached(!showCached); }} />
+          {showCached && cachedMsgs.map(function (m, i) { return renderRow(m, i); })}
+        </>
+      )}
+      {newMsgs.map(function (m, i) { return renderRow(m, cachedCount + i); })}
     </div>
   );
 }
@@ -787,29 +812,39 @@ function ToolResultList(props) {
   var newCount = typeof props.newCount === "number" ? props.newCount : msgs.length;
   if (!msgs.length) return <div style={{ color: theme.text.ghost, fontSize: theme.fontSize.xs, fontStyle: "italic" }}>none in this call</div>;
   var cachedCount = msgs.length - newCount;
+  var [showCached, setShowCached] = React.useState(false);
+  var renderRow = function (m, i) {
+    var label = m.label || ("result " + (i + 1));
+    var isCached = i < cachedCount;
+    var raw = (m.preview || "").replace(/\s+/g, " ").trim();
+    var summary = raw.length > 90 ? raw.slice(0, 90) + "\u2026" : raw;
+    var tip = label + " \u00b7 " + (m.chars || 0).toLocaleString() + " chars \u00b7 ~" + fmtT(m.tokens || 0) + " tok"
+      + (isCached ? " \u00b7 cached from prior call" : " \u00b7 new this call")
+      + (m.preview ? "\n\n" + m.preview : "");
+    var rowOpacity = isCached ? 0.55 : 1;
+    return (
+      <div key={i}
+        title={tip}
+        style={{ display: "grid", gridTemplateColumns: "minmax(0, auto) 1fr auto", gap: 8, fontSize: theme.fontSize.sm, padding: "3px 0", alignItems: "baseline", borderTop: i === 0 ? "none" : "1px solid " + theme.border.subtle, opacity: rowOpacity, cursor: m.preview ? "help" : "default" }}>
+        <span
+          style={{ fontSize: theme.fontSize.xs, padding: "1px 6px", borderRadius: 9, fontWeight: 600, letterSpacing: 0.2, background: theme.cost.chipBgResult, color: theme.cost.ctxToolResults, maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+        >{label}</span>
+        <span style={{ color: isCached ? theme.text.muted : theme.text.secondary, fontStyle: "italic", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{summary}</span>
+        <span style={{ color: isCached ? theme.text.muted : theme.text.primary, fontVariantNumeric: "tabular-nums", textAlign: "right" }}>{fmtT(m.tokens || 0)}</span>
+      </div>
+    );
+  };
+  var cachedMsgs = msgs.slice(0, cachedCount);
+  var newMsgs = msgs.slice(cachedCount);
   return (
     <div>
-      {msgs.map(function (m, i) {
-        var label = m.label || ("result " + (i + 1));
-        var isCached = i < cachedCount;
-        var raw = (m.preview || "").replace(/\s+/g, " ").trim();
-        var summary = raw.length > 90 ? raw.slice(0, 90) + "…" : raw;
-        var tip = label + " · " + (m.chars || 0).toLocaleString() + " chars · ~" + fmtT(m.tokens || 0) + " tok"
-          + (isCached ? " · cached from prior call" : " · new this call")
-          + (m.preview ? "\n\n" + m.preview : "");
-        var rowOpacity = isCached ? 0.55 : 1;
-        return (
-          <div key={i}
-            title={tip}
-            style={{ display: "grid", gridTemplateColumns: "minmax(0, auto) 1fr auto", gap: 8, fontSize: theme.fontSize.sm, padding: "3px 0", alignItems: "baseline", borderTop: i === 0 ? "none" : "1px solid " + theme.border.subtle, opacity: rowOpacity, cursor: m.preview ? "help" : "default" }}>
-            <span
-              style={{ fontSize: theme.fontSize.xs, padding: "1px 6px", borderRadius: 9, fontWeight: 600, letterSpacing: 0.2, background: theme.cost.chipBgResult, color: theme.cost.ctxToolResults, maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-            >{label}</span>
-            <span style={{ color: isCached ? theme.text.muted : theme.text.secondary, fontStyle: "italic", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{summary}</span>
-            <span style={{ color: isCached ? theme.text.muted : theme.text.primary, fontVariantNumeric: "tabular-nums", textAlign: "right" }}>{fmtT(m.tokens || 0)}</span>
-          </div>
-        );
-      })}
+      {cachedCount > 0 && (
+        <>
+          <CachedRowsHeader count={cachedCount} noun="result" open={showCached} onClick={function () { setShowCached(!showCached); }} />
+          {showCached && cachedMsgs.map(function (m, i) { return renderRow(m, i); })}
+        </>
+      )}
+      {newMsgs.map(function (m, i) { return renderRow(m, cachedCount + i); })}
     </div>
   );
 }
@@ -1652,7 +1687,7 @@ function LLMDetail(props) {
           if (k === "history") return (
             <>
               <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, marginBottom: 4 }}>
-                {ev.newHistoryMsgs.length} new of {ev.historyMsgs.length} total (older entries dimmed; hover any row for full text)
+                {ev.newHistoryMsgs.length} new of {ev.historyMsgs.length} total (older cached entries collapsed; hover any row for full text)
               </div>
               <HistoryList msgs={ev.historyMsgs} newCount={ev.newHistoryMsgs.length} />
             </>
@@ -1660,7 +1695,7 @@ function LLMDetail(props) {
           if (k === "tool_results") return (
             <>
               <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, marginBottom: 4 }}>
-                {ev.newToolResultMsgs.length} new of {ev.toolResultMsgs.length} total (older entries dimmed; hover any row for full text)
+                {ev.newToolResultMsgs.length} new of {ev.toolResultMsgs.length} total (older cached entries collapsed; hover any row for full text)
               </div>
               <ToolResultList msgs={ev.toolResultMsgs} newCount={ev.newToolResultMsgs.length} />
             </>
