@@ -1563,13 +1563,41 @@ function LLMDetail(props) {
             borderRadius: 4,
             padding: "10px 12px",
           }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8, fontSize: theme.fontSize.sm }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8, fontSize: theme.fontSize.sm, gap: 12, flexWrap: "wrap" }}>
               <span style={{ color: theme.text.primary, fontWeight: 600 }}>
                 <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 1, marginRight: 6, background: theme.cost.output }} />
                 Response
               </span>
-              <span style={{ color: theme.text.secondary, fontVariantNumeric: "tabular-nums" }}>
-                {fmtT(ev.output)} output tok
+              <span style={{ color: theme.text.secondary, fontVariantNumeric: "tabular-nums", display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                <span style={{ color: theme.text.primary, fontWeight: 600 }}>{fmtT(ev.output)} output tok</span>
+                {(function () {
+                  var visCh = ev.visibleResponseChars || 0;
+                  var thinkCh = ev.thinkingChars || 0;
+                  var argsCh = ev.toolArgsChars || 0;
+                  var sumCh = visCh + thinkCh + argsCh;
+                  var parts = [];
+                  if (sumCh > 0 && ev.output > 0) {
+                    var estVis = Math.round(visCh / 4);
+                    var estThink = Math.round(thinkCh / 4);
+                    var estArgs = Math.round(argsCh / 4);
+                    if (estVis > 0) parts.push({ label: "visible", tok: estVis, color: theme.cost.fresh });
+                    if (estThink > 0) parts.push({ label: "thinking", tok: estThink, color: theme.cost.output });
+                    if (estArgs > 0) parts.push({ label: "tool args", tok: estArgs, color: theme.cost.ctxToolDefs });
+                  } else if (ev.reasoningTokens > 0) {
+                    var visTok2 = ev.output - ev.reasoningTokens;
+                    if (visTok2 > 0) parts.push({ label: "visible", tok: visTok2, color: theme.cost.fresh });
+                    parts.push({ label: "thinking", tok: ev.reasoningTokens, color: theme.cost.output });
+                  }
+                  if (parts.length === 0) return null;
+                  return parts.map(function (p, i) {
+                    return (
+                      <span key={i} style={{ display: "inline-flex", alignItems: "baseline", gap: 4, color: theme.text.secondary }} title={p.label + " (estimated from char share)"}>
+                        <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: 1, background: p.color, transform: "translateY(-1px)" }} />
+                        ~{fmtT(p.tok)} {p.label}
+                      </span>
+                    );
+                  });
+                })()}
               </span>
             </div>
             {hasText && (
