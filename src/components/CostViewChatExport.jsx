@@ -294,21 +294,27 @@ function inferWorkspaceRoot(analysis) {
     });
   });
   if (paths.length < 2) return "";
-  var split = paths.map(function (p) { return p.split(/[\\/]+/); });
-  var common = [];
-  for (var i = 0; ; i++) {
-    var seg = split[0][i];
-    if (seg === undefined) break;
-    var allMatch = split.every(function (s) { return s[i] === seg; });
-    if (!allMatch) break;
-    common.push(seg);
-  }
-  var meaningful = common.filter(function (s) { return s.length > 0; });
-  // Require at least 4 meaningful segments (e.g. /Users/<name>/Code/<repo>)
-  // before we trust the prefix as a workspace root. Below that, stripping
-  // can hide context (e.g. distinguishing /usr/local/bin from /usr/bin).
-  if (meaningful.length < 4) return "";
-  return common.join("/");
+  // Tally every prefix candidate (every parent directory of every path).
+  // Pick the longest prefix that covers >= 80% of paths AND has at least
+  // 4 meaningful segments. This is robust against outliers like
+  // /memories/session/plan.md from a memory tool that would otherwise
+  // collapse a strict longest-common-prefix to "".
+  var counts = new Map();
+  paths.forEach(function (p) {
+    var segs = p.split(/[\\/]+/);
+    // Build every prefix from segment 4 up to segment N-1 (exclude the
+    // basename itself; we only care about directory prefixes).
+    for (var i = 4; i < segs.length; i++) {
+      var pref = segs.slice(0, i + 1).join("/");
+      counts.set(pref, (counts.get(pref) || 0) + 1);
+    }
+  });
+  var threshold = Math.ceil(paths.length * 0.8);
+  var best = "";
+  counts.forEach(function (n, pref) {
+    if (n >= threshold && pref.length > best.length) best = pref;
+  });
+  return best;
 }
 
 function stripRoot(p, root) {
