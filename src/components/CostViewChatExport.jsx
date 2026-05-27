@@ -342,11 +342,77 @@ function smartToolHeadline(ev, workspaceRoot) {
   if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
     var lname = name.toLowerCase();
 
-    if (lname.indexOf("read_file") >= 0 || lname.indexOf("create_file") >= 0
-        || lname.indexOf("edit_file") >= 0 || lname.indexOf("replace_string_in_file") >= 0
-        || lname === "write" || lname === "edit") {
-      var fp = parsed.filePath || parsed.path || parsed.file || parsed.uri || "";
-      if (fp) return basename(fp);
+    var fmtSize = function (s) {
+      if (!s || typeof s !== "string") return "";
+      var chars = s.length;
+      var lines = s ? s.split("\n").length : 0;
+      var charsStr = chars >= 1000 ? (chars / 1000).toFixed(chars >= 10000 ? 0 : 1) + "k" : String(chars);
+      return lines + " line" + (lines === 1 ? "" : "s") + ", " + charsStr + " chars";
+    };
+    var diffLines = function (a, b) {
+      var al = a ? a.split("\n").length : 0;
+      var bl = b ? b.split("\n").length : 0;
+      // Approximate: treat as full replacement when both sides exist.
+      var added = bl;
+      var removed = al;
+      return "+" + added + " / -" + removed + " lines";
+    };
+    var patchCounts = function (patch) {
+      if (!patch || typeof patch !== "string") return "";
+      var added = 0, removed = 0;
+      patch.split("\n").forEach(function (ln) {
+        if (ln.length === 0) return;
+        var c = ln.charAt(0);
+        if (c === "+" && ln.slice(0, 3) !== "+++") added += 1;
+        else if (c === "-" && ln.slice(0, 3) !== "---") removed += 1;
+      });
+      if (added === 0 && removed === 0) return "";
+      return "+" + added + " / -" + removed + " lines";
+    };
+
+    if (lname.indexOf("read_file") >= 0) {
+      var rfp = parsed.filePath || parsed.path || parsed.file || parsed.uri || "";
+      if (rfp) {
+        var label = basename(rfp);
+        var startLine = parsed.startLine || parsed.startLineNumber || parsed.start_line;
+        var endLine = parsed.endLine || parsed.endLineNumber || parsed.end_line;
+        if (startLine && endLine) label += " \u00b7 lines " + startLine + "-" + endLine;
+        return label;
+      }
+    }
+
+    if (lname.indexOf("create_file") >= 0 || lname === "write") {
+      var cfp = parsed.filePath || parsed.path || parsed.file || parsed.uri || "";
+      if (cfp) {
+        var body = parsed.content || parsed.text || parsed.code || parsed.fileContents || "";
+        var size = fmtSize(body);
+        return basename(cfp) + (size ? " \u00b7 " + size : "");
+      }
+    }
+
+    if (lname.indexOf("replace_string_in_file") >= 0) {
+      var rsfp = parsed.filePath || parsed.path || parsed.file || parsed.uri || "";
+      if (rsfp) {
+        var oldS = parsed.oldString || parsed.old_string || parsed.search || "";
+        var newS = parsed.newString || parsed.new_string || parsed.replace || "";
+        var d = diffLines(oldS, newS);
+        return basename(rsfp) + (d ? " \u00b7 " + d : "");
+      }
+    }
+
+    if (lname.indexOf("insert_edit_into_file") >= 0 || lname.indexOf("edit_file") >= 0 || lname === "edit") {
+      var efp = parsed.filePath || parsed.path || parsed.file || parsed.uri || "";
+      if (efp) {
+        var ebody = parsed.code || parsed.content || parsed.text || parsed.newString || "";
+        var esize = fmtSize(ebody);
+        return basename(efp) + (esize ? " \u00b7 +" + esize : "");
+      }
+    }
+
+    if (lname.indexOf("apply_patch") >= 0 || lname === "patch") {
+      var p = parsed.patch || parsed.diff || parsed.body || "";
+      var pc = patchCounts(p);
+      if (pc) return pc;
     }
 
     if (lname.indexOf("list_dir") >= 0 || lname === "ls") {
