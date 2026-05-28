@@ -245,29 +245,29 @@ export function aggregateSkillCarry(prompts: CostAnalysisPrompt[]): {
   unusedCount: number;
   unusedTokensPerCall: number;
 } {
-  // Sample the skill list from the first CHAT (non-overhead) LLM call.
-  // The very first LLM event in the session is usually an overhead call
-  // (title generation, prompt categorization) which has its own minimal
-  // system prompt without the user's skills attached -- sampling from
-  // there returned 0 skills even when 35 were configured.
+  // Sample the skill list from the LLM call that carries the MOST skills.
+  // Originally we sampled from the first non-overhead LLM event, but that
+  // is fragile: the first chat call can be a lightweight session-start
+  // request that ships an empty skills array, even when every later call
+  // in the same session attaches the user's full skill set. Skill lists
+  // don't shrink across a session, so the per-call maximum is the steady
+  // state and survives both kinds of false-empty early calls (overhead
+  // title-gen and lightweight kickoff requests).
   let charsPerCall = 0;
   let count = 0;
   let chatCalls = 0;
   let skillRows: { name: string; tokens: number; file: string; used: boolean }[] = [];
-  let sampled = false;
   let sampledSkills: { name: string; file: string; chars: number }[] = [];
   prompts.forEach(p => p.events.forEach(e => {
     if (e.kind !== "llm" || e.category === "overhead") return;
     chatCalls += 1;
-    if (!sampled) {
-      sampled = true;
-      (e.skills || []).forEach((s: { name: string; chars: number; file?: string }) => {
-        charsPerCall += s.chars || 0;
-        count += 1;
-        sampledSkills.push({ name: s.name, file: s.file || "", chars: s.chars || 0 });
-      });
+    const skills = (e.skills || []) as { name: string; chars: number; file?: string }[];
+    if (skills.length > sampledSkills.length) {
+      sampledSkills = skills.map(s => ({ name: s.name, file: s.file || "", chars: s.chars || 0 }));
     }
   }));
+  charsPerCall = sampledSkills.reduce((a, s) => a + (s.chars || 0), 0);
+  count = sampledSkills.length;
   const usedSet = detectUsedSkills(prompts, sampledSkills);
   let unusedChars = 0;
   sampledSkills.forEach(s => {
