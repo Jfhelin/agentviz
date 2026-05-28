@@ -2886,17 +2886,77 @@ function Kpis(props) {
     (function () {
       var ohc = sa.overheadCount || 0;
       var primary = Math.max(0, t.llmCalls - ohc);
-      var d = ohc > 0
-        ? primary + " primary · " + ohc + " overhead"
-        : null;
+      // Per-thread breakdown when sub-agents exist: count LLM events grouped
+      // by their containing prompt's name. Sub-agent prompts (name ===
+      // "tool/runSubagent") carry an `invokedBy.description` we use as the
+      // thread label.
+      var threadBreakdown = null;
+      var an = props.analysis;
+      if (an && Array.isArray(an.prompts)) {
+        var mainCount = 0;
+        var subThreads = [];
+        an.prompts.forEach(function (p) {
+          var n = (p.events || []).filter(function (e) { return e && e.kind === "llm"; }).length;
+          if (n === 0) return;
+          if (p.name === "tool/runSubagent") {
+            var label = (p.invokedBy && p.invokedBy.description) || p.userMessage || "subagent";
+            subThreads.push({ label: label, count: n });
+          } else {
+            mainCount += n;
+          }
+        });
+        if (subThreads.length > 0) {
+          subThreads.sort(function (a, b) { return b.count - a.count; });
+          var truncLabel = function (s) {
+            var clean = String(s || "").replace(/\s+/g, " ").trim();
+            return clean.length > 28 ? clean.slice(0, 27) + "\u2026" : clean;
+          };
+          var lineStyle = { fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" };
+          var nodes = [];
+          nodes.push(
+            <div key="main" style={lineStyle}>
+              <strong style={{ fontWeight: 600 }}>{mainCount}</strong>
+              {" main thread" + (ohc > 0 ? " (incl. " + ohc + " overhead)" : "")}
+            </div>
+          );
+          var maxRows = 3;
+          var shown = subThreads.slice(0, maxRows);
+          shown.forEach(function (st, idx) {
+            nodes.push(
+              <div key={"sa" + idx} style={lineStyle}>
+                <span style={{ color: theme.text.dim }}>{"\u21B3 "}</span>
+                <strong style={{ fontWeight: 600 }}>{st.count}</strong>
+                {" "}
+                {truncLabel(st.label)}
+              </div>
+            );
+          });
+          if (subThreads.length > maxRows) {
+            var extra = subThreads.length - maxRows;
+            var extraCalls = subThreads.slice(maxRows).reduce(function (a, s) { return a + s.count; }, 0);
+            nodes.push(
+              <div key="more" style={Object.assign({}, lineStyle, { color: theme.text.dim })}
+                title={subThreads.slice(maxRows).map(function (s) { return s.count + " " + s.label; }).join("\n")}>
+                {"\u2026 +" + extra + " more sub-agents (" + extraCalls + " calls)"}
+              </div>
+            );
+          }
+          threadBreakdown = <>{nodes}</>;
+        }
+      }
+      var d = threadBreakdown
+        ? threadBreakdown
+        : (ohc > 0 ? primary + " primary \u00B7 " + ohc + " overhead" : null);
       return {
         l: "LLM calls",
         v: "" + t.llmCalls,
         d: d,
         dColor: theme.text.muted,
-        dTitle: ohc > 0
-          ? "Primary calls are real chat turns the agent ran. Overhead calls are background bookkeeping (e.g. title generation, prompt categorization) Copilot makes for UI features -- still billed."
-          : null,
+        dTitle: threadBreakdown
+          ? "LLM calls grouped by thread. Main thread = the chat conversation. Sub-agent threads are spawned via the runSubagent tool; their calls are counted here but their token usage is estimated separately (see overall total)."
+          : (ohc > 0
+            ? "Primary calls are real chat turns the agent ran. Overhead calls are background bookkeeping (e.g. title generation, prompt categorization) Copilot makes for UI features -- still billed."
+            : null),
       };
     })(),
     (function () {
