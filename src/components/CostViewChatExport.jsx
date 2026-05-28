@@ -2970,16 +2970,18 @@ function Kpis(props) {
     var skillsTokPerCall = skillCarry.unusedTokensPerCall || 0;
     var toolsCost = toolsTokPerCall * calls * perTokCached;
     var skillsCost = skillsTokPerCall * calls * perTokCached;
+    var toolsTotal = (unusedTools.offeredAll && unusedTools.offeredAll.size) || 0;
+    var skillsTotal = skillCarry.skillCount || 0;
     var lines = [];
     if (toolsUnused > 0) {
       lines.push({
-        text: toolsUnused + " unused " + (toolsUnused === 1 ? "tool" : "tools"),
+        text: toolsUnused + "/" + toolsTotal + " " + (toolsTotal === 1 ? "tool" : "tools") + " unused",
         cost: toolsCost,
       });
     }
     if (skillsUnused > 0) {
       lines.push({
-        text: skillsUnused + " unused " + (skillsUnused === 1 ? "skill" : "skills"),
+        text: skillsUnused + "/" + skillsTotal + " " + (skillsTotal === 1 ? "skill" : "skills") + " unused",
         cost: skillsCost,
       });
     }
