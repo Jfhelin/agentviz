@@ -60,10 +60,10 @@ When the user just points at a file with no specific question, produce a 6-to-10
 - Number of unique files touched and top 3
 - Whether any prompts ran as sub-agents (and if so, which parent spawned which — pull from `prompts[].spawnedSubagents`)
 - One-line per-prompt summary using `promptPreview` (truncate to fit), include `costUsd`
-- If `rollups.toolDefs.approxShareOfPromptTokens` ≥ 0.10, mention it: "tool schemas account for ~N% of input tokens (~$X worst case)"
-- If `rollups.thinking.present` is true, mention it: "this run used extended thinking (~N distinct events, ~T plaintext tokens, ~E encrypted tokens). Cost is a LOWER BOUND — see `rollups.cost.thinkingUnderCount` for the estimated gap (~M credits hidden)."
-- If `rollups.toolCallPayloads.approxShareOfCompletion` ≥ 0.30, mention it: "~N% of output bytes were tool-call args (code/JSON the model wrote into tool calls), only ~V tokens were visible assistant text"
-- If `rollups.cacheAnomalies.count` > 0, mention it: "~N requests started cold (~C credits paid to re-warm prefixes). See `rollups.cacheAnomalies.items` for refs and causes (tool-defs change is the most common; ≥5 min gaps expire the Anthropic cache)."
+- If `rollups.toolDefs.approxShareOfPromptTokens` ≥ 0.10, mention the share of input budget spent on tool schemas (~$X worst case)
+- If `rollups.thinking.present` is true, mention extended thinking (~N events, ~T plaintext tokens) and that cost is a LOWER BOUND by ~M credits (see `rollups.cost.thinkingUnderCount`)
+- If `rollups.toolCallPayloads.approxShareOfCompletion` ≥ 0.30, mention that ~N% of output was tool-call args (only ~V tokens visible text)
+- If `rollups.cacheAnomalies.count` > 0, mention how many requests started cold (~C credits to re-warm) and that `rollups.cacheAnomalies.items` has the refs and causes
 - If `rollups.errors.toolCallErrors` > 0, mention how many and in which prompts
 
 Then ask: "Anything specific you want to dig into?" Do not volunteer further analysis unprompted — this is a conversation.
@@ -362,20 +362,15 @@ If a savings estimate for a handful of tokens lands in the multi-credit range, t
 
 Per-prompt `credits` and per-timeline `credits` are **rounded to 0.1 credit** in the digest. Any single change saving fewer than ~70 output tokens (or ~330 fresh input tokens) on Sonnet 4.6 will round to 0 in those fields — express such savings as fractional credits in your answer, not as "0".
 
+### Hypotheticals and refs
+
+`pricing.resolved[]` lists the rates the digest used for each model present; `pricing.table[]` is the full embedded price table. For "what would this cost on model X?" questions, recompute from the token fields (`promptTokens`, `cachedTokens`, `cacheCreationTokens`, `completionTokens`) against `pricing.table[]` rather than guessing rates.
+
+**Refs** use the form `p<promptIndex>` for prompts and `p<promptIndex>.l<logIndex>` for individual log entries. Cite them when pointing at specific events so the user can trace back.
+
 ### Tool-definition accounting
 
-Every request advertises tool schemas in `metadata.tools`. Re-sending those on every call is a real share of the input budget — often the largest single line item after the conversation prefix. The digest exposes this two ways:
-
-- Per request: `toolDefsCount` (how many schemas), `toolDefsJsonBytes` (raw size), `toolDefsApproxTokens` (≈ bytes/4), `toolDefsApproxFullPriceUsd` (worst case if billed fresh).
-- Session-level: `rollups.toolDefs.approxTokensTotal`, `approxShareOfPromptTokens`, `approxFullPriceUsd`.
-
-Token counts are approximations (4-char-per-token rule, ±20%). The full-price number is worst case — actual paid cost depends on cache hits, which is why no "paid" number is reported here. Compare `approxFullPriceUsd` against `rollups.cost.totalUsd` to gauge how much the cache is buying you.
-
-### Hypotheticals
-
-`pricing.resolved[]` lists the rates the digest used for each model present. `pricing.table[]` is the full embedded price table. Use these to answer "what if we ran on model X?" questions by recomputing from the token fields (`promptTokens`, `cachedTokens`, `cacheCreationTokens`, `completionTokens`) rather than guessing rates.
-
-Refs use the form `p<promptIndex>` for prompts and `p<promptIndex>.l<logIndex>` for individual log entries — use these when citing things back to the user or when looking up the raw entry.
+Tool schemas re-sent on every request are often the largest single line item after the conversation prefix. The schema doc above covers the fields (`rollups.toolDefs.*` and per-request `timeline[*].toolDefs*`). The one tip not in the schema: **compare `rollups.toolDefs.approxFullPriceUsd` against `rollups.cost.totalUsd` to gauge what the cache is buying you** on tool defs specifically. Token counts are 4-char-per-token approximations (±20%).
 
 ## Drilling into the raw file
 
@@ -395,7 +390,9 @@ jq '.prompts[3].logs[] | select(.kind=="toolCall") | {tool, args}' SRC
 jq --arg id "toolu_bdrk_01H4XWWZfUerGyZ2BYRahHSD" \
   '.prompts[].logs[] | select(.kind=="request") | select(.requestMessages.messages[].toolCalls[]?.id == $id)' SRC
 
-# Cost estimate stub (replace rates as needed)
+# Cost estimate stub: prefer the digest's `rollups.cost.credits.total`
+# (run digest.mjs first). Drop to raw token math here only if you need
+# a custom slice the digest does not pre-compute.
 jq '[.prompts[].logs[] | select(.kind=="request") | .metadata.usage]
    | { promptTokens: map(.prompt_tokens)|add,
        cachedTokens: map(.prompt_tokens_details.cached_tokens)|add,
@@ -425,7 +422,6 @@ When you need to read a single message body that is long, project just `.content
 | "What did tool Y do?" | `timeline[*].argsPreview` and `timeline[*].response.preview` on toolCall rows. Drop to raw file via the ref for the full body. |
 | "What files did it touch?" | `files[]` |
 | "What did it do first / last?" | `timeline[0]` / `timeline[-1]`, or first/last entry per prompt |
-| "Which prompts were sub-agents?" | `prompts[] where isSubagent` (kept for backward compatibility — prefer the spawn-linkage question above) |
 | "Why did the model decide to do X?" | Find the relevant request via timeline, then drill into `requestMessages.messages` for that request |
 | "What was in the model's context when it called tool Y?" | Find the request whose response advertised the toolCall id; read its `requestMessages.messages` |
 
@@ -435,8 +431,4 @@ When you need to read a single message body that is long, project just `.content
 - When the digest's number disagrees with the user's intuition, double-check by computing from the raw file before pushing back.
 - Do not invent fields. The schema above is complete as of digest version 7. If something seems missing, peek at the raw file and tell the user it is not in the digest.
 - **When extended thinking is detected (`rollups.thinking.present` true), always disclose it in cost discussions.** The headline credits number from `rollups.cost.credits.total` is a LOWER BOUND. Add the gap from `rollups.cost.thinkingUnderCount.approxMissingCredits` and frame it: "this run used extended thinking, so the real billed output is roughly headline + ~M credits hidden in plaintext reasoning." Encrypted thinking blobs are input-side and largely cache-amortized; don't add them on top.
-- **Don't conflate `completionTokens` with "what the model said to the user."** For implementation-heavy prompts, most of completion is `toolCallPayloads.approxTokensTotal` (code being written into tool calls). Caveman-style output reduction only affects `visibleTextApproxTokens`. When the user asks "could we have written less?" lead with that split.
-- **Lead with AI credits when reporting cost** (GitHub UBB, post-2026-06-01: 1 credit = $0.01). Put the USD equivalent in parens. Use `rollups.cost.credits.*` and `prompts[].credits` directly; for any other number, multiply USD × 100. Cite `pricingVersion`. If `allModelsPriced` is false, flag that some calls were not priced.
-- Keep numeric answers grounded in actual fields. If the user supplies a different rate or asks about a different model, recompute from `promptTokens` / `cachedTokens` / `cacheCreationTokens` / `completionTokens` against `pricing.table` rather than guessing.
-- **For small token-count savings estimates, always go token → USD → credits** (see "Per-token credit math" above). Never multiply tokens directly by a credit rate carried in your head. Sanity check: 1,000 Sonnet 4.6 output tokens ≈ 1.5 credits; if 50 tokens comes out near 1 credit you've slipped a decimal.
 - Do not write the digest into git history. The sidecar lives next to the source file in `.agentviz/`.
