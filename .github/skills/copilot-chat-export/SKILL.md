@@ -61,6 +61,8 @@ When the user just points at a file with no specific question, produce a 6-to-10
 - Whether any prompts ran as sub-agents
 - One-line per-prompt summary using `promptPreview` (truncate to fit), include `costUsd`
 - If `rollups.toolDefs.approxShareOfPromptTokens` ≥ 0.10, mention it: "tool schemas account for ~N% of input tokens (~$X worst case)"
+- If `rollups.thinking.present` is true, mention it: "this run used extended thinking (~N distinct events, ~T plaintext tokens, ~E encrypted tokens). Cost is a LOWER BOUND — see `rollups.cost.thinkingUnderCount` for the estimated gap (~M credits hidden)."
+- If `rollups.toolCallPayloads.approxShareOfCompletion` ≥ 0.30, mention it: "~N% of output bytes were tool-call args (code/JSON the model wrote into tool calls), only ~V tokens were visible assistant text"
 - If `rollups.errors.toolCallErrors` > 0, mention how many and in which prompts
 
 Then ask: "Anything specific you want to dig into?" Do not volunteer further analysis unprompted — this is a conversation.
@@ -134,11 +136,21 @@ A Copilot chat export is one JSON object:
 ```
 {
   role: integer           // 0 = system, 1 = user, 2 = assistant, 3 = tool
-  content: array          // each element has { type, … }; type 1 ≈ text, type 2 ≈ structured/tool
+  content: array          // each element has { type, … }. Common kinds:
+                          //   type 1 = plain text         (string `.text`)
+                          //   type 2 = structured / tool  (tool input or output payload)
+                          //   type "thinking" = Anthropic extended-thinking block carried
+                          //     in the request prefix: { thinking: { id, text, encrypted, tokens: 0 } }
+                          //     — the model's chain-of-thought summary + redacted encrypted blob.
   toolCalls?: array       // present on assistant messages that called tools
   toolCallId?: string     // present on tool messages, links to the toolCall log's id
 }
 ```
+
+Thinking blocks also appear directly on `toolCall` log entries as
+`logs[].thinking = { id, text }` (plaintext only, no encrypted blob) —
+that is the "new emission immediately before this tool call" view. The
+prefix-carry form above is what subsequent requests see.
 
 ### Crucial structural facts (these trip people up)
 
@@ -149,6 +161,8 @@ A Copilot chat export is one JSON object:
 - **`tool/runSubagent`** as `metadata` is irrelevant — what matters is the **request `name` field** being `"tool/runSubagent"`. When you see that, the prompt was spawned by a sub-agent invocation. The digest flags such prompts with `isSubagent: true`.
 - **A `toolCall` log's `id` matches a `toolCallId` on a later tool-role message** in a subsequent request. That's how you reconstruct the chain "model decided X → called tool → got result → next request sees the result."
 - **Conversation roles are integers, not strings.** 0=system, 1=user, 2=assistant, 3=tool.
+- **`completion_tokens` UNDER-REPORTS when extended thinking is on.** Copilot exports set `tokens: 0` on every thinking block and `completion_tokens_details.reasoning_tokens: 0` on every request, even when the response clearly contains thinking output. So `rollups.cost.*` is a LOWER BOUND for Anthropic models. The digest estimates the gap in `rollups.thinking` (raw byte counts of distinct thinking events) and `rollups.cost.thinkingUnderCount` (output-rate cost of plaintext thinking). Encrypted thinking blobs ride on the input side and are heavily cache-amortized, so the output-side plaintext is the dominant missing cost.
+- **A large `completionTokens` does not mean the model "wrote a lot to the user."** Tool-call arguments (the JSON / code body emitted into a tool call) are counted in `completion_tokens`. For implementation-heavy prompts, 80–95% of output bytes can be tool-call payloads (`rollups.toolCallPayloads`), with visible assistant text in the single digits. Caveman-style output reduction only addresses the visible-text slice.
 
 ## The digest schema (what `digest.mjs` produces)
 
@@ -178,12 +192,36 @@ A Copilot chat export is one JSON object:
         total, withoutCache, savings,
         perUsd,            // 100
         billingModel       // "github-ai-credits-ubb-2026-06-01"
+      },
+      thinkingUnderCount: { // applies=true when extended thinking detected; output-side gap estimate
+        applies,
+        approxMissingOutputTokens,   // ceil(distinct plaintext chars / 4)
+        approxMissingUsd,            // approxMissingOutputTokens × primary model outputPerM / 1e6
+        approxMissingCredits,        // USD × 100
+        note
       }
     },
     toolDefs: {
       approxTokensTotal,        // sum across requests of ceil(JSON.stringify(metadata.tools).length / 4)
       approxShareOfPromptTokens, // approxTokensTotal / promptTokens — share of input budget spent re-sending schemas
       approxFullPriceUsd,       // worst-case: all tool-def tokens billed as fresh input
+      note
+    },
+    toolCallPayloads: {         // output-side mirror of toolDefs
+      approxTokensTotal,        // ceil(totalToolArgsChars / 4) — bytes emitted into tool-call args
+      approxShareOfCompletion,  // approxTokensTotal / completionTokens
+      approxFullPriceUsd,       // worst-case at primary model's output rate
+      visibleTextApproxTokens,  // user-visible assistant text — the caveman-addressable portion
+      note
+    },
+    thinking: {                 // Anthropic extended thinking, deduped by plaintext text
+      present,                  // true if any thinking block was found anywhere
+      totalBlocks,              // raw count incl. prefix carries (one event re-appears N times)
+      distinctEvents,           // unique thinking events by .text
+      plaintextChars,           // sum across distinct events
+      plaintextTokensApprox,    // ceil(plaintextChars / 4)
+      encryptedChars,           // sum of encrypted blobs across distinct events
+      encryptedTokensApprox,    // ceil(encryptedChars / 4)
       note
     },
     errors: {
@@ -286,6 +324,27 @@ Plan allowances (from `pricing.monthlyAllowances`, for context when the user ask
 
 Inline ghost-text completions and Next Edit Suggestions are **not** billed against credits. Chat, CLI, agent mode, cloud agents, Code Review, Spark, and third-party coding agents **do** consume credits. The digest covers chat exports — every request in `timeline` is a credit-burning call.
 
+### Per-token credit math (for hypotheticals and savings estimates)
+
+When the user asks "how much would saving N tokens be worth?", always go **token → USD → credits**, never token → credits directly:
+
+```
+credits = (tokens × rate_per_million / 1_000_000) × 100
+        = tokens × rate_per_million / 10_000
+```
+
+Sanity anchors for Sonnet 4.6 (`outputPerM = 15`, `inputPerM = 3`):
+
+| Tokens | Output cost | Input cost (fresh) |
+|---:|---:|---:|
+| 100 | ~$0.0015 / 0.15 cr | ~$0.0003 / 0.03 cr |
+| 1,000 | ~$0.015 / 1.5 cr | ~$0.003 / 0.3 cr |
+| 10,000 | ~$0.15 / 15 cr | ~$0.03 / 3 cr |
+
+If a savings estimate for a handful of tokens lands in the multi-credit range, the math is wrong — recheck. A useful gut check: **1,000 Sonnet 4.6 output tokens ≈ 1.5 credits**.
+
+Per-prompt `credits` and per-timeline `credits` are **rounded to 0.1 credit** in the digest. Any single change saving fewer than ~70 output tokens (or ~330 fresh input tokens) on Sonnet 4.6 will round to 0 in those fields — express such savings as fractional credits in your answer, not as "0".
+
 ### Tool-definition accounting
 
 Every request advertises tool schemas in `metadata.tools`. Re-sending those on every call is a real share of the input budget — often the largest single line item after the conversation prefix. The digest exposes this two ways:
@@ -335,7 +394,9 @@ When you need to read a single message body that is long, project just `.content
 | "How many of X?" (prompts, requests, tool calls, files) | `rollups` |
 | "How long did it take?" | `rollups.wallSpanMs` vs `rollups.totalRequestDurationMs` |
 | "Why was it slow?" | `rollups.requestDurationMs` percentiles; sort `timeline` by `ms` |
-| "How much did it cost?" | `rollups.cost.credits.total` (lead with credits, USD in parens); per-prompt `credits`; per-model `costUsd` × 100. Compare to `credits.withoutCache` for savings. Per-request split lives on every `timeline` request row (multiply any `*Usd` by 100 to get credits). |
+| "How much did it cost?" | `rollups.cost.credits.total` (lead with credits, USD in parens); per-prompt `credits`; per-model `costUsd` × 100. Compare to `credits.withoutCache` for savings. Per-request split lives on every `timeline` request row (multiply any `*Usd` by 100 to get credits). If `rollups.cost.thinkingUnderCount.applies` is true, add: "+ ~M credits hidden as extended-thinking output." |
+| "How much did the model think?" | `rollups.thinking.{distinctEvents, plaintextTokensApprox, encryptedTokensApprox}`; per-prompt `thinkingEventCount` / `thinkingPlaintextTokensApprox`. Note these are LOWER BOUNDS because the export sets `tokens:0` on every block. |
+| "How much of output was tool-call payloads vs visible text?" | `rollups.toolCallPayloads.{approxTokensTotal, visibleTextApproxTokens, approxShareOfCompletion}`; per-prompt `toolCallArgsApproxTokens` / `visibleTextApproxTokens`. |
 | "Is that a lot of credits?" | Compare to `pricing.monthlyAllowances` — e.g. Pro = 1,000/mo, Business = 1,900/user/mo. |
 | "How much of cost is tool definitions?" | `rollups.toolDefs.approxFullPriceUsd` (worst case) and `approxShareOfPromptTokens`. Per-call: `timeline[*].toolDefsApproxFullPriceUsd`. |
 | "What would this cost on model X?" | Recompute with rates from `pricing.table[]` against the token fields (`promptTokens`, `cachedTokens`, `cacheCreationTokens`, `completionTokens`) on each request. |
@@ -353,7 +414,10 @@ When you need to read a single message body that is long, project just `.content
 
 - Cite refs (`p2.l3`) when pointing at specific events so the user can trace back.
 - When the digest's number disagrees with the user's intuition, double-check by computing from the raw file before pushing back.
-- Do not invent fields. The schema above is complete as of digest version 5. If something seems missing, peek at the raw file and tell the user it is not in the digest.
+- Do not invent fields. The schema above is complete as of digest version 6. If something seems missing, peek at the raw file and tell the user it is not in the digest.
+- **When extended thinking is detected (`rollups.thinking.present` true), always disclose it in cost discussions.** The headline credits number from `rollups.cost.credits.total` is a LOWER BOUND. Add the gap from `rollups.cost.thinkingUnderCount.approxMissingCredits` and frame it: "this run used extended thinking, so the real billed output is roughly headline + ~M credits hidden in plaintext reasoning." Encrypted thinking blobs are input-side and largely cache-amortized; don't add them on top.
+- **Don't conflate `completionTokens` with "what the model said to the user."** For implementation-heavy prompts, most of completion is `toolCallPayloads.approxTokensTotal` (code being written into tool calls). Caveman-style output reduction only affects `visibleTextApproxTokens`. When the user asks "could we have written less?" lead with that split.
 - **Lead with AI credits when reporting cost** (GitHub UBB, post-2026-06-01: 1 credit = $0.01). Put the USD equivalent in parens. Use `rollups.cost.credits.*` and `prompts[].credits` directly; for any other number, multiply USD × 100. Cite `pricingVersion`. If `allModelsPriced` is false, flag that some calls were not priced.
 - Keep numeric answers grounded in actual fields. If the user supplies a different rate or asks about a different model, recompute from `promptTokens` / `cachedTokens` / `cacheCreationTokens` / `completionTokens` against `pricing.table` rather than guessing.
+- **For small token-count savings estimates, always go token → USD → credits** (see "Per-token credit math" above). Never multiply tokens directly by a credit rate carried in your head. Sanity check: 1,000 Sonnet 4.6 output tokens ≈ 1.5 credits; if 50 tokens comes out near 1 credit you've slipped a decimal.
 - Do not write the digest into git history. The sidecar lives next to the source file in `.agentviz/`.

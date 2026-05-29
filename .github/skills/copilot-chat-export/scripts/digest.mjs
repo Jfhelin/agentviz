@@ -5,7 +5,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const DIGEST_VERSION = 5;
+const DIGEST_VERSION = 6;
 const CREDITS_PER_USD = 100; // GitHub AI Credits: 1 credit = $0.01 USD (UBB launch 2026-06-01)
 const credits = (usd) => Math.round(usd * CREDITS_PER_USD * 10) / 10; // 1 decimal credit
 
@@ -115,6 +115,28 @@ function summarizeToolResponse(resp, max = 240) {
     /<error[\s>]/i.test(head) ||
     /"error"\s*:/.test(head);
   return { hasError, kind, bytes, preview };
+}
+
+// Walk an arbitrary JSON value and collect all Anthropic extended-thinking blocks.
+// Shape: { type: "thinking", thinking: { id, text, encrypted, tokens } }.
+// The `tokens` field is always 0 in Copilot Chat exports (the proxy drops it),
+// which is why we measure plaintext/encrypted bytes ourselves.
+function collectThinkingBlocks(value, acc) {
+  if (value == null) return acc;
+  if (Array.isArray(value)) {
+    for (const v of value) collectThinkingBlocks(v, acc);
+    return acc;
+  }
+  if (typeof value !== "object") return acc;
+  if (value.type === "thinking" && value.thinking && typeof value.thinking === "object") {
+    acc.push({
+      id: value.thinking.id ?? null,
+      text: typeof value.thinking.text === "string" ? value.thinking.text : "",
+      encrypted: typeof value.thinking.encrypted === "string" ? value.thinking.encrypted : "",
+    });
+  }
+  for (const k of Object.keys(value)) collectThinkingBlocks(value[k], acc);
+  return acc;
 }
 
 // Last assistant message text from a request's response, if any.
@@ -252,6 +274,14 @@ let totalCacheCreationTokens = 0;
 let totalDurationMs = 0;
 let totalToolDefsTokens = 0;
 let totalToolDefsFullPriceUsd = 0;
+let totalToolArgsChars = 0;          // sum of toolCall.args char lengths (output-side tool payload)
+let totalVisibleTextChars = 0;       // sum of response.message[] char lengths
+// Globally distinct thinking events, deduped by plaintext text.
+const distinctThinkingText = new Set();
+const distinctThinkingEncrypted = new Set();  // for second-pass encrypted merge
+let totalThinkingBlockCount = 0;     // raw count incl. prefix carries
+let totalThinkingPlaintextChars = 0; // distinct-events only
+let totalThinkingEncryptedChars = 0; // distinct-events only
 let firstTime = null;
 let lastTime = null;
 
@@ -279,6 +309,11 @@ prompts.forEach((p, pi) => {
     costUsd: 0,
     withoutCacheUsd: 0,
     toolDefsApproxTokens: 0,
+    toolCallArgsApproxTokens: 0,         // sum of toolCall.args / 4 for this prompt
+    visibleTextApproxTokens: 0,          // sum of request.response.message / 4
+    thinkingEventCount: 0,               // distinct thinking emissions (deduped by text)
+    thinkingPlaintextTokensApprox: 0,    // chars/4 of distinct plaintext summaries
+    thinkingEncryptedTokensApprox: 0,    // chars/4 of distinct encrypted blobs
     toolErrorCount: 0,
     finalAssistantPreview: null,
     durationMs: 0,
@@ -286,6 +321,9 @@ prompts.forEach((p, pi) => {
     lastTime: null,
     isSubagent: false,
   };
+
+  // Distinct thinking events scoped to this prompt (deduped by text).
+  const promptThinkingTexts = new Set();
 
   logs.forEach((log, li) => {
     const ref = `p${pi}.l${li}`;
@@ -305,6 +343,32 @@ prompts.forEach((p, pi) => {
       const ts = toolStats.get(tool) ?? { name: tool, calls: 0, errors: 0, firstRef: ref };
       ts.calls += 1;
       toolStats.set(tool, ts);
+
+      // Tool-call args bytes (output-side payload the model emitted).
+      const argsLen = typeof log.args === "string"
+        ? log.args.length
+        : (log.args != null ? JSON.stringify(log.args).length : 0);
+      pSummary.toolCallArgsApproxTokens += Math.ceil(argsLen / 4);
+      totalToolArgsChars += argsLen;
+
+      // Thinking block(s) attached directly to this toolCall (new emissions
+      // that preceded the tool call, NOT prefix carries).
+      if (log.thinking && typeof log.thinking === "object") {
+        totalThinkingBlockCount += 1;
+        const text = typeof log.thinking.text === "string" ? log.thinking.text : "";
+        if (text && !promptThinkingTexts.has(text)) {
+          promptThinkingTexts.add(text);
+          pSummary.thinkingEventCount += 1;
+          pSummary.thinkingPlaintextTokensApprox += Math.ceil(text.length / 4);
+          const enc = typeof log.thinking.encrypted === "string" ? log.thinking.encrypted : "";
+          pSummary.thinkingEncryptedTokensApprox += Math.ceil(enc.length / 4);
+          if (!distinctThinkingText.has(text)) {
+            distinctThinkingText.add(text);
+            totalThinkingPlaintextChars += text.length;
+            totalThinkingEncryptedChars += enc.length;
+          }
+        }
+      }
 
       const fp = extractPath(tool, log.args);
       if (fp) {
@@ -336,6 +400,10 @@ prompts.forEach((p, pi) => {
         tool,
         toolCallId: log.id ?? null,
         file: fp,
+        argsBytes: argsLen,
+        argsApproxTokens: Math.ceil(argsLen / 4),
+        thinkingBeforeChars: log.thinking?.text?.length ?? 0,
+        thinkingBeforeTokensApprox: Math.ceil((log.thinking?.text?.length ?? 0) / 4),
         argsPreview: previewArgs(log.args),
         response: {
           kind: respSummary.kind,
@@ -441,6 +509,45 @@ prompts.forEach((p, pi) => {
       if (assistantText) {
         pSummary.finalAssistantPreview = truncate(assistantText, 800);
       }
+      const visibleTextChars = assistantText ? assistantText.length : 0;
+      const visibleTextTokensApprox = Math.ceil(visibleTextChars / 4);
+      pSummary.visibleTextApproxTokens += visibleTextTokensApprox;
+      totalVisibleTextChars += visibleTextChars;
+
+      // Count thinking blocks already carried in this request's prefix.
+      // These are prior emissions; their encrypted blobs are part of input
+      // and (with caching) read at the cache_read rate on this call.
+      // Also harvest the encrypted blobs here — toolCall.thinking only has
+      // plaintext, so the prefix is where we learn the input-side cost.
+      const prefixThinking = collectThinkingBlocks(log.requestMessages, []);
+      const thinkingPrefixCount = prefixThinking.length;
+      const thinkingPrefixEncryptedChars = prefixThinking.reduce(
+        (s, b) => s + (b.encrypted?.length ?? 0), 0);
+      const thinkingPrefixTokensApprox = Math.ceil(thinkingPrefixEncryptedChars / 4);
+      totalThinkingBlockCount += thinkingPrefixCount;
+      for (const blk of prefixThinking) {
+        const text = blk.text || "";
+        if (!text) continue;
+        // Per-prompt dedup (in case a prefix block surfaces an emission
+        // we never saw attached to a toolCall in this prompt).
+        if (!promptThinkingTexts.has(text)) {
+          promptThinkingTexts.add(text);
+          pSummary.thinkingEventCount += 1;
+          pSummary.thinkingPlaintextTokensApprox += Math.ceil(text.length / 4);
+          pSummary.thinkingEncryptedTokensApprox += Math.ceil((blk.encrypted?.length ?? 0) / 4);
+        }
+        // Global dedup; merge encrypted bytes from prefix view.
+        if (!distinctThinkingText.has(text)) {
+          distinctThinkingText.add(text);
+          totalThinkingPlaintextChars += text.length;
+          totalThinkingEncryptedChars += blk.encrypted?.length ?? 0;
+        } else if (blk.encrypted && !distinctThinkingEncrypted.has(text)) {
+          // Already counted plaintext; add the encrypted blob the first time
+          // we see it (toolCall.thinking lacks it, prefix carry has it).
+          distinctThinkingEncrypted.add(text);
+          totalThinkingEncryptedChars += blk.encrypted.length;
+        }
+      }
 
       const freshInputTokens = Math.max(0, pt - cached - cacheWrite);
       const cacheHitRate = pt > 0 ? cached / pt : 0;
@@ -477,6 +584,10 @@ prompts.forEach((p, pi) => {
         toolDefsApproxTokens,
         toolDefsApproxFullPriceUsd: round6(toolDefsApproxFullPriceUsd),
         toolDefsApproxFullPriceCredits: credits(toolDefsApproxFullPriceUsd),
+        visibleTextChars,
+        visibleTextTokensApprox,
+        thinkingPrefixBlocks: thinkingPrefixCount,
+        thinkingPrefixTokensApprox,
         assistantTextPreview: assistantText ? truncate(assistantText, 240) : null,
       });
     }
@@ -542,6 +653,32 @@ const pricingResolved = modelsArr.map((m) => {
     : { model: m.name, matched: false };
 });
 
+// Tool-call payload accounting (output side mirror of toolDefs):
+// how much of the model's completion bytes were tool-call args.
+const totalToolArgsApproxTokens = Math.ceil(totalToolArgsChars / 4);
+const totalVisibleTextApproxTokens = Math.ceil(totalVisibleTextChars / 4);
+const totalToolCallPayloadFullPriceUsd = (() => {
+  const primary = modelsArr[0];
+  const price = primary ? lookupPricing(primary.name) : null;
+  return price ? (totalToolArgsApproxTokens * price.outputPerM) / 1_000_000 : 0;
+})();
+
+// Thinking under-count for the cost rollup. Anthropic extended thinking is
+// billed at the output rate but the Copilot export sets
+// completion_tokens_details.reasoning_tokens to 0 — so rollups.cost.totalUsd
+// is a LOWER BOUND when thinking blocks are present. We estimate the gap
+// from plaintext bytes of distinct thinking events; the encrypted portion
+// is on the input side (and gets cached, so amortized cost is small).
+const thinkingPresent = distinctThinkingText.size > 0;
+const thinkingPlaintextTokensApprox = Math.ceil(totalThinkingPlaintextChars / 4);
+const thinkingEncryptedTokensApprox = Math.ceil(totalThinkingEncryptedChars / 4);
+const thinkingMissingUsd = (() => {
+  if (!thinkingPresent) return 0;
+  const primary = modelsArr[0];
+  const price = primary ? lookupPricing(primary.name) : null;
+  return price ? (thinkingPlaintextTokensApprox * price.outputPerM) / 1_000_000 : 0;
+})();
+
 const digest = {
   session,
   rollups: {
@@ -590,6 +727,18 @@ const digest = {
         perUsd: CREDITS_PER_USD,
         billingModel: "github-ai-credits-ubb-2026-06-01",
       },
+      // Cost is a LOWER BOUND when extended thinking was used (Anthropic).
+      // The Copilot export sets reasoning_tokens=0 so completion_tokens
+      // under-reports. This block estimates the gap from plaintext bytes.
+      thinkingUnderCount: {
+        applies: thinkingPresent,
+        approxMissingOutputTokens: thinkingPresent ? thinkingPlaintextTokensApprox : 0,
+        approxMissingUsd: round6(thinkingMissingUsd),
+        approxMissingCredits: credits(thinkingMissingUsd),
+        note: thinkingPresent
+          ? "Estimate from chars/4 of distinct thinking plaintext. Encrypted blobs ride in input and are mostly cache-amortized; output billing is the dominant gap."
+          : "No extended-thinking blocks detected.",
+      },
     },
     toolDefs: {
       approxTokensTotal: totalToolDefsTokens,
@@ -600,6 +749,28 @@ const digest = {
       approxFullPriceUsd: round6(totalToolDefsFullPriceUsd),
       note:
         "Worst-case (all fresh) tokens for re-sending tool schemas. Actual paid cost depends on cache hits.",
+    },
+    toolCallPayloads: {
+      approxTokensTotal: totalToolArgsApproxTokens,
+      approxShareOfCompletion:
+        totalCompletionTokens > 0
+          ? Math.round((totalToolArgsApproxTokens / totalCompletionTokens) * 10000) / 10000
+          : 0,
+      approxFullPriceUsd: round6(totalToolCallPayloadFullPriceUsd),
+      visibleTextApproxTokens: totalVisibleTextApproxTokens,
+      note:
+        "Output-side mirror of toolDefs: how much of completion bytes were tool-call arguments (the code/JSON the model wrote into tool calls) vs visible assistant text. Caveman-style output reduction only addresses visibleTextApproxTokens.",
+    },
+    thinking: {
+      present: thinkingPresent,
+      totalBlocks: totalThinkingBlockCount,
+      distinctEvents: distinctThinkingText.size,
+      plaintextChars: totalThinkingPlaintextChars,
+      plaintextTokensApprox: thinkingPlaintextTokensApprox,
+      encryptedChars: totalThinkingEncryptedChars,
+      encryptedTokensApprox: thinkingEncryptedTokensApprox,
+      note:
+        "Anthropic extended-thinking blocks. Copilot exports set `tokens: 0` on every block and `completion_tokens_details.reasoning_tokens: 0` on every request, so completionTokens UNDER-REPORTS for thinking-enabled models. See rollups.cost.thinkingUnderCount for the estimated gap. Token counts are chars/4 approximations.",
     },
     errors: {
       toolCallErrors: totalToolCallErrors,
