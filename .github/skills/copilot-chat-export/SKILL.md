@@ -58,11 +58,12 @@ When the user just points at a file with no specific question, produce a 6-to-10
 - **Total cost in AI credits** (from `rollups.cost.credits.total`), with USD in parens, plus savings vs no-cache (also in credits). Mention `pricingVersion` and flag if `allModelsPriced` is false.
 - Number of unique tools used and top 3 tools by call count
 - Number of unique files touched and top 3
-- Whether any prompts ran as sub-agents
+- Whether any prompts ran as sub-agents (and if so, which parent spawned which — pull from `prompts[].spawnedSubagents`)
 - One-line per-prompt summary using `promptPreview` (truncate to fit), include `costUsd`
 - If `rollups.toolDefs.approxShareOfPromptTokens` ≥ 0.10, mention it: "tool schemas account for ~N% of input tokens (~$X worst case)"
 - If `rollups.thinking.present` is true, mention it: "this run used extended thinking (~N distinct events, ~T plaintext tokens, ~E encrypted tokens). Cost is a LOWER BOUND — see `rollups.cost.thinkingUnderCount` for the estimated gap (~M credits hidden)."
 - If `rollups.toolCallPayloads.approxShareOfCompletion` ≥ 0.30, mention it: "~N% of output bytes were tool-call args (code/JSON the model wrote into tool calls), only ~V tokens were visible assistant text"
+- If `rollups.cacheAnomalies.count` > 0, mention it: "~N requests started cold (~C credits paid to re-warm prefixes). See `rollups.cacheAnomalies.items` for refs and causes (tool-defs change is the most common; ≥5 min gaps expire the Anthropic cache)."
 - If `rollups.errors.toolCallErrors` > 0, mention how many and in which prompts
 
 Then ask: "Anything specific you want to dig into?" Do not volunteer further analysis unprompted — this is a conversation.
@@ -158,7 +159,8 @@ prefix-carry form above is what subsequent requests see.
 - **`prompt_tokens_details.cached_tokens`** is the cache HIT count; **`cache_creation_input_tokens`** is the cache WRITE count. Cache hit rate = `cached_tokens / prompt_tokens` for the same call. Aggregating: sum both numerators and denominators across calls first, then divide.
 - **`duration` is wall-clock for that single model call** (ms). Sum of `duration` across requests is total model time, which is usually less than total session wall time (which also includes tool execution and human think time).
 - **`timeToFirstToken`** is part of `duration`, not on top of it.
-- **`tool/runSubagent`** as `metadata` is irrelevant — what matters is the **request `name` field** being `"tool/runSubagent"`. When you see that, the prompt was spawned by a sub-agent invocation. The digest flags such prompts with `isSubagent: true`.
+- **`tool/runSubagent`** as `metadata` is irrelevant — what matters is the **request `name` field** being `"tool/runSubagent"`. When you see that, the prompt was spawned by a sub-agent invocation. The digest flags such prompts with `isSubagent: true`, and resolves the full parent ↔ subagent linkage on `prompts[].spawnedBy` (the `runSubagent` toolCall ref that spawned this subagent) and `prompts[].spawnedSubagents` (which subagents this prompt fanned out into). Use that linkage when answering "what did the subagents do?" questions — do NOT eyeball it from prompt ordering.
+- **Subagent caches are isolated from the parent.** Each subagent runs in its own process and only inherits Anthropic's cross-session system-prompt cache (typically ~15–20K cached tokens on the very first call). Results flow back as plain text into the parent's prefix; the rich intermediate work (raw file reads etc.) is discarded. High intra-subagent hit rates (90%+) are normal and do not mean the parent benefited.
 - **A `toolCall` log's `id` matches a `toolCallId` on a later tool-role message** in a subsequent request. That's how you reconstruct the chain "model decided X → called tool → got result → next request sees the result."
 - **Conversation roles are integers, not strings.** 0=system, 1=user, 2=assistant, 3=tool.
 - **`completion_tokens` UNDER-REPORTS when extended thinking is on.** Copilot exports set `tokens: 0` on every thinking block and `completion_tokens_details.reasoning_tokens: 0` on every request, even when the response clearly contains thinking output. So `rollups.cost.*` is a LOWER BOUND for Anthropic models. The digest estimates the gap in `rollups.thinking` (raw byte counts of distinct thinking events) and `rollups.cost.thinkingUnderCount` (output-rate cost of plaintext thinking). Encrypted thinking blobs ride on the input side and are heavily cache-amortized, so the output-side plaintext is the dominant missing cost.
@@ -227,6 +229,19 @@ prefix-carry form above is what subsequent requests see.
     errors: {
       toolCallErrors,      // tool responses flagged by heuristic (starts with Error:/Failed, contains <error>, has "error":)
       promptsWithErrors    // count of prompts with at least one tool-call error
+    },
+    cacheAnomalies: {      // requests that started essentially cold despite a non-trivial prefix
+      count,
+      thresholdHitRate,    // = 0.5; below this counts as anomaly
+      minPromptTokens,     // = 5000; below this counts as trivial and is ignored
+      items: [{
+        ref, t, model,
+        promptTokens, cachedTokens, cacheCreationTokens, cacheHitRate,
+        cacheWriteUsd, cacheWriteCredits,   // ≈ cost to re-warm the prefix
+        toolDefsApproxTokens,
+        causes              // ["first call for model in session" | "tool-defs-changed (Δ ±N tokens)" | "time-gap (~N min since prior request, cache likely evicted)" | "unknown"]
+      }],
+      note
     }
   }
   pricing: {                   // resolved rates the digest used + the full embedded table
@@ -256,7 +271,9 @@ prefix-carry form above is what subsequent requests see.
     toolDefsApproxTokens,
     toolErrorCount, hadError,
     finalAssistantPreview,    // last assistant text from the last request, truncated to 800 chars
-    firstTime, lastTime, isSubagent
+    firstTime, lastTime, isSubagent,
+    spawnedBy,                // ref of the parent's runSubagent toolCall (e.g. "p2.l1") if isSubagent, else null
+    spawnedSubagents          // [{ toolCallRef, subagentRef, description }] - empty if this prompt did not spawn any
   }]
   timeline: [
     // request rows carry full cost decomposition + tool-defs accounting + assistant preview
@@ -401,12 +418,14 @@ When you need to read a single message body that is long, project just `.content
 | "How much of cost is tool definitions?" | `rollups.toolDefs.approxFullPriceUsd` (worst case) and `approxShareOfPromptTokens`. Per-call: `timeline[*].toolDefsApproxFullPriceUsd`. |
 | "What would this cost on model X?" | Recompute with rates from `pricing.table[]` against the token fields (`promptTokens`, `cachedTokens`, `cacheCreationTokens`, `completionTokens`) on each request. |
 | "Was caching working?" | `rollups.cacheHitRate` + per-prompt `cachedTokens / promptTokens`. Per-call: `timeline[*].cacheHitRate` and `cacheSavingsUsd`. |
+| "Was there a cold-start or cache miss anywhere?" | `rollups.cacheAnomalies.items` — each entry has the ref, hit rate, cache-write credits paid to re-warm, and a `causes` hint (tool-defs delta, time-gap, or first-call). Cold starts on large prefixes are usually the single biggest single cache lever in a run. |
+| "Which prompts were sub-agents and who spawned them?" | `prompts[] where isSubagent` for the list. For each, `spawnedBy` is the parent's `runSubagent` toolCall ref. For the inverse view, parents carry `spawnedSubagents` with `{ toolCallRef, subagentRef, description }`. Never infer subagent parentage from prompt ordering alone. |
 | "Did anything fail?" | `rollups.errors`; per-prompt `hadError` / `toolErrorCount`; per-tool `tools[].errors`; per-call `timeline[*].response.hasError`. |
 | "What did the agent say at the end of prompt N?" | `prompts[N].finalAssistantPreview` (truncated to 800 chars); per-request preview at `timeline[*].assistantTextPreview` (240 chars). |
 | "What did tool Y do?" | `timeline[*].argsPreview` and `timeline[*].response.preview` on toolCall rows. Drop to raw file via the ref for the full body. |
 | "What files did it touch?" | `files[]` |
 | "What did it do first / last?" | `timeline[0]` / `timeline[-1]`, or first/last entry per prompt |
-| "Which prompts were sub-agents?" | `prompts[] where isSubagent` |
+| "Which prompts were sub-agents?" | `prompts[] where isSubagent` (kept for backward compatibility — prefer the spawn-linkage question above) |
 | "Why did the model decide to do X?" | Find the relevant request via timeline, then drill into `requestMessages.messages` for that request |
 | "What was in the model's context when it called tool Y?" | Find the request whose response advertised the toolCall id; read its `requestMessages.messages` |
 
@@ -414,7 +433,7 @@ When you need to read a single message body that is long, project just `.content
 
 - Cite refs (`p2.l3`) when pointing at specific events so the user can trace back.
 - When the digest's number disagrees with the user's intuition, double-check by computing from the raw file before pushing back.
-- Do not invent fields. The schema above is complete as of digest version 6. If something seems missing, peek at the raw file and tell the user it is not in the digest.
+- Do not invent fields. The schema above is complete as of digest version 7. If something seems missing, peek at the raw file and tell the user it is not in the digest.
 - **When extended thinking is detected (`rollups.thinking.present` true), always disclose it in cost discussions.** The headline credits number from `rollups.cost.credits.total` is a LOWER BOUND. Add the gap from `rollups.cost.thinkingUnderCount.approxMissingCredits` and frame it: "this run used extended thinking, so the real billed output is roughly headline + ~M credits hidden in plaintext reasoning." Encrypted thinking blobs are input-side and largely cache-amortized; don't add them on top.
 - **Don't conflate `completionTokens` with "what the model said to the user."** For implementation-heavy prompts, most of completion is `toolCallPayloads.approxTokensTotal` (code being written into tool calls). Caveman-style output reduction only affects `visibleTextApproxTokens`. When the user asks "could we have written less?" lead with that split.
 - **Lead with AI credits when reporting cost** (GitHub UBB, post-2026-06-01: 1 credit = $0.01). Put the USD equivalent in parens. Use `rollups.cost.credits.*` and `prompts[].credits` directly; for any other number, multiply USD × 100. Cite `pricingVersion`. If `allModelsPriced` is false, flag that some calls were not priced.

@@ -5,7 +5,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const DIGEST_VERSION = 6;
+const DIGEST_VERSION = 7;
 const CREDITS_PER_USD = 100; // GitHub AI Credits: 1 credit = $0.01 USD (UBB launch 2026-06-01)
 const credits = (usd) => Math.round(usd * CREDITS_PER_USD * 10) / 10; // 1 decimal credit
 
@@ -320,7 +320,13 @@ prompts.forEach((p, pi) => {
     firstTime: null,
     lastTime: null,
     isSubagent: false,
+    spawnedBy: null,           // toolCall ref (e.g. "p2.l0") if this prompt is a subagent
+    spawnedSubagents: [],      // [{ toolCallRef, subagentRef, description }] if this prompt spawned any
   };
+
+  // runSubagent toolCall args captured during this prompt; resolved to
+  // subagent prompt refs in the post-processing linkage pass.
+  const spawnAttempts = [];
 
   // Distinct thinking events scoped to this prompt (deduped by text).
   const promptThinkingTexts = new Set();
@@ -384,6 +390,30 @@ prompts.forEach((p, pi) => {
         else if (FILE_WRITE_TOOLS.has(tool)) fs2.writes += 1;
         else if (FILE_LIST_TOOLS.has(tool)) fs2.lists += 1;
         fileStats.set(fp, fs2);
+      }
+
+      // Capture subagent spawn intent for the post-processing linkage pass.
+      if (tool === "runSubagent") {
+        let parsedArgs = null;
+        try {
+          parsedArgs = typeof log.args === "string"
+            ? JSON.parse(log.args)
+            : log.args;
+        } catch { parsedArgs = null; }
+        const description = parsedArgs && typeof parsedArgs.description === "string"
+          ? parsedArgs.description
+          : null;
+        const prompt = parsedArgs && typeof parsedArgs.prompt === "string"
+          ? parsedArgs.prompt
+          : null;
+        if (prompt) {
+          spawnAttempts.push({
+            toolCallRef: ref,
+            toolCallId: log.id ?? null,
+            description,
+            promptHead: prompt.slice(0, 160),
+          });
+        }
       }
 
       const respSummary = summarizeToolResponse(log.response);
@@ -554,7 +584,7 @@ prompts.forEach((p, pi) => {
 
       timeline.push({
         ref,
-        t,
+        t: t ?? md.startTime ?? null,
         kind: "request",
         requestType: log.type ?? null,
         name: log.name ?? null,
@@ -593,8 +623,48 @@ prompts.forEach((p, pi) => {
     }
   });
 
+  // Stash spawnAttempts on the summary so the post-prompt linkage pass
+  // can resolve refs once all subagent prompts are visible.
+  pSummary._spawnAttempts = spawnAttempts;
   promptsOut.push(pSummary);
 });
+
+// --- Subagent linkage pass --------------------------------------------------
+// p2.l0 runSubagent toolCall -> p1 (the subagent prompt it spawned).
+// Match by prompt-text head (the runSubagent args.prompt is copied verbatim
+// into the spawned subagent's prompt). This is deterministic; we do not
+// invent fuzzy matches.
+{
+  const subagents = promptsOut.filter((p) => p.isSubagent);
+  const usedSubagentRefs = new Set();
+  for (const parent of promptsOut) {
+    const attempts = parent._spawnAttempts || [];
+    for (const att of attempts) {
+      const head = att.promptHead || "";
+      const match = subagents.find(
+        (s) => !usedSubagentRefs.has(s.ref) && typeof s.promptText === "string"
+          && s.promptText.slice(0, 160) === head
+      );
+      if (match) {
+        usedSubagentRefs.add(match.ref);
+        match.spawnedBy = att.toolCallRef;
+        parent.spawnedSubagents.push({
+          toolCallRef: att.toolCallRef,
+          subagentRef: match.ref,
+          description: att.description,
+        });
+      } else {
+        // Record the attempt without a match so the user can see it.
+        parent.spawnedSubagents.push({
+          toolCallRef: att.toolCallRef,
+          subagentRef: null,
+          description: att.description,
+        });
+      }
+    }
+    delete parent._spawnAttempts;
+  }
+}
 
 ttftSamples.sort((a, b) => a - b);
 durationSamples.sort((a, b) => a - b);
@@ -635,6 +705,63 @@ for (const p of promptsOut) {
   p.hadError = p.toolErrorCount > 0;
   p.credits = credits(p.costUsd);
   p.creditsWithoutCache = credits(p.withoutCacheUsd);
+}
+
+// --- Cache-anomaly pass -----------------------------------------------------
+// Flag requests that started essentially cold despite a non-trivial prefix.
+// A cold start on a large prefix is usually the single biggest cache lever
+// in a session (every byte gets cache-written at premium rate). We only
+// surface clear outliers; the heuristic for the cause is best-effort.
+const CACHE_ANOMALY_MIN_TOKENS = 5000;   // ignore trivial calls
+const CACHE_ANOMALY_HIT_THRESHOLD = 0.5; // flag below this
+const TOOLDEFS_DELTA_TOKENS = 500;       // tool-defs change significant if > N tokens
+const TIME_GAP_MS = 5 * 60 * 1000;       // Anthropic default cache TTL is ~5 min
+const cacheAnomalies = [];
+{
+  const lastByModel = new Map(); // model -> { t, toolDefsApproxTokens }
+  for (const row of timeline) {
+    if (row.kind !== "request") continue;
+    if ((row.promptTokens ?? 0) < CACHE_ANOMALY_MIN_TOKENS) {
+      lastByModel.set(row.model, { t: row.t, toolDefsApproxTokens: row.toolDefsApproxTokens });
+      continue;
+    }
+    if ((row.cacheHitRate ?? 0) >= CACHE_ANOMALY_HIT_THRESHOLD) {
+      lastByModel.set(row.model, { t: row.t, toolDefsApproxTokens: row.toolDefsApproxTokens });
+      continue;
+    }
+    const prev = lastByModel.get(row.model);
+    const causes = [];
+    if (!prev) {
+      causes.push("first call for model in session");
+    } else {
+      const toolDelta = (row.toolDefsApproxTokens ?? 0) - (prev.toolDefsApproxTokens ?? 0);
+      if (Math.abs(toolDelta) >= TOOLDEFS_DELTA_TOKENS) {
+        causes.push(`tool-defs-changed (Δ ${toolDelta >= 0 ? "+" : ""}${toolDelta} tokens)`);
+      }
+      if (row.t && prev.t) {
+        const gapMs = new Date(row.t).getTime() - new Date(prev.t).getTime();
+        if (gapMs >= TIME_GAP_MS) {
+          const gapMin = Math.round(gapMs / 60000);
+          causes.push(`time-gap (~${gapMin} min since prior request, cache likely evicted)`);
+        }
+      }
+    }
+    if (causes.length === 0) causes.push("unknown");
+    cacheAnomalies.push({
+      ref: row.ref,
+      t: row.t,
+      model: row.model,
+      promptTokens: row.promptTokens,
+      cachedTokens: row.cachedTokens,
+      cacheCreationTokens: row.cacheCreationTokens,
+      cacheHitRate: row.cacheHitRate,
+      cacheWriteUsd: row.cacheWriteUsd,
+      cacheWriteCredits: credits(row.cacheWriteUsd ?? 0),
+      toolDefsApproxTokens: row.toolDefsApproxTokens,
+      causes,
+    });
+    lastByModel.set(row.model, { t: row.t, toolDefsApproxTokens: row.toolDefsApproxTokens });
+  }
 }
 
 // Resolved pricing block: which embedded rates were used for each model
@@ -775,6 +902,14 @@ const digest = {
     errors: {
       toolCallErrors: totalToolCallErrors,
       promptsWithErrors: promptsOut.filter((p) => p.hadError).length,
+    },
+    cacheAnomalies: {
+      count: cacheAnomalies.length,
+      thresholdHitRate: CACHE_ANOMALY_HIT_THRESHOLD,
+      minPromptTokens: CACHE_ANOMALY_MIN_TOKENS,
+      items: cacheAnomalies,
+      note:
+        "Requests with promptTokens >= minPromptTokens AND cacheHitRate < thresholdHitRate. These usually indicate either a fresh model session, a tool-defs change between prompts (most common cause inside VS Code mode switches), or a 5+ minute gap that exceeded the Anthropic prompt-cache TTL. Each anomaly's cacheWriteCredits is roughly the cost paid to re-warm the prefix.",
     },
   },
   pricing: {
