@@ -110,4 +110,73 @@ describe("parseCopilotPromptsJSON", function () {
     expect(parsed!.events[0].text.length).toBe(4000);
     expect(parsed!.events[0].text.endsWith("…")).toBe(true);
   });
+
+  it("flattens nested logs[].kind==='request' exports into per-call events", function () {
+    // This mirrors the real ~/CopilotLogExports/*.json export shape produced by
+    // the Copilot Chat export tooling: one entry per user prompt, with all
+    // model requests nested inside .logs[] and usage on metadata.usage.
+    const nested = JSON.stringify({
+      exportedAt: "2026-05-26T08:33:05.464Z",
+      totalPrompts: 1,
+      prompts: [
+        {
+          prompt: "Refactor the cart code",
+          promptId: "p1",
+          logs: [
+            { id: "t1", kind: "toolCall", tool: "read_file", args: {}, time: "2026-05-26T08:33:00Z" },
+            {
+              id: "r1",
+              kind: "request",
+              type: "ChatMLSuccess",
+              name: "panel/editAgent",
+              metadata: {
+                model: "claude-sonnet-4.6",
+                startTime: "2026-05-26T08:33:01Z",
+                endTime: "2026-05-26T08:33:05Z",
+                duration: 4000,
+                usage: {
+                  prompt_tokens: 12000,
+                  completion_tokens: 800,
+                  prompt_tokens_details: { cached_tokens: 10000, cache_creation_input_tokens: 200 },
+                },
+                tools: [{ name: "read_file", input_schema: { type: "object" } }],
+              },
+              requestMessages: { messages: [{ role: 0, content: ["sys"] }, { role: 1, content: ["x"] }] },
+              response: { type: "ChatMLSuccess", message: { 0: "" } },
+            },
+            {
+              id: "r2",
+              kind: "request",
+              type: "ChatMLSuccess",
+              name: "panel/editAgent",
+              metadata: {
+                model: "claude-sonnet-4.6",
+                duration: 3000,
+                usage: { prompt_tokens: 13000, completion_tokens: 600 },
+                tools: [],
+              },
+              requestMessages: { messages: [] },
+              response: { type: "ChatMLSuccess", message: { 0: "" } },
+            },
+          ],
+        },
+      ],
+    });
+    expect(detectCopilotPrompts(nested)).toBe(true);
+    const parsed = parseCopilotPromptsJSON(nested);
+    expect(parsed).not.toBeNull();
+    // Two request logs → two synthesized calls/events.
+    expect(parsed!.events).toHaveLength(2);
+    // User-facing prompt text is preserved on every synthesized call so
+    // CostView's "user message" column doesn't show numeric-role gibberish.
+    expect(parsed!.events[0].text).toBe("Refactor the cart code");
+    expect(parsed!.events[1].text).toBe("Refactor the cart code");
+    expect(parsed!.metadata.primaryModel).toBe("claude-sonnet-4.6");
+    expect(parsed!.metadata.tokenUsage).toMatchObject({
+      inputTokens: 25000,
+      outputTokens: 1400,
+      cacheRead: 10000,
+      cacheWrite: 200,
+    });
+  });
 });

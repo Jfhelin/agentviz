@@ -24,12 +24,71 @@ function parseJSON(text: string): unknown {
 }
 
 function getCalls(value: unknown): PromptCall[] | null {
-  if (Array.isArray(value)) return value.filter(isRecord) as PromptCall[];
+  if (Array.isArray(value)) return flattenPromptCalls(value.filter(isRecord) as PromptCall[]);
   if (isRecord(value)) {
-    if (Array.isArray(value.prompts)) return value.prompts.filter(isRecord) as PromptCall[];
-    if (Array.isArray(value.calls)) return value.calls.filter(isRecord) as PromptCall[];
+    if (Array.isArray(value.prompts)) return flattenPromptCalls(value.prompts.filter(isRecord) as PromptCall[]);
+    if (Array.isArray(value.calls)) return flattenPromptCalls(value.calls.filter(isRecord) as PromptCall[]);
   }
   return null;
+}
+
+// Copilot Chat prompt exports come in two shapes:
+//   1. Flat:   prompts[].request / prompts[].response  (older / synthetic)
+//   2. Nested: prompts[].logs[] where each log has kind === "request",
+//              requestMessages.messages, and metadata.{model, usage, tools, ...}
+// We normalize the nested shape into per-model-request PromptCall records so
+// the rest of the parser can stay shape-agnostic. The user-facing prompt text
+// is preserved on every synthesized call so CostView's "User Message" column
+// keeps showing the original prompt rather than the synthetic call name.
+function flattenPromptCalls(items: PromptCall[]): PromptCall[] {
+  const out: PromptCall[] = [];
+  for (let index = 0; index < items.length; index += 1) {
+    const item = items[index];
+    if (isPromptCall(item)) {
+      out.push(item);
+      continue;
+    }
+    if (Array.isArray(item.logs)) {
+      const promptText = typeof item.prompt === "string" ? item.prompt : "";
+      for (let logIndex = 0; logIndex < item.logs.length; logIndex += 1) {
+        const log = item.logs[logIndex];
+        if (!isRecord(log) || log.kind !== "request") continue;
+        const converted = convertNestedRequestLog(log, promptText);
+        if (converted) out.push(converted);
+      }
+    }
+  }
+  return out;
+}
+
+function convertNestedRequestLog(log: AnyRecord, promptText: string): PromptCall | null {
+  const metadata = isRecord(log.metadata) ? log.metadata : {};
+  const usage = isRecord(metadata.usage) ? metadata.usage : null;
+  if (!usage) return null;
+  const requestMessages = isRecord(log.requestMessages) ? log.requestMessages : {};
+  const messages = Array.isArray(requestMessages.messages) ? requestMessages.messages : [];
+  // Synthesize the flat shape downstream code expects. We keep the original
+  // prompt text in `userMessage` so CostView's last-user-message extraction
+  // surfaces it for every call, even when the message array uses numeric roles.
+  const request: AnyRecord = {
+    messages,
+    model: metadata.model,
+    tools: Array.isArray(metadata.tools) ? metadata.tools : [],
+  };
+  const response: AnyRecord = {
+    usage,
+    model: metadata.model,
+  };
+  return {
+    request,
+    response,
+    model: metadata.model,
+    userMessage: promptText,
+    startTime: metadata.startTime,
+    endTime: metadata.endTime,
+    duration: metadata.duration,
+    name: log.name,
+  } as PromptCall;
 }
 
 function isPromptCall(call: PromptCall): boolean {
@@ -177,6 +236,8 @@ function getUsage(usage: AnyRecord): TokenUsage | null {
     usage.cache_write_input_tokens,
     usage.cache_write_tokens,
     usage.cacheWrite,
+    promptDetails.cache_creation_input_tokens,
+    promptDetails.cache_creation_tokens,
     inputDetails.cache_creation_tokens,
     outputDetails.cache_creation_tokens,
   );
@@ -223,7 +284,9 @@ function makeEvent(index: number, call: PromptCall): NormalizedEvent | null {
   const tools = getTools(call.request);
   const usage = getUsage(call.response.usage);
   const model = getModel(call);
-  const userText = getLastUserMessage(messages);
+  const userText = typeof call.userMessage === "string" && call.userMessage.trim()
+    ? call.userMessage
+    : getLastUserMessage(messages);
   const contextBreakdown = buildContextBreakdown(messages, tools);
   return {
     t: index,
