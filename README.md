@@ -1,3 +1,6 @@
+> [!IMPORTANT]
+> **This fork is archived and no longer maintained.** Development continues in the independent [AGENTVIZ STUDIO](https://github.com/Jfhelin/agentviz-studio) repository. Existing releases remain available here for historical installations.
+
 <div align="center">
 
 # ◇ AGENTVIZ
