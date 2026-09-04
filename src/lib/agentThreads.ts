@@ -32,10 +32,14 @@ function taskSnippet(text: string): string {
   return line.length <= 80 ? line : line.slice(0, 79).trimEnd() + "…";
 }
 
+function normalizeTask(text: string): string {
+  return (text || "").trim().replace(/\s+/g, " ");
+}
+
 export function buildAgentThreads(prompts: CostAnalysisPrompt[]): AgentThreadsResult {
   if (!prompts.length) return { threads: [], promptIdToThreadId: {} };
 
-  const parentByTask = new Map<string, string>();
+  const parentsByTask = new Map<string, string[]>();
   for (const prompt of prompts) {
     if (isSubagentPrompt(prompt)) continue;
     for (const event of prompt.events) {
@@ -44,7 +48,10 @@ export function buildAgentThreads(prompts: CostAnalysisPrompt[]): AgentThreadsRe
         event.name === "runSubagent" &&
         event.subagent?.argsPrompt
       ) {
-        parentByTask.set(event.subagent.argsPrompt, prompt.promptId);
+        const task = normalizeTask(event.subagent.argsPrompt);
+        const parents = parentsByTask.get(task) || [];
+        parents.push(prompt.promptId);
+        parentsByTask.set(task, parents);
       }
     }
   }
@@ -79,12 +86,13 @@ export function buildAgentThreads(prompts: CostAnalysisPrompt[]): AgentThreadsRe
     }
 
     const letter = String.fromCharCode(65 + (subagentIndex % 26));
+    const matchingParents = parentsByTask.get(normalizeTask(prompt.userMessage));
     const thread: AgentThread = {
       id: prompt.promptId,
       kind: "subagent",
       label: "Subagent " + letter,
       promptIds: [prompt.promptId],
-      parentPromptId: parentByTask.get(prompt.userMessage) || null,
+      parentPromptId: matchingParents?.shift() || null,
       taskSnippet: taskSnippet(prompt.userMessage),
       measuredCost: prompt.cost,
       measuredLlmCalls: prompt.llmCount,

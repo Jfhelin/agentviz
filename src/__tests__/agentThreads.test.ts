@@ -113,4 +113,38 @@ describe("buildAgentThreads", () => {
     expect(result.threads).toHaveLength(1);
     expect(result.threads[0].measuredLlmCalls).toBe(0);
   });
+
+  it("links duplicate task text to parent spawns in order", () => {
+    const spawn = (id: string) => prompt({
+      promptId: id,
+      events: [{
+        kind: "tool",
+        id: "spawn-" + id,
+        name: "runSubagent",
+        argsSummary: "",
+        rawArgs: "",
+        thinking: "",
+        resultChars: 0,
+        resultTokens: 0,
+        resultPreview: "",
+        cumCostAfter: 0,
+        subagent: {
+          description: "worker",
+          argsPrompt: "same task",
+          promptChars: 9,
+          promptTokensEst: 3,
+        },
+      }],
+    });
+    const result = buildAgentThreads([
+      spawn("parent-1"),
+      spawn("parent-2"),
+      prompt({ promptId: "child-1", name: "tool/runSubagent", userMessage: "same   task" }),
+      prompt({ promptId: "child-2", name: "tool/runSubagent", userMessage: "same task" }),
+    ]);
+    expect(result.threads.slice(1).map((thread) => thread.parentPromptId)).toEqual([
+      "parent-1",
+      "parent-2",
+    ]);
+  });
 });

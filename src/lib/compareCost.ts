@@ -497,16 +497,26 @@ function summarizeRun(ca: CostAnalysisLike | null | undefined): RunSummary {
   const cacheDenom = totalCached + totalFresh + totalCacheWrite;
   const cacheHitRate = cacheDenom > 0 ? totalCached / cacheDenom : 0;
 
-  // Final answer = response preview of the LAST event of the LAST non-overhead
-  // prompt. Falls back to the very last event if every prompt is overhead.
+  // Final answer = full response of the last primary LLM call. A prompt can
+  // contain both primary and overhead calls, so filtering only at prompt level
+  // can accidentally compare generated titles instead of user-facing answers.
   function isOverheadPrompt(p: PromptLike): boolean {
     const llmEvents = p.events.filter((e) => e.kind === "llm");
     if (llmEvents.length === 0) return false;
     return llmEvents.every((e) => e.category === "overhead");
   }
+  function lastLlmEvent(p: PromptLike, includeOverhead: boolean): EventLike | null {
+    for (let index = p.events.length - 1; index >= 0; index -= 1) {
+      const event = p.events[index];
+      if (event.kind && event.kind !== "llm") continue;
+      if (!includeOverhead && event.category === "overhead") continue;
+      return event;
+    }
+    return null;
+  }
   const userFacingPrompts = ca.prompts.filter((p) => !isOverheadPrompt(p));
   const userPrompts: Array<{ label: string; finalAnswer: string }> = userFacingPrompts.map((p) => {
-    const lastE = p.events.length ? p.events[p.events.length - 1] : null;
+    const lastE = lastLlmEvent(p, false);
     return {
       label: (p.label || "").trim(),
       finalAnswer: (lastE && (lastE.responseText || lastE.responsePreview)) || "",
@@ -514,9 +524,7 @@ function summarizeRun(ca: CostAnalysisLike | null | undefined): RunSummary {
   });
   const lastUserPrompt = userPrompts.length ? userPrompts[userPrompts.length - 1] : null;
   const fallbackLast = ca.prompts[ca.prompts.length - 1];
-  const fallbackLastEv = fallbackLast && fallbackLast.events.length
-    ? fallbackLast.events[fallbackLast.events.length - 1]
-    : null;
+  const fallbackLastEv = fallbackLast ? lastLlmEvent(fallbackLast, true) : null;
   const finalAnswer = lastUserPrompt
     ? lastUserPrompt.finalAnswer
     : ((fallbackLastEv && (fallbackLastEv.responseText || fallbackLastEv.responsePreview)) || "");

@@ -11,6 +11,10 @@ export interface SessionAnalysisExportOptions {
 }
 
 function compactCall(call: CostAnalysisCall) {
+  const contextBucketsEstimated = {
+    ...call.components,
+    current: Math.max(0, call.components.current - (call.imageTokensEst || 0)),
+  };
   return {
     id: call.id,
     name: call.name,
@@ -26,7 +30,16 @@ function compactCall(call: CostAnalysisCall) {
       outputAttribution: call.outputAttribution,
     },
     costUsd: call.cost,
-    context: call.components,
+    contextAttributionEstimated: {
+      buckets: contextBucketsEstimated,
+      totalMeasuredInput: call.promptTokens,
+      method: "Character-weighted allocation scaled to measured input tokens",
+    },
+    imageContextSupplemental: {
+      newImages: call.newImages?.length || 0,
+      inputTokensEstimated: call.imageTokensEst,
+      includedInMeasuredInput: true,
+    },
     cache: {
       deltaVsPreviousSameModel: call.deltaVsPrev,
       unexpectedMiss: call.unexpectedMiss,

@@ -1344,19 +1344,28 @@ export default function CostView(props) {
   }, [analysis]);
 
   var toolSummary = useMemo(function () {
-    var offered = 0;
     var counts = {};
+    var toolCatalog = new Set();
+    var maxOffered = 0;
     analysis.prompts.forEach(function (p) {
       p.events.forEach(function (e) {
-        if (e.kind === "llm") offered = Math.max(offered, e.totalTools || 0);
-        if (e.kind === "tool") counts[e.name] = (counts[e.name] || 0) + 1;
+        if (e.kind === "llm") {
+          maxOffered = Math.max(maxOffered, e.totalTools || 0);
+          (e.toolGroups || []).forEach(function (group) {
+            (group.tools || []).forEach(function (tool) { toolCatalog.add(tool.name); });
+          });
+        }
+        if (e.kind === "tool") {
+          counts[e.name] = (counts[e.name] || 0) + 1;
+          toolCatalog.add(e.name);
+        }
       });
     });
     var top = Object.keys(counts)
       .sort(function (a, b) { return counts[b] - counts[a] || a.localeCompare(b); })
       .slice(0, 3)
       .map(function (name) { return name + " ×" + counts[name]; });
-    return { offered: offered, usedDistinct: Object.keys(counts).length, top: top };
+    return { offered: Math.max(maxOffered, toolCatalog.size), usedDistinct: Object.keys(counts).length, top: top };
   }, [analysis]);
 
   var rowKey = function (pi, ei) { return pi + ":" + ei; };

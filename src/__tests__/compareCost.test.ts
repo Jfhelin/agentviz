@@ -67,6 +67,34 @@ describe("compareRunsCost (synthetic minimal)", () => {
     expect(compareRunsCost(mk(prefix + "A"), mk(prefix + "B"))!.answersEquivalent).toBe(false);
   });
 
+  it("uses the last primary response when overhead follows in the same prompt", () => {
+    const mk = (answer: string) => ({
+      prompts: [{
+        index: 0, label: "Question", cost: 0.02, output: 10, cached: 0, fresh: 100,
+        cacheWrite: 0, promptTokens: 100, llmCount: 2,
+        events: [
+          {
+            kind: "llm" as const, category: "primary" as const, name: "panel/editAgent",
+            model: "m", cost: 0.019, output: 8, cached: 0, fresh: 90, cacheWrite: 0,
+            promptTokens: 90, components: { system: 90 }, responseText: answer,
+            responsePreview: answer,
+          },
+          {
+            kind: "llm" as const, category: "overhead" as const, name: "title",
+            model: "m", cost: 0.001, output: 2, cached: 0, fresh: 10, cacheWrite: 0,
+            promptTokens: 10, components: { system: 10 }, responseText: "same title",
+            responsePreview: "same title",
+          },
+        ],
+      }],
+      totals: { promptTokens: 100, output: 10, cached: 0, fresh: 100, cacheWrite: 0, cost: 0.02, llmCalls: 2, toolCalls: 0, cacheHitRate: 0 },
+    });
+    const result = compareRunsCost(mk("Answer A"), mk("Answer B"))!;
+    expect(result.answersEquivalent).toBe(false);
+    expect(result.finalAnswerA).toBe("Answer A");
+    expect(result.finalAnswerB).toBe("Answer B");
+  });
+
   it("classifies near-identical totals as 'noise' verdict", () => {
     const mk = (cost: number) => ({
       prompts: [{
