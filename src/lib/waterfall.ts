@@ -1,23 +1,9 @@
 import type { NormalizedEvent, WaterfallItem, WaterfallLayoutItem, WaterfallStats } from "./sessionTypes";
-import { theme } from "./theme.js";
 
 export const WATERFALL_ROW_HEIGHT = 32;
 export const WATERFALL_ROW_GAP = 2;
 
-const DARK_TOOL_PALETTE = [
-  "#3b9eff",
-  "#a78bfa",
-  "#22d3ee",
-  "#6475e8",
-  "#10d97a",
-  "#818cf8",
-  "#60c5ff",
-  "#2dd4bf",
-  "#c084fc",
-  "#94a3b8",
-];
-
-const LIGHT_TOOL_PALETTE = [
+const TOOL_PALETTE = [
   "#2563eb",
   "#7c3aed",
   "#0e7490",
@@ -30,10 +16,6 @@ const LIGHT_TOOL_PALETTE = [
   "#5b6b7f",
 ];
 
-function getToolPalette(): string[] {
-  return theme.mode === "light" ? LIGHT_TOOL_PALETTE : DARK_TOOL_PALETTE;
-}
-
 function hashToolName(name: string | undefined): number {
   if (!name) return 0;
   let hash = 0;
@@ -44,8 +26,7 @@ function hashToolName(name: string | undefined): number {
 }
 
 export function getToolColor(toolName: string | undefined): string {
-  const palette = getToolPalette();
-  return palette[hashToolName(toolName) % palette.length];
+  return TOOL_PALETTE[hashToolName(toolName) % TOOL_PALETTE.length];
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
