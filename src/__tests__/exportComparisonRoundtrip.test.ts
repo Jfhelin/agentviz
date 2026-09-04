@@ -6,7 +6,7 @@
 // the raw text inside `window.__AGENTVIZ_COMPARE__` must yield the same
 // CostAnalysis as if the file had been loaded interactively.
 //
-// Skipped when the user's real Copilot Chat fixtures aren't on disk.
+// Skipped unless optional real Copilot Chat fixture paths are provided.
 
 import { describe, it, expect } from "vitest";
 import * as fs from "fs";
@@ -14,11 +14,12 @@ import { parseCopilotChatExport } from "../lib/copilotChatExportParser";
 import { compareRunsCost } from "../lib/compareCost";
 
 const FIXTURES = {
-  caveman: "/Users/jfhelin/.copilot/workspaces/e41f93cd-465a-4313-8701-888682ca72ec/attachments/9be5e028-3b03-41ae-915f-41b83e05bf53-copilot_all_prompts_caveman.json",
-  polite:  "/Users/jfhelin/.copilot/workspaces/e41f93cd-465a-4313-8701-888682ca72ec/attachments/729bad37-c16c-4dc1-8231-f47f96d310af-copilot_all_prompts_polite.json",
+  caveman: process.env.AGENTVIZ_CAVEMAN_FIXTURE || "",
+  polite: process.env.AGENTVIZ_POLITE_FIXTURE || "",
 };
 
 const haveFixtures = Object.values(FIXTURES).every(p => {
+  if (!p) return false;
   try { fs.accessSync(p); return true; } catch { return false; }
 });
 

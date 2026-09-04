@@ -78,7 +78,9 @@ export function formatComparisonAsMarkdown(
   const lines: string[] = [];
 
   // Header
-  lines.push(`# Cost compare summary: ${nameA} vs ${nameB}`);
+  lines.push(`# AGENTVIZ comparison analysis package: ${nameA} vs ${nameB}`);
+  lines.push("");
+  lines.push("Analyze the controlled comparison below. Treat blocking drift as a confound, distinguish measured values from projections, and do not claim causality from path-dependent N=1 cost differences.");
   lines.push("");
   if (technique) {
     lines.push(`**Technique under test:** ${technique}`);
@@ -199,8 +201,28 @@ export function formatComparisonAsMarkdown(
   lines.push("```");
   lines.push("");
 
+  lines.push("## Structured facts");
+  lines.push("```json");
+  lines.push(JSON.stringify({
+    schemaVersion: 1,
+    names: { a: nameA, b: nameB },
+    technique: technique || null,
+    runSummaries: { a: cmp.a, b: cmp.b },
+    verdict: cmp.verdict,
+    drift: cmp.drift,
+    headlineKpis: cmp.kpis,
+    behavioralKpis: cmp.behavioralKpis,
+    divergenceSplit: cmp.divergenceSplit,
+    prefixTaxProjections: cmp.prefixTaxProjections,
+    bucketDeltas: cmp.bucketDeltas,
+    cachePollution: cmp.cachePollution,
+    answersEquivalent: cmp.answersEquivalent,
+  }, null, 2));
+  lines.push("```");
+  lines.push("");
+
   lines.push("---");
-  lines.push("Generated from agentviz Cost Compare. All numbers computed deterministically from the parsed cost analysis.");
+  lines.push("Generated from AGENTVIZ Cost Compare. All numbers computed deterministically from the parsed cost analysis.");
 
   return lines.join("\n");
 }

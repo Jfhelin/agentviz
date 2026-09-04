@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { theme, alpha } from "../lib/theme.js";
 import { compareRunsCost, BUCKETS } from "../lib/compareCost";
 import { formatComparisonAsMarkdown } from "../lib/exportComparison";
@@ -617,6 +617,30 @@ function RunDriftPanel({ drift, nameA, nameB }) {
           );
         })}
       </div>
+      {drift.systemPromptDiff && (
+        <div style={{
+          marginTop: 10, padding: "10px 12px", background: theme.bg.base,
+          border: "1px solid " + theme.border.subtle, borderRadius: theme.radius.sm,
+        }}>
+          <div style={{ color: theme.text.secondary, fontSize: theme.fontSize.xs, fontWeight: 600, marginBottom: 6 }}>
+            System prompt blocks
+          </div>
+          {drift.systemPromptDiff.rows.map((row) => (
+            <div key={row.key} style={{
+              display: "grid", gridTemplateColumns: "1fr 80px 80px 80px",
+              gap: 8, padding: "3px 0", fontSize: 10,
+              color: row.status === "identical" ? theme.text.muted : theme.text.primary,
+            }} title={row.preview}>
+              <code>{row.key}</code>
+              <span style={{ color: COLOR_A }}>A {row.charsA.toLocaleString()}</span>
+              <span style={{ color: COLOR_B }}>B {row.charsB.toLocaleString()}</span>
+              <span style={{ color: row.delta === 0 ? theme.text.muted : theme.semantic.warning }}>
+                {row.delta > 0 ? "+" : ""}{row.delta.toLocaleString()}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
       <div style={{ marginTop: 8, fontSize: 10, color: theme.text.dim, lineHeight: 1.5 }}>
         Comparing <span style={{ color: COLOR_A }}>{nameA}</span> vs <span style={{ color: COLOR_B }}>{nameB}</span>.
         {" "}Rows marked ⚠ flag axes that should have been identical between the two runs;
@@ -860,6 +884,41 @@ function ProjectionRow({ proj, label }) {
   );
 }
 
+function OutputAttributionComparison({ a, b }) {
+  const rows = [
+    ["visible", "Visible reply"],
+    ["reasoning", "Reasoning"],
+    ["toolArguments", "Tool arguments"],
+    ["unattributed", "Unattributed"],
+  ];
+  const reasoningProvenance = (run) => {
+    const source = run.outputAttribution.reasoningSource || "none";
+    return source === "reported" ? "reported"
+      : source === "estimated" ? "estimated"
+      : source === "mixed" ? "reported + estimated"
+      : "none";
+  };
+  return (
+    <div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 100px 100px", gap: 10, fontSize: theme.fontSize.xs }}>
+        <div style={{ color: theme.text.muted }}>Attributed output category</div>
+        <div style={{ color: COLOR_A }}>Run A</div>
+        <div style={{ color: COLOR_B }}>Run B</div>
+        {rows.map(([key, label]) => (
+          <Fragment key={key}>
+            <div style={{ color: theme.text.secondary }}>{label}</div>
+            <div style={{ color: COLOR_A, fontVariantNumeric: "tabular-nums" }}>{fmtTok(a.outputAttribution[key] || 0)}</div>
+            <div style={{ color: COLOR_B, fontVariantNumeric: "tabular-nums" }}>{fmtTok(b.outputAttribution[key] || 0)}</div>
+          </Fragment>
+        ))}
+      </div>
+      <div style={{ marginTop: 10, color: theme.text.muted, fontSize: theme.fontSize.xs }}>
+        Reasoning provenance: A {reasoningProvenance(a)} · B {reasoningProvenance(b)}. Measured threads: A {a.measuredThreadCount} · B {b.measuredThreadCount}. Parent-side subagent estimates are excluded.
+      </div>
+    </div>
+  );
+}
+
 function BehavioralKpisPanel({ kpis }) {
   const fmtNum = (n, dec = 0) => {
     if (!isFinite(n)) return "--";
@@ -950,12 +1009,12 @@ function CopySummaryButton({ cmp, nameA, nameB }) {
   };
   const label = status === "copied" ? "✓ Copied to clipboard"
     : status === "error" ? "Copy failed -- see console"
-    : "Copy summary as markdown";
+    : "Copy for LLM analysis";
   return (
     <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end" }}>
       <button
         onClick={onClick}
-        title="Copy a structured markdown summary of this comparison for paste-into-chat. Useful when discussing the result with someone (or with a chat model)."
+        title="Copy a deterministic Markdown and JSON analysis package for paste into an LLM."
         style={{
           background: status === "copied" ? alpha(theme.semantic.success, 0.15) : "transparent",
           border: "1px solid " + (status === "error" ? theme.semantic.error : theme.border.default),
@@ -1034,6 +1093,9 @@ export default function CostCompare({ sessionA, sessionB, fileA, fileB }) {
 
       <SectionHeader title="Headline numbers" sub="all metrics, side by side" />
       <KpiGrid kpis={cmp.kpis} equivalent={cmp.answersEquivalent} />
+
+      <SectionHeader title="Output attribution" sub="reported output split with exact-sum accounting" />
+      <Card><OutputAttributionComparison a={cmp.a} b={cmp.b} /></Card>
 
       <SectionHeader title="Pre- vs post-divergence" sub="separates prefix tax from path-dependent behavior" />
       <Card><DivergencePanel split={cmp.divergenceSplit} projections={cmp.prefixTaxProjections} nameA={nameA} nameB={nameB} /></Card>

@@ -251,6 +251,8 @@ Token spend and context-buildup analysis for VS Code Copilot Chat exports (`copi
 
 Each LLM call surfaces three lenses on "input": **CTX** (full prompt size), **&#9651; NET** (real new tokens for that model, with per-model cache scoping), and **$ BILLED** (with a separate &#8634; RECOMMIT signal when cache writes exceeded growth). Calls also highlight unexpected cache misses with a tool-defs diff to explain the most common cause of sudden cost spikes under usage-based billing.
 
+Output is attributed into **visible reply**, **reasoning**, **tool arguments**, and an honest **unattributed** residual; the four buckets always sum to reported output usage. Response rows lead with visible text and expand into accessible sections for reasoning and structured tool payloads. Headline usage shows primary versus overhead calls, measured main/subagent threads, and how many available tools were actually used. **Copy for LLM analysis** produces a deterministic Markdown and fixed-schema JSON package with current pricing metadata and explicit measured-versus-estimated labels.
+
 The Cost tab only appears when the loaded session is a Copilot Chat export. Drag and drop a `copilot_all_prompts_*.json` file onto the landing screen to use it.
 
 For terminal-only analysis, the repository-local `copilot-chat-export` skill generates a compact digest without launching the UI:
@@ -419,6 +421,12 @@ src/
     waterfall.ts         # Waterfall view helpers: item building, stats, layout
     graphLayout.js       # ELKjs graph builder, fork/join DAG for parallel agents, layout merger
     pricing.js           # Claude model pricing table and cost estimation
+    outputAttribution.ts # Exact-sum visible/reasoning/tool-argument output attribution
+    agentThreads.ts      # Measured main/subagent thread grouping and linkage
+    llmAnalysisExport.ts # Deterministic single-session LLM analysis package
+    compareCost.ts       # Cost comparison, run drift, system-block diff, and projections
+    exportComparison.ts  # Deterministic comparison LLM analysis package
+    copilotChatExportParser.ts # VS Code Copilot Chat export parser and cost analysis
     exportHtml.js        # Self-contained HTML export for single sessions and comparisons
     formatTime.js        # Duration and date formatting utilities
     landingSessions.js   # Shared landing browser labels, filters, and format options
@@ -432,6 +440,8 @@ src/
     WaterfallView.jsx    # Tool execution waterfall with nesting and inspector
     GraphView.jsx        # Interactive turn graph with expandable tool-call nodes (lazy-loaded)
     StatsView.jsx        # Aggregate metrics, tool ranking, turn summary
+    CostView.jsx         # Token cost, context buildup, output attribution, and analysis export
+    CostCompare.jsx      # Cost comparison with drift, attribution, and analysis export
     CompareView.jsx      # Side-by-side session comparison (Scorecard + Tools tabs)
     CommandPalette.jsx   # Cmd+K fuzzy search overlay
     Timeline.jsx         # Scrubable playback bar with event markers

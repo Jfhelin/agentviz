@@ -3,14 +3,15 @@ import * as fs from "fs";
 import { compareRunsCost, projectPrefixTaxOver } from "../lib/compareCost";
 import { parseCopilotChatExport } from "../lib/copilotChatExportParser";
 
-// These fixtures live outside the repo (user attachments). The test is
-// SKIPPED when they aren't available, so CI on a fresh checkout still passes.
+// Optional real-world fixtures are supplied explicitly so tests never depend
+// on a contributor's local filesystem layout.
 const FIXTURES = {
-  caveman: "/Users/jfhelin/.copilot/workspaces/e41f93cd-465a-4313-8701-888682ca72ec/attachments/9be5e028-3b03-41ae-915f-41b83e05bf53-copilot_all_prompts_caveman.json",
-  polite:  "/Users/jfhelin/.copilot/workspaces/e41f93cd-465a-4313-8701-888682ca72ec/attachments/729bad37-c16c-4dc1-8231-f47f96d310af-copilot_all_prompts_polite.json",
+  caveman: process.env.AGENTVIZ_CAVEMAN_FIXTURE || "",
+  polite: process.env.AGENTVIZ_POLITE_FIXTURE || "",
 };
 
 const haveFixtures = Object.values(FIXTURES).every(p => {
+  if (!p) return false;
   try { fs.accessSync(p); return true; } catch { return false; }
 });
 
@@ -47,6 +48,23 @@ describe("compareRunsCost (synthetic minimal)", () => {
     expect(r2!.answersEquivalent).toBe(false);
     const r3 = compareRunsCost(mk("  paris.  "), mk("Paris."));
     expect(r3!.answersEquivalent).toBe(true); // normalized
+  });
+
+  it("compares full responses instead of truncated previews", () => {
+    const mk = (responseText: string) => ({
+      prompts: [{
+        index: 0, cost: 0.01, output: 5, cached: 0, fresh: 100, cacheWrite: 0,
+        promptTokens: 100, llmCount: 1,
+        events: [{
+          name: "x", model: "m", cost: 0.01, output: 5, cached: 0, fresh: 100,
+          cacheWrite: 0, promptTokens: 100, components: { system: 100 },
+          responsePreview: responseText.slice(0, 800), responseText,
+        }],
+      }],
+      totals: { promptTokens: 100, output: 5, cached: 0, fresh: 100, cacheWrite: 0, cost: 0.01, llmCalls: 1, toolCalls: 0, cacheHitRate: 0 },
+    });
+    const prefix = "x".repeat(800);
+    expect(compareRunsCost(mk(prefix + "A"), mk(prefix + "B"))!.answersEquivalent).toBe(false);
   });
 
   it("classifies near-identical totals as 'noise' verdict", () => {
