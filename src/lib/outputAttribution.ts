@@ -43,6 +43,23 @@ function allocateByWeight(
   return result;
 }
 
+function estimateTokensFromChars(chars: number): number {
+  return chars > 0 ? Math.ceil(chars / 4) : 0;
+}
+
+function allocateCapturedTokens(
+  available: number,
+  charCounts: Record<WeightedBucket, number>,
+): Record<WeightedBucket, number> {
+  const estimates: Record<WeightedBucket, number> = {
+    visible: estimateTokensFromChars(charCounts.visible),
+    reasoning: estimateTokensFromChars(charCounts.reasoning),
+    toolArguments: estimateTokensFromChars(charCounts.toolArguments),
+  };
+  const estimatedTotal = estimates.visible + estimates.reasoning + estimates.toolArguments;
+  return estimatedTotal <= available ? estimates : allocateByWeight(available, charCounts);
+}
+
 export function attributeOutputTokens(input: OutputAttributionInput): OutputAttribution {
   const totalTokens = Math.max(0, Math.round(input.totalTokens || 0));
   const visibleChars = Math.max(0, input.visibleChars || 0);
@@ -59,7 +76,7 @@ export function attributeOutputTokens(input: OutputAttributionInput): OutputAttr
 
   if (reportedReasoning > 0) {
     const remainder = totalTokens - reportedReasoning;
-    const allocated = allocateByWeight(remainder, {
+    const allocated = allocateCapturedTokens(remainder, {
       visible: visibleChars,
       reasoning: 0,
       toolArguments: toolArgumentChars,
@@ -74,7 +91,7 @@ export function attributeOutputTokens(input: OutputAttributionInput): OutputAttr
     };
   }
 
-  const allocated = allocateByWeight(totalTokens, {
+  const allocated = allocateCapturedTokens(totalTokens, {
     visible: visibleChars,
     reasoning: thinkingChars,
     toolArguments: toolArgumentChars,

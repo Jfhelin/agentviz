@@ -11,7 +11,7 @@
 //     fixed per call IF the bucket value is large and nearly identical
 //     between calls -- but for v1 we keep the definition simple).
 //   - "Variable" = history + tool_results + current + response (output).
-//   - Answer equivalence: byte-equal final responsePreview, after
+//   - Answer equivalence: byte-equal final response text, after
 //     trim+collapse-whitespace+lowercase.
 //   - Buckets we compare across runs match the existing CostView buckets
 //     in `CTX_KEYS`: system, tool_defs, history, tool_results, current,
@@ -33,6 +33,7 @@ interface CostAnalysisLike {
 }
 interface PromptLike {
   index: number;
+  name?: string;
   cost: number;
   output: number;
   cached: number;
@@ -505,6 +506,9 @@ function summarizeRun(ca: CostAnalysisLike | null | undefined): RunSummary {
     if (llmEvents.length === 0) return false;
     return llmEvents.every((e) => e.category === "overhead");
   }
+  function isSubagentPrompt(p: PromptLike): boolean {
+    return p.name === "tool/runSubagent";
+  }
   function lastLlmEvent(p: PromptLike, includeOverhead: boolean): EventLike | null {
     for (let index = p.events.length - 1; index >= 0; index -= 1) {
       const event = p.events[index];
@@ -514,7 +518,8 @@ function summarizeRun(ca: CostAnalysisLike | null | undefined): RunSummary {
     }
     return null;
   }
-  const userFacingPrompts = ca.prompts.filter((p) => !isOverheadPrompt(p));
+  const nonSubagentPrompts = ca.prompts.filter((p) => !isSubagentPrompt(p));
+  const userFacingPrompts = nonSubagentPrompts.filter((p) => !isOverheadPrompt(p));
   const userPrompts: Array<{ label: string; finalAnswer: string }> = userFacingPrompts.map((p) => {
     const lastE = lastLlmEvent(p, false);
     return {
@@ -523,7 +528,7 @@ function summarizeRun(ca: CostAnalysisLike | null | undefined): RunSummary {
     };
   });
   const lastUserPrompt = userPrompts.length ? userPrompts[userPrompts.length - 1] : null;
-  const fallbackLast = ca.prompts[ca.prompts.length - 1];
+  const fallbackLast = nonSubagentPrompts[nonSubagentPrompts.length - 1];
   const fallbackLastEv = fallbackLast ? lastLlmEvent(fallbackLast, true) : null;
   const finalAnswer = lastUserPrompt
     ? lastUserPrompt.finalAnswer
@@ -891,6 +896,7 @@ function buildFingerprint(ca: CostAnalysisLike | null | undefined, summary: RunS
   // start from a single user message so this captures "the prompt".
   let firstUserPrompt = "";
   for (const p of ca.prompts) {
+    if (p.name === "tool/runSubagent") continue;
     const llmEvents = (p.events || []).filter((e) => e.kind === "llm" || e.kind === undefined);
     if (llmEvents.length === 0) continue;
     const allOverhead = llmEvents.every((e) => e.category === "overhead");
@@ -954,6 +960,7 @@ function buildFingerprint(ca: CostAnalysisLike | null | undefined, summary: RunS
 
   // turnCount: number of non-overhead prompts (one per user-facing chat turn).
   const turnCount = ca.prompts.filter((p) => {
+    if (p.name === "tool/runSubagent") return false;
     const llmEvents = (p.events || []).filter((e) => e.kind === "llm" || e.kind === undefined);
     if (llmEvents.length === 0) return false;
     return !llmEvents.every((e) => e.category === "overhead");

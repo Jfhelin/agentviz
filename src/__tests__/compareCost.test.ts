@@ -95,6 +95,41 @@ describe("compareRunsCost (synthetic minimal)", () => {
     expect(result.finalAnswerB).toBe("Answer B");
   });
 
+  it("excludes subagent prompts from user-facing answers and turn counts", () => {
+    const mk = (childAnswer: string) => ({
+      prompts: [
+        {
+          index: 0, promptId: "main", name: "panel/editAgent", label: "Question",
+          cost: 0.01, output: 5, cached: 0, fresh: 100, cacheWrite: 0,
+          promptTokens: 100, llmCount: 1,
+          events: [{
+            kind: "llm" as const, category: "primary" as const, name: "panel/editAgent",
+            model: "m", cost: 0.01, output: 5, cached: 0, fresh: 100, cacheWrite: 0,
+            promptTokens: 100, components: { system: 100 }, responseText: "Main answer",
+            responsePreview: "Main answer",
+          }],
+        },
+        {
+          index: 1, promptId: "child", name: "tool/runSubagent", label: "Child task",
+          cost: 0.01, output: 5, cached: 0, fresh: 100, cacheWrite: 0,
+          promptTokens: 100, llmCount: 1,
+          events: [{
+            kind: "llm" as const, category: "primary" as const, name: "tool/runSubagent",
+            model: "m", cost: 0.01, output: 5, cached: 0, fresh: 100, cacheWrite: 0,
+            promptTokens: 100, components: { system: 100 }, responseText: childAnswer,
+            responsePreview: childAnswer,
+          }],
+        },
+      ],
+      totals: { promptTokens: 200, output: 10, cached: 0, fresh: 200, cacheWrite: 0, cost: 0.02, llmCalls: 2, toolCalls: 0, cacheHitRate: 0 },
+    });
+    const result = compareRunsCost(mk("Child A"), mk("Child B"))!;
+    expect(result.answersEquivalent).toBe(true);
+    expect(result.finalAnswerA).toBe("Main answer");
+    expect(result.behavioralKpis.userTurns.a).toBe(1);
+    expect(result.behavioralKpis.userTurns.b).toBe(1);
+  });
+
   it("classifies near-identical totals as 'noise' verdict", () => {
     const mk = (cost: number) => ({
       prompts: [{

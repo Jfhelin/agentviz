@@ -18,7 +18,7 @@ describe("attributeOutputTokens", () => {
     });
   });
 
-  it("estimates all captured buckets by character share", () => {
+  it("estimates captured buckets and leaves unobserved output unattributed", () => {
     const result = attributeOutputTokens({
       totalTokens: 11,
       visibleChars: 5,
@@ -26,10 +26,10 @@ describe("attributeOutputTokens", () => {
       toolArgumentChars: 2,
     });
     expect(result).toEqual({
-      visible: 6,
-      reasoning: 3,
-      toolArguments: 2,
-      unattributed: 0,
+      visible: 2,
+      reasoning: 1,
+      toolArguments: 1,
+      unattributed: 7,
       reasoningSource: "estimated",
     });
     expect(result.visible + result.reasoning + result.toolArguments + result.unattributed).toBe(11);
@@ -41,6 +41,16 @@ describe("attributeOutputTokens", () => {
       reasoning: 0,
       toolArguments: 0,
       unattributed: 17,
+      reasoningSource: "none",
+    });
+  });
+
+  it("does not inflate a short visible reply to fill reported output", () => {
+    expect(attributeOutputTokens({ totalTokens: 100, visibleChars: 4 })).toEqual({
+      visible: 1,
+      reasoning: 0,
+      toolArguments: 0,
+      unattributed: 99,
       reasoningSource: "none",
     });
   });
