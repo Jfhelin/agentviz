@@ -39,6 +39,11 @@ import {
 } from "./cacheAnalysis";
 import { estimateCost } from "./pricing.js";
 import { estimateImageTokens } from "./imageTokenEstimate.js";
+import {
+  attributeOutputTokens,
+  type OutputAttribution,
+} from "./outputAttribution";
+import { buildAgentThreads, type AgentThread } from "./agentThreads";
 import type {
   NormalizedEvent,
   ParsedSession,
@@ -90,6 +95,9 @@ interface RawLog {
       prompt_tokens_details?: {
         cached_tokens?: number;
         cache_creation_input_tokens?: number;
+      };
+      completion_tokens_details?: {
+        reasoning_tokens?: number;
       };
     };
     tools?: ToolDef[];
@@ -233,6 +241,73 @@ interface ImageAttachment {
   detail: string;
 }
 
+export interface SystemBlock {
+  tag: string;
+  attrs: string;
+  key: string;
+  chars: number;
+  bodyPreview: string;
+  bodyHash: string;
+}
+
+export function extractSystemBlocks(systemText: string): SystemBlock[] {
+  const blocks: SystemBlock[] = [];
+  const occurrences = new Map<string, number>();
+  const openTag = /<([a-zA-Z][\w.-]*)(\s[^>]*)?>/g;
+  let cursor = 0;
+  while (cursor < systemText.length) {
+    openTag.lastIndex = cursor;
+    const open = openTag.exec(systemText);
+    if (!open) break;
+    const tag = open[1];
+    const attrs = (open[2] || "").trim();
+    const bodyStart = open.index + open[0].length;
+    const sameOpen = new RegExp(`<${tag}(\\s[^>]*)?>`, "g");
+    const sameClose = new RegExp(`<\\/${tag}>`, "g");
+    let depth = 1;
+    let position = bodyStart;
+    let bodyEnd = -1;
+    let blockEnd = -1;
+    while (position < systemText.length) {
+      sameOpen.lastIndex = position;
+      sameClose.lastIndex = position;
+      const nestedOpen = sameOpen.exec(systemText);
+      const close = sameClose.exec(systemText);
+      if (!close) break;
+      if (nestedOpen && nestedOpen.index < close.index) {
+        depth += 1;
+        position = nestedOpen.index + nestedOpen[0].length;
+      } else {
+        depth -= 1;
+        if (depth === 0) {
+          bodyEnd = close.index;
+          blockEnd = close.index + close[0].length;
+          break;
+        }
+        position = close.index + close[0].length;
+      }
+    }
+    if (bodyEnd < 0) {
+      cursor = bodyStart;
+      continue;
+    }
+    const body = systemText.slice(bodyStart, bodyEnd);
+    const baseKey = attrs ? `${tag}[${attrs}]` : tag;
+    const occurrence = (occurrences.get(baseKey) || 0) + 1;
+    occurrences.set(baseKey, occurrence);
+    blocks.push({
+      tag,
+      attrs,
+      key: occurrence === 1 ? baseKey : `${baseKey}#${occurrence}`,
+      chars: body.length,
+      bodyPreview: body.slice(0, 400),
+      bodyHash: fnv1aHex(body.trim().replace(/\s+/g, " ")),
+    });
+    cursor = blockEnd;
+  }
+  return blocks;
+}
+
 interface ClassifiedCall {
   components: ComponentBreakdown;
   /** Raw character counts per bucket (pre-scaling). Used by cacheAnalysis to
@@ -243,9 +318,10 @@ interface ClassifiedCall {
   systemPreview: string;
   systemChars: number;
   systemHash: string;
+  systemBlocks: SystemBlock[];
   currentText: string;
   historyMsgs: { role: "user" | "assistant"; chars: number; tokens: number; preview: string }[];
-  toolResultMsgs: { chars: number; tokens: number; preview: string; label: string }[];
+  toolResultMsgs: { chars: number; tokens: number; preview: string; label: string; toolCallId: string | null }[];
   totalTools: number;
   toolGroups: { source: string; tools: { name: string; chars: number; tokens: number }[]; chars: number; tokens: number }[];
   /** Image attachments referenced by this call's request messages. The export
@@ -319,7 +395,13 @@ function classifyCall(log: RawLog): ClassifiedCall {
       const tcId = msg.toolCallId ?? msg.tool_call_id;
       const info = tcId ? toolCallMap.get(tcId) : undefined;
       const label = toolResultLabel(info, toolResultMsgs.length);
-      toolResultMsgs.push({ chars: len, tokens: 0, preview: text.slice(0, 240), label });
+      toolResultMsgs.push({
+        chars: len,
+        tokens: 0,
+        preview: text.slice(0, 240),
+        label,
+        toolCallId: tcId ?? null,
+      });
     }
   });
 
@@ -416,6 +498,7 @@ function classifyCall(log: RawLog): ClassifiedCall {
     systemPreview: systemText.slice(0, 400),
     systemChars: systemText.length,
     systemHash: fnv1aHex(systemText.trim().replace(/\s+/g, " ")),
+    systemBlocks: extractSystemBlocks(systemText),
     currentText: currentText.slice(0, 600),
     historyMsgs,
     toolResultMsgs,
@@ -455,11 +538,14 @@ export interface CostAnalysisCall {
    * the standard `{type:"success", message:[...]}` shape). Empty when the
    * export had no response payload. */
   responsePreview: string;
+  responseText: string;
   /** When the model emitted no text and only tool calls, this lists the
    * tool names + short arg summary that immediately followed this LLM call
    * in the export. Lets us show *what the model did* instead of an empty
    * response box. */
-  producedToolCalls: { name: string; argsSummary: string }[];
+  producedToolCalls: { name: string; argsSummary: string; rawArgs: string }[];
+  reasoningBlocks: { tool: string; text: string }[];
+  outputAttribution: OutputAttribution;
   model: string;
   duration: number;
   promptTokens: number;
@@ -508,6 +594,7 @@ export interface CostAnalysisCall {
   systemPreview: string;
   systemChars: number;
   systemHash: string;
+  systemBlocks: SystemBlock[];
   currentText: string;
   cumCostAfter: number;
 }
@@ -532,6 +619,7 @@ export interface CostAnalysisToolCall {
    */
   subagent?: {
     description: string;
+    argsPrompt: string;
     promptChars: number;
     promptTokensEst: number;
     modelName?: string;
@@ -545,7 +633,9 @@ export type CostAnalysisEvent =
 export interface CostAnalysisPrompt {
   index: number;
   promptId: string;
+  name: string;
   label: string;
+  userMessage: string;
   events: CostAnalysisEvent[];
   promptTokens: number;
   output: number;
@@ -561,6 +651,7 @@ export interface CostAnalysisPrompt {
 
 export interface CostAnalysis {
   prompts: CostAnalysisPrompt[];
+  threads: AgentThread[];
   totals: {
     promptTokens: number;
     output: number;
@@ -571,6 +662,9 @@ export interface CostAnalysis {
     llmCalls: number;
     toolCalls: number;
     cacheHitRate: number;
+    outputAttribution: OutputAttribution;
+    primaryLlmCalls: number;
+    overheadLlmCalls: number;
     unexpectedMissCount: number;
     unexpectedMissCost: number;
   };
@@ -617,6 +711,7 @@ function extractSubagent(log: RawLog): CostAnalysisToolCall["subagent"] | undefi
   const meta = (log as unknown as { toolMetadata?: { modelName?: string } }).toolMetadata;
   return {
     description,
+    argsPrompt: prompt,
     promptChars: prompt.length,
     // Char/4 is the standard rough token estimate. Real cost will be off by
     // ~25% but it's the best we can do without per-subagent usage data.
@@ -625,11 +720,9 @@ function extractSubagent(log: RawLog): CostAnalysisToolCall["subagent"] | undefi
   };
 }
 
-function summarizeResponse(response: unknown): string {
+function responseText(response: unknown): string {
   if (response == null) return "";
-  if (typeof response === "string") {
-    return response.length > 800 ? response.slice(0, 800) + "…" : response;
-  }
+  if (typeof response === "string") return response;
   if (typeof response === "object") {
     const obj = response as Record<string, unknown>;
     // VS Code Copilot Chat shape: { type: "success" | "error", message: string[] }
@@ -638,10 +731,25 @@ function summarizeResponse(response: unknown): string {
         .filter((m) => typeof m === "string")
         .join("\n")
         .trim();
-      if (joined) return joined.length > 800 ? joined.slice(0, 800) + "…" : joined;
+      return joined;
     }
     try {
       const json = JSON.stringify(obj);
+      return json;
+    } catch {
+      return "";
+    }
+
+  }
+  return "";
+}
+
+function summarizeResponse(response: unknown): string {
+  const text = responseText(response);
+  if (text) return text.length > 800 ? text.slice(0, 800) + "…" : text;
+  if (response && typeof response === "object") {
+    try {
+      const json = JSON.stringify(response);
       return json.length > 800 ? json.slice(0, 800) + "…" : json;
     } catch {
       return "";
@@ -650,7 +758,7 @@ function summarizeResponse(response: unknown): string {
   return "";
 }
 
-function callUsage(log: RawLog): { prompt_tokens: number; cached_tokens: number; cache_write: number; completion_tokens: number } {
+function callUsage(log: RawLog): { prompt_tokens: number; cached_tokens: number; cache_write: number; completion_tokens: number; reasoning_tokens: number } {
   const u = log.metadata?.usage ?? {};
   const ptd = u.prompt_tokens_details ?? {};
   return {
@@ -658,7 +766,35 @@ function callUsage(log: RawLog): { prompt_tokens: number; cached_tokens: number;
     completion_tokens: u.completion_tokens ?? 0,
     cached_tokens: ptd.cached_tokens ?? 0,
     cache_write: u.cache_creation_input_tokens ?? ptd.cache_creation_input_tokens ?? 0,
+    reasoning_tokens: u.completion_tokens_details?.reasoning_tokens ?? 0,
   };
+}
+
+function normalizeToolCallId(id: string | null | undefined): string {
+  return (id || "").replace(/__vscode-[A-Za-z0-9_-]+$/, "");
+}
+
+function pairToolResults(
+  pending: CostAnalysisToolCall[],
+  results: ClassifiedCall["toolResultMsgs"],
+): void {
+  const assigned = new Set<number>();
+  for (const result of results) {
+    const wanted = normalizeToolCallId(result.toolCallId);
+    let match = -1;
+    if (wanted) {
+      match = pending.findIndex((tool, index) => (
+        !assigned.has(index) && normalizeToolCallId(tool.id) === wanted
+      ));
+      if (match < 0) continue;
+    }
+    if (!wanted) match = pending.findIndex((_, index) => !assigned.has(index));
+    if (match < 0) continue;
+    assigned.add(match);
+    pending[match].resultChars = result.chars;
+    pending[match].resultTokens = result.tokens;
+    pending[match].resultPreview = result.preview;
+  }
 }
 
 // ── Parser ───────────────────────────────────────────────────────────────────
@@ -716,7 +852,14 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
   const turns: SessionTurn[] = [];
   let cumCost = 0;
   let cumPt = 0, cumOut = 0, cumCached = 0, cumCwrite = 0, cumFresh = 0;
-  let totalLlm = 0, totalTool = 0;
+  let totalLlm = 0, totalTool = 0, totalPrimaryLlm = 0, totalOverheadLlm = 0;
+  const totalOutputAttribution: OutputAttribution = {
+    visible: 0,
+    reasoning: 0,
+    toolArguments: 0,
+    unattributed: 0,
+    reasoningSource: "none",
+  };
   let totalUnexpectedMissCount = 0, totalUnexpectedMissCost = 0;
   let timeCursor = 0;
   // Per-model set of image URLs already sent in a prior call's prompt.
@@ -741,6 +884,7 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
     let pLlm = 0, pTool = 0;
     const costEvents: CostAnalysisEvent[] = [];
     const pendingToolCalls: CostAnalysisToolCall[] = [];
+    let observedToolResultCount = 0;
 
     let classifiedIdx = 0;
     let analysisCallIdx = 0;
@@ -846,27 +990,54 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
       pLlm += 1;
       totalLlm += 1;
 
-      // Pair pending tool calls with role-3 tool result messages by ordinal
-      cls.toolResultMsgs.forEach((tr, i) => {
-        if (i < pendingToolCalls.length) {
-          pendingToolCalls[i].resultChars = tr.chars;
-          pendingToolCalls[i].resultTokens = tr.tokens;
-          pendingToolCalls[i].resultPreview = tr.preview;
-        }
-      });
+      const newToolResults = cls.toolResultMsgs.length >= observedToolResultCount
+        ? cls.toolResultMsgs.slice(observedToolResultCount)
+        : cls.toolResultMsgs;
+      observedToolResultCount = cls.toolResultMsgs.length;
+      pairToolResults(pendingToolCalls, newToolResults);
       pendingToolCalls.length = 0;
 
       // Look forward in this prompt's logs to the next request log; the
       // toolCall logs in between are what this LLM call produced. This is
       // critical for showing "what the model did" when its text response is
       // empty (model emitted only tool_use blocks, no message content).
-      const producedToolCalls: { name: string; argsSummary: string }[] = [];
+      const producedToolCalls: { name: string; argsSummary: string; rawArgs: string }[] = [];
+      const reasoningBlocks: { tool: string; text: string }[] = [];
+      let thinkingChars = 0;
+      let toolArgumentChars = 0;
       for (let lookIdx = logIdx + 1; lookIdx < c.logs.length; lookIdx++) {
         const next = c.logs[lookIdx];
         if (next.kind === "request") break;
         if (next.kind === "toolCall") {
-          producedToolCalls.push({ name: next.tool ?? "", argsSummary: shortArgs(next.args) });
+          const rawArgs = asString(next.args);
+          const thinking = next.thinking?.text ?? "";
+          producedToolCalls.push({ name: next.tool ?? "", argsSummary: shortArgs(next.args), rawArgs });
+          toolArgumentChars += rawArgs.length;
+          if (thinking) {
+            reasoningBlocks.push({ tool: next.tool ?? "", text: thinking });
+            thinkingChars += thinking.length;
+          }
         }
+      }
+      const fullResponseText = responseText(log.response);
+      const outputAttribution = attributeOutputTokens({
+        totalTokens: out_t,
+        reportedReasoningTokens: usage.reasoning_tokens,
+        visibleChars: fullResponseText.length,
+        thinkingChars,
+        toolArgumentChars,
+      });
+      totalOutputAttribution.visible += outputAttribution.visible;
+      totalOutputAttribution.reasoning += outputAttribution.reasoning;
+      totalOutputAttribution.toolArguments += outputAttribution.toolArguments;
+      totalOutputAttribution.unattributed += outputAttribution.unattributed;
+      if (outputAttribution.reasoningSource !== "none") {
+        const aggregateSource = totalOutputAttribution.reasoningSource;
+        totalOutputAttribution.reasoningSource = aggregateSource === "none"
+          ? outputAttribution.reasoningSource
+          : aggregateSource === outputAttribution.reasoningSource
+            ? aggregateSource
+            : "mixed";
       }
 
       // Compute which images are newly added on this call vs. prior same-model
@@ -913,7 +1084,10 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
         name: log.name ?? "request",
         category: categorizeCallName(log.name),
         responsePreview: summarizeResponse(log.response),
+        responseText: fullResponseText,
         producedToolCalls,
+        reasoningBlocks,
+        outputAttribution,
         model,
         duration: log.metadata?.duration ?? 0,
         promptTokens: usage.prompt_tokens,
@@ -945,9 +1119,12 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
         systemPreview: cls.systemPreview,
         systemChars: cls.systemChars,
         systemHash: cls.systemHash,
+        systemBlocks: cls.systemBlocks,
         currentText: cls.currentText,
         cumCostAfter: cumCost,
       };
+      if (callEvent.category === "overhead") totalOverheadLlm += 1;
+      else totalPrimaryLlm += 1;
       if (ca.unexpectedMiss) {
         totalUnexpectedMissCount += 1;
         totalUnexpectedMissCost += cost;
@@ -989,7 +1166,9 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
     costPrompts.push({
       index: pi,
       promptId,
+      name: c.logs.find((log) => log.kind === "request")?.name ?? "",
       label: promptText.slice(0, 200),
+      userMessage: promptText,
       events: costEvents,
       promptTokens: pPt,
       output: pOut,
@@ -1017,6 +1196,7 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
   const totalDenom = cumCached + cumFresh + cumCwrite;
   const costAnalysis: CostAnalysis = {
     prompts: costPrompts,
+    threads: buildAgentThreads(costPrompts).threads,
     totals: {
       promptTokens: cumPt,
       output: cumOut,
@@ -1027,6 +1207,9 @@ export function parseCopilotChatExport(text: string): ParsedSession | null {
       llmCalls: totalLlm,
       toolCalls: totalTool,
       cacheHitRate: totalDenom > 0 ? cumCached / totalDenom : 0,
+      outputAttribution: totalOutputAttribution,
+      primaryLlmCalls: totalPrimaryLlm,
+      overheadLlmCalls: totalOverheadLlm,
       unexpectedMissCount: totalUnexpectedMissCount,
       unexpectedMissCost: totalUnexpectedMissCost,
     },

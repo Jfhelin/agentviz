@@ -54,7 +54,12 @@ src/
     graphLayout.js     # Graph view helpers: ELKjs DAG builder, layout runner, position merger
     pricing.js         # Claude + GPT-4o model pricing table and cost estimation (per-model cache ratios)
     cacheAnalysis.ts   # Per-model cache scoping, recommit math, unexpected-miss diagnosis
+    outputAttribution.ts # Exact-sum visible/reasoning/tool-argument output attribution
+    agentThreads.ts    # Measured main/subagent thread grouping and parent linkage
     copilotChatExportParser.ts # Parser + cost analysis builder for VS Code Copilot Chat exports
+    compareCost.ts     # Cost comparison, run drift, system-block diff, and projections
+    exportComparison.ts # Deterministic comparison LLM analysis package
+    llmAnalysisExport.ts # Deterministic single-session LLM analysis package
     exportHtml.js      # Self-contained HTML export for single sessions and comparisons
     dataInspector.js   # Payload summary and preview helpers for inspector panels
     formatTime.js      # Duration and date formatting utilities
@@ -71,7 +76,8 @@ src/
     WaterfallView.jsx  # Tool execution waterfall with nesting, inspector sidebar
     GraphView.jsx      # Interactive DAG of turns/tool calls with ELKjs layout, pan/zoom, animations
     StatsView.jsx      # Aggregate metrics, tool ranking, turn summary
-    CostView.jsx       # Token cost & context buildup view (Copilot Chat exports only); 3-column timeline with CTX/NET/BILLED lenses
+    CostView.jsx       # Cost/context timeline with exact output attribution and LLM analysis export
+    CostCompare.jsx    # Cost comparison with drift, attribution, projections, and analysis export
     CompareView.jsx    # Side-by-side session comparison: Scorecard + Tools tabs
     CommandPalette.jsx # Cmd+K fuzzy search overlay (events, turns, views)
     DiffViewer.jsx     # Inline unified diff view for file-editing tool calls
@@ -140,6 +146,8 @@ Vite proxies `/api/*` to the backend automatically.
 - Product name is always AGENTVIZ (all caps, no spaces)
 - UI/UX design system: see docs/ui-ux-style-guide.md -- all UI changes must conform to it
 - Cache usage summaries omit the cache-write segment when `cacheWrite` is zero
+- Output attribution must sum exactly to reported output: visible + reasoning + tool arguments + unattributed
+- Headline thread totals include measured request usage only; parent-side subagent estimates stay supplemental
 
 ## Planned features
 - Bookmarks and annotations (persisted to localStorage)

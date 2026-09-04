@@ -122,6 +122,14 @@ Used by `CostView` for token-cost categorical data and the cache-miss / recommit
 | `theme.cost.switch*` | blue tints | blue tints | Model-switch callouts |
 | `theme.cost.ok*` | green tints | green tints | Net-new / fresh content blocks |
 
+#### Output Attribution Pattern
+
+- The Cost View reuses existing semantic roles instead of adding new colors: visible reply uses `theme.cost.output`, reasoning uses `theme.cost.cwrite`, tool arguments use `theme.cost.ctxHistory`, and unattributed residual uses `theme.text.muted`.
+- The top Output KPI and every expanded response header must show the same exact-sum buckets.
+- Visible reply text leads the row headline. Reasoning and tool arguments are secondary, collapsible sections.
+- Use a native button with `aria-expanded` for collapsible content. Do not show an expand affordance for short one-line content.
+- Never label an estimated or inferred bucket as measured. Reported reasoning metadata takes precedence; character-weighted reasoning is labeled `estimated`.
+
 ### Data Visualization Scales
 
 Track colors (above) work for categorical data. For sequential/intensity data (heatmaps,

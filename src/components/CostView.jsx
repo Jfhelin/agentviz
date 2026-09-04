@@ -3,6 +3,7 @@ import { theme } from "../lib/theme.js";
 import { estimateCost, hasModelPricing, getModelPrice } from "../lib/pricing.js";
 import { estimateImageTokens, imageDollarCost } from "../lib/imageTokenEstimate.js";
 import usePersistentState from "../hooks/usePersistentState.js";
+import { formatSessionForLlmAnalysis } from "../lib/llmAnalysisExport";
 
 // Display unit for $ amounts. Module-level so the dozens of fmt$ call sites
 // don't all need a context/prop. The CostView root keeps it in sync with the
@@ -67,6 +68,20 @@ function friendlyCallName(name) {
   // panel/<something> → "Chat: something"
   if (name.indexOf("panel/") === 0) return "Chat: " + name.slice(6);
   return name;
+}
+
+function outputPartsText(parts) {
+  if (!parts) return "";
+  var labels = [
+    ["visible", "visible"],
+    ["reasoning", parts.reasoningSource === "reported" ? "reasoning" : "reasoning est."],
+    ["toolArguments", "tool args"],
+    ["unattributed", "unattributed"],
+  ];
+  return labels
+    .filter(function (item) { return (parts[item[0]] || 0) > 0; })
+    .map(function (item) { return fmtT(parts[item[0]]) + " " + item[1]; })
+    .join(" · ");
 }
 
 function fmt$(n) {
@@ -642,40 +657,98 @@ function LLMDetail(props) {
           </>
         );
       })()}
-      {(function () {
-        var hasText = ev.responsePreview && ev.responsePreview.trim().length > 0;
-        var calls = ev.producedToolCalls || [];
-        if (!hasText && calls.length === 0) return null;
-        return (
-          <div style={{ marginTop: 14 }}>
-            <div style={{ fontSize: theme.fontSize.xs, color: theme.text.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 5, fontWeight: 600 }}>
-              Response ({fmtT(ev.output)} output tok)
-            </div>
-            {hasText && <div style={textBlockStyle}>{ev.responsePreview}</div>}
-            {!hasText && calls.length > 0 && (
-              <div style={{ ...textBlockStyle, color: theme.text.secondary, fontStyle: "italic", marginBottom: 6 }}>
-                No text content -- the model spent its {fmtT(ev.output)} output tokens emitting {calls.length} tool call{calls.length === 1 ? "" : "s"}:
-              </div>
-            )}
-            {calls.length > 0 && (
-              <div style={{
-                background: theme.bg.base, border: "1px dashed " + theme.border.default,
-                borderRadius: 3, padding: "6px 10px", marginTop: hasText ? 6 : 0,
-              }}>
-                {calls.map(function (tc, i) {
-                  return (
-                    <div key={i} style={{ display: "flex", gap: 8, alignItems: "baseline", fontFamily: theme.font.mono, fontSize: theme.fontSize.xs, lineHeight: 1.7 }}>
-                      <span style={{ color: theme.text.muted }}>→</span>
-                      <span style={{ color: theme.text.primary, fontWeight: 600 }}>{tc.name || "(unnamed tool)"}</span>
-                      {tc.argsSummary && <span style={{ color: theme.text.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{tc.argsSummary}</span>}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        );
-      })()}
+      <ResponseBreakdown event={ev} />
+    </div>
+  );
+}
+
+function CollapsibleResponsePart(props) {
+  var [open, setOpen] = useState(props.defaultOpen);
+  var canCollapse = props.text.length > 160;
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        {canCollapse ? (
+          <button
+            type="button"
+            className="av-interactive"
+            aria-expanded={open}
+            onClick={function () { setOpen(!open); }}
+            style={{
+              border: "none", background: "transparent", padding: 0,
+              color: props.color, fontFamily: theme.font.mono,
+              fontSize: theme.fontSize.xs, fontWeight: 600, cursor: "pointer",
+            }}
+          >
+            {open ? "▼" : "▶"} {props.label}
+          </button>
+        ) : (
+          <span style={{ color: props.color, fontSize: theme.fontSize.xs, fontWeight: 600 }}>
+            {props.label}
+          </span>
+        )}
+        <span style={{ color: theme.text.muted, fontSize: theme.fontSize.xs }}>{fmtT(props.tokens)} tok</span>
+      </div>
+      {(!canCollapse || open) && <div style={textBlockStyle}>{props.text}</div>}
+    </div>
+  );
+}
+
+function ResponseBreakdown(props) {
+  var ev = props.event;
+  var parts = ev.outputAttribution || {};
+  var response = (ev.responseText || ev.responsePreview || "").trim();
+  var reasoning = (ev.reasoningBlocks || []).map(function (block) {
+    return (block.tool ? block.tool + ":\n" : "") + block.text;
+  }).join("\n\n");
+  var toolArgs = (ev.producedToolCalls || []).map(function (call) {
+    return (call.name || "(unnamed tool)") + (call.rawArgs ? "\n" + call.rawArgs : "");
+  }).join("\n\n");
+  if (!response && !reasoning && !toolArgs && !parts.unattributed) return null;
+  return (
+    <div style={{ marginTop: 14 }}>
+      <div style={{
+        display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap",
+        fontSize: theme.fontSize.xs, color: theme.text.muted,
+        textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 5, fontWeight: 600,
+      }}>
+        <span>Response ({fmtT(ev.output)} output tok)</span>
+        <span style={{ textTransform: "none", letterSpacing: 0, fontWeight: 400 }}>
+          {outputPartsText(parts)}
+        </span>
+      </div>
+      {response && (
+        <CollapsibleResponsePart
+          label="Visible reply"
+          tokens={parts.visible || 0}
+          text={response}
+          color={theme.cost.output}
+          defaultOpen={true}
+        />
+      )}
+      {reasoning && (
+        <CollapsibleResponsePart
+          label={parts.reasoningSource === "reported" ? "Reasoning" : "Reasoning (estimated tokens)"}
+          tokens={parts.reasoning || 0}
+          text={reasoning}
+          color={theme.cost.cwrite}
+          defaultOpen={false}
+        />
+      )}
+      {toolArgs && (
+        <CollapsibleResponsePart
+          label="Tool arguments"
+          tokens={parts.toolArguments || 0}
+          text={toolArgs}
+          color={theme.cost.ctxHistory}
+          defaultOpen={false}
+        />
+      )}
+      {(parts.unattributed || 0) > 0 && (
+        <div style={{ marginTop: 8, color: theme.text.muted, fontSize: theme.fontSize.xs }}>
+          {fmtT(parts.unattributed)} output tokens could not be attributed from the export payload.
+        </div>
+      )}
     </div>
   );
 }
@@ -1021,6 +1094,7 @@ function PromptNewMini(props) {
 
 function Kpis(props) {
   var t = props.totals;
+  var threads = props.threads || [];
   var sa = props.subagentEst || {};
   var notes = [];
   if (sa.overheadCount > 0) {
@@ -1056,9 +1130,29 @@ function Kpis(props) {
   var items = [
     totalCostItem,
     { l: "Billed input", v: fmtT(t.promptTokens), d: fmtT(t.cached) + " cached (" + (100 * t.cacheHitRate).toFixed(0) + "%)" },
-    { l: "Output", v: fmtT(t.output) },
-    { l: "LLM calls", v: "" + t.llmCalls },
-    { l: "Tool calls", v: "" + t.toolCalls },
+    { l: "Output", v: fmtT(t.output), d: outputPartsText(t.outputAttribution) },
+    {
+      l: "LLM calls",
+      v: "" + t.llmCalls,
+      d: (t.primaryLlmCalls || 0) + " primary" + ((t.overheadLlmCalls || 0) ? " · " + t.overheadLlmCalls + " overhead" : ""),
+      notes: threads.length > 1 ? threads.map(function (thread) {
+        return {
+          text: thread.label + ": " + thread.measuredLlmCalls + " measured",
+          title: "Measured request usage only. Parent runSubagent estimates are not included.",
+          color: theme.text.muted,
+        };
+      }) : null,
+    },
+    {
+      l: "Tool calls",
+      v: "" + t.toolCalls,
+      d: props.toolSummary
+        ? props.toolSummary.usedDistinct + "/" + props.toolSummary.offered + " available used"
+        : "",
+      notes: props.toolSummary && props.toolSummary.top.length
+        ? [{ text: "top: " + props.toolSummary.top.join(" · "), color: theme.text.muted }]
+        : null,
+    },
   ];
   if (t.cacheWrite > 0) {
     items.splice(3, 0, { l: "Cache write", v: fmtT(t.cacheWrite) });
@@ -1089,6 +1183,54 @@ function Kpis(props) {
         );
       })}
     </div>
+  );
+}
+
+function CopyAnalysisButton(props) {
+  var [status, setStatus] = useState("idle");
+  var onClick = async function () {
+    try {
+      var text = formatSessionForLlmAnalysis(props.analysis);
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        var textarea = document.createElement("textarea");
+        textarea.value = text;
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+      }
+      setStatus("copied");
+      setTimeout(function () { setStatus("idle"); }, 2200);
+    } catch (error) {
+      console.warn("[agentviz][cost] copy analysis failed", error);
+      setStatus("error");
+      setTimeout(function () { setStatus("idle"); }, 2200);
+    }
+  };
+  return (
+    <button
+      type="button"
+      className="av-interactive"
+      onClick={onClick}
+      title="Copy a deterministic Markdown and JSON analysis package for paste into an LLM."
+      style={{
+        marginLeft: "auto",
+        padding: "4px 10px",
+        border: "1px solid " + (status === "error" ? theme.semantic.error : theme.border.default),
+        borderRadius: 4,
+        background: status === "copied" ? theme.bg.raised : "transparent",
+        color: status === "copied" ? theme.semantic.success : status === "error" ? theme.semantic.error : theme.text.primary,
+        cursor: "pointer",
+        fontFamily: theme.font.mono,
+        fontSize: theme.fontSize.sm,
+      }}
+    >
+      {status === "copied" ? "✓ Copied" : status === "error" ? "Copy failed" : "Copy for LLM analysis"}
+    </button>
   );
 }
 
@@ -1201,6 +1343,31 @@ export default function CostView(props) {
     return { count: saCount, cost: saCost, overheadCount: ohCount, overheadCost: ohCost, imageCount: imgCount, imageCost: imgCost, imageTokens: imgTokens };
   }, [analysis]);
 
+  var toolSummary = useMemo(function () {
+    var counts = {};
+    var toolCatalog = new Set();
+    var maxOffered = 0;
+    analysis.prompts.forEach(function (p) {
+      p.events.forEach(function (e) {
+        if (e.kind === "llm") {
+          maxOffered = Math.max(maxOffered, e.totalTools || 0);
+          (e.toolGroups || []).forEach(function (group) {
+            (group.tools || []).forEach(function (tool) { toolCatalog.add(tool.name); });
+          });
+        }
+        if (e.kind === "tool") {
+          counts[e.name] = (counts[e.name] || 0) + 1;
+          toolCatalog.add(e.name);
+        }
+      });
+    });
+    var top = Object.keys(counts)
+      .sort(function (a, b) { return counts[b] - counts[a] || a.localeCompare(b); })
+      .slice(0, 3)
+      .map(function (name) { return name + " ×" + counts[name]; });
+    return { offered: Math.max(maxOffered, toolCatalog.size), usedDistinct: Object.keys(counts).length, top: top };
+  }, [analysis]);
+
   var rowKey = function (pi, ei) { return pi + ":" + ei; };
   var toggle = function (pi, ei) { var k = rowKey(pi, ei); setOpenRow(Object.assign({}, openRow, { [k]: !openRow[k] })); };
 
@@ -1227,7 +1394,7 @@ export default function CostView(props) {
         Three different lenses on "input": context size, growth, and billing.
       </div>
 
-      <Kpis totals={analysis.totals} subagentEst={subagentEst} />
+      <Kpis totals={analysis.totals} threads={analysis.threads} subagentEst={subagentEst} toolSummary={toolSummary} />
       <Glossary />
       <Legend />
 
@@ -1271,6 +1438,7 @@ export default function CostView(props) {
             ? "100 cr = $1. Persists across sessions."
             : "Raw USD from per-token rates. Persists across sessions."}
         </span>
+        <CopyAnalysisButton analysis={analysis} />
       </div>
 
       {overheadCount > 0 && (
@@ -1406,6 +1574,11 @@ export default function CostView(props) {
                       $ <b>{fmtT(ev.newTotal)}</b> billed-new
                     </span>
                     <span style={{ color: theme.text.secondary }}>{fmt$(ev.cost)}</span>
+                    {(ev.output || 0) > 0 && (
+                      <span style={{ color: theme.cost.output }}>
+                        ◀ <b>{fmtT(ev.output)}</b> out · {outputPartsText(ev.outputAttribution)}
+                      </span>
+                    )}
                     {ev.unexpectedMiss && (
                       <span style={{ color: theme.cost.missText, background: theme.cost.missBg, border: "1px solid " + theme.cost.missBorder, padding: "1px 6px", borderRadius: 3 }}>⚠ unexpected cache miss</span>
                     )}
@@ -1458,8 +1631,17 @@ export default function CostView(props) {
                         }}>{isLLM ? "L" : "T"}</div>
                         <div>
                           <div style={{ color: theme.text.primary, fontSize: theme.fontSize.base, fontWeight: 500, lineHeight: 1.4, display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap" }}>
-                            <span title={isLLM ? ev.name : undefined}>{isLLM ? friendlyCallName(ev.name) : ev.name}</span>
-                            {isLLM && ev.name && friendlyCallName(ev.name) !== ev.name && (
+                            <span title={isLLM ? ev.name : undefined}>
+                              {isLLM && ev.responseText
+                                ? ev.responseText.replace(/\s+/g, " ").slice(0, 110)
+                                : (isLLM ? friendlyCallName(ev.name) : ev.name)}
+                            </span>
+                            {isLLM && ev.responseText && (
+                              <span style={{ color: theme.text.ghost, fontWeight: 400, fontSize: theme.fontSize.xs }}>
+                                {friendlyCallName(ev.name)}
+                              </span>
+                            )}
+                            {isLLM && !ev.responseText && ev.name && friendlyCallName(ev.name) !== ev.name && (
                               <span style={{ color: theme.text.ghost, fontWeight: 400, fontSize: theme.fontSize.xs, fontFamily: theme.font.mono }}>
                                 {ev.name}
                               </span>

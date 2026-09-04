@@ -11,7 +11,7 @@
 //     fixed per call IF the bucket value is large and nearly identical
 //     between calls -- but for v1 we keep the definition simple).
 //   - "Variable" = history + tool_results + current + response (output).
-//   - Answer equivalence: byte-equal final responsePreview, after
+//   - Answer equivalence: byte-equal final response text, after
 //     trim+collapse-whitespace+lowercase.
 //   - Buckets we compare across runs match the existing CostView buckets
 //     in `CTX_KEYS`: system, tool_defs, history, tool_results, current,
@@ -29,9 +29,11 @@ const VARIABLE_BUCKETS: Bucket[] = ["history", "tool_results", "current", "outpu
 interface CostAnalysisLike {
   prompts: PromptLike[];
   totals: TotalsLike;
+  threads?: Array<{ kind: "main" | "subagent"; measuredLlmCalls: number }>;
 }
 interface PromptLike {
   index: number;
+  name?: string;
   cost: number;
   output: number;
   cached: number;
@@ -54,6 +56,7 @@ interface EventLike {
   cacheWrite: number;
   promptTokens: number;
   components?: Partial<Record<Bucket, number>>;
+  responseText?: string;
   responsePreview?: string;
   currentText?: string;
   systemPreview?: string;
@@ -64,6 +67,7 @@ interface EventLike {
   /** Hash of the FULL (un-truncated) system text. Use this in preference to
    * hashing systemPreview when present. */
   systemHash?: string;
+  systemBlocks?: SystemBlockLike[];
   argsSummary?: string;
   rawArgs?: string;
   /** "primary" = real user-facing chat call. "overhead" = UI/telemetry side
@@ -71,6 +75,14 @@ interface EventLike {
    * when summarizing per-turn user prompts. */
   category?: "primary" | "overhead";
   kind?: "llm" | "tool";
+}
+export interface SystemBlockLike {
+  tag: string;
+  attrs: string;
+  key: string;
+  chars: number;
+  bodyPreview: string;
+  bodyHash?: string;
 }
 interface TotalsLike {
   promptTokens: number;
@@ -82,12 +94,22 @@ interface TotalsLike {
   llmCalls: number;
   toolCalls: number;
   cacheHitRate: number;
+  outputAttribution?: OutputAttributionLike;
+}
+interface OutputAttributionLike {
+  visible: number;
+  reasoning: number;
+  toolArguments: number;
+  unattributed: number;
+  reasoningSource?: "reported" | "estimated" | "mixed" | "none";
 }
 
 export interface RunSummary {
   totalCost: number;
   totalInput: number;        // promptTokens (raw, includes cached)
   totalOutput: number;
+  outputAttribution: OutputAttributionLike;
+  measuredThreadCount: number;
   totalCached: number;
   totalFresh: number;
   totalCacheWrite: number;
@@ -208,6 +230,7 @@ export interface RunFingerprint {
    * value here means a System prompt drift row of "match" should be qualified
    * as "preview only". */
   systemPromptHashTrusted: boolean;
+  systemBlocks: SystemBlockLike[];
   filesTouched: string[];   // sorted unique paths from any tool args
   filesEdited: string[];    // sorted unique paths from edit/write/create tools
   toolsInvoked: string[];   // sorted unique tool names actually called
@@ -236,6 +259,26 @@ export interface DriftReport {
   hasBlockingDrift: boolean;
   /** True iff any row at all is in "diff" state. */
   hasAnyDrift: boolean;
+  systemPromptDiff: SystemPromptDiff | null;
+}
+
+export interface SystemPromptDiff {
+  rows: SystemPromptDiffRow[];
+  taggedCharsA: number;
+  taggedCharsB: number;
+  totalBlockDelta: number;
+  hasBlockDrift: boolean;
+}
+
+export interface SystemPromptDiffRow {
+  key: string;
+  tag: string;
+  attrs: string;
+  status: "identical" | "chars-differ" | "only-A" | "only-B";
+  charsA: number;
+  charsB: number;
+  delta: number;
+  preview: string;
 }
 
 export interface CostComparison {
@@ -379,6 +422,8 @@ export interface BehavioralKpis {
 function summarizeRun(ca: CostAnalysisLike | null | undefined): RunSummary {
   const empty: RunSummary = {
     totalCost: 0, totalInput: 0, totalOutput: 0, totalCached: 0, totalFresh: 0, totalCacheWrite: 0,
+    outputAttribution: { visible: 0, reasoning: 0, toolArguments: 0, unattributed: 0, reasoningSource: "none" },
+    measuredThreadCount: 0,
     cacheHitRate: 0, promptCount: 0, llmCallCount: 0,
     fixedCost: 0, variableCost: 0, fixedShare: 0,
     componentTokens: zeroBuckets(), componentShare: zeroBuckets(), bucketCost: zeroBuckets(),
@@ -404,6 +449,7 @@ function summarizeRun(ca: CostAnalysisLike | null | undefined): RunSummary {
     totalFresh += p.fresh || 0;
     totalCacheWrite += p.cacheWrite || 0;
     for (const ev of p.events || []) {
+      if (ev.kind === "tool") continue;
       llmCallCount++;
       if (ev.model) modelSet.add(ev.model);
       if (!mostExpensiveCall || (ev.cost || 0) > (mostExpensiveCall.cost || 0)) {
@@ -452,29 +498,41 @@ function summarizeRun(ca: CostAnalysisLike | null | undefined): RunSummary {
   const cacheDenom = totalCached + totalFresh + totalCacheWrite;
   const cacheHitRate = cacheDenom > 0 ? totalCached / cacheDenom : 0;
 
-  // Final answer = response preview of the LAST event of the LAST non-overhead
-  // prompt. Falls back to the very last event if every prompt is overhead.
+  // Final answer = full response of the last primary LLM call. A prompt can
+  // contain both primary and overhead calls, so filtering only at prompt level
+  // can accidentally compare generated titles instead of user-facing answers.
   function isOverheadPrompt(p: PromptLike): boolean {
     const llmEvents = p.events.filter((e) => e.kind === "llm");
     if (llmEvents.length === 0) return false;
     return llmEvents.every((e) => e.category === "overhead");
   }
-  const userFacingPrompts = ca.prompts.filter((p) => !isOverheadPrompt(p));
+  function isSubagentPrompt(p: PromptLike): boolean {
+    return p.name === "tool/runSubagent";
+  }
+  function lastLlmEvent(p: PromptLike, includeOverhead: boolean): EventLike | null {
+    for (let index = p.events.length - 1; index >= 0; index -= 1) {
+      const event = p.events[index];
+      if (event.kind && event.kind !== "llm") continue;
+      if (!includeOverhead && event.category === "overhead") continue;
+      return event;
+    }
+    return null;
+  }
+  const nonSubagentPrompts = ca.prompts.filter((p) => !isSubagentPrompt(p));
+  const userFacingPrompts = nonSubagentPrompts.filter((p) => !isOverheadPrompt(p));
   const userPrompts: Array<{ label: string; finalAnswer: string }> = userFacingPrompts.map((p) => {
-    const lastE = p.events.length ? p.events[p.events.length - 1] : null;
+    const lastE = lastLlmEvent(p, false);
     return {
       label: (p.label || "").trim(),
-      finalAnswer: (lastE && (lastE as any).responsePreview) || "",
+      finalAnswer: (lastE && (lastE.responseText || lastE.responsePreview)) || "",
     };
   });
   const lastUserPrompt = userPrompts.length ? userPrompts[userPrompts.length - 1] : null;
-  const fallbackLast = ca.prompts[ca.prompts.length - 1];
-  const fallbackLastEv = fallbackLast && fallbackLast.events.length
-    ? fallbackLast.events[fallbackLast.events.length - 1]
-    : null;
+  const fallbackLast = nonSubagentPrompts[nonSubagentPrompts.length - 1];
+  const fallbackLastEv = fallbackLast ? lastLlmEvent(fallbackLast, true) : null;
   const finalAnswer = lastUserPrompt
     ? lastUserPrompt.finalAnswer
-    : ((fallbackLastEv && (fallbackLastEv as any).responsePreview) || "");
+    : ((fallbackLastEv && (fallbackLastEv.responseText || fallbackLastEv.responsePreview)) || "");
   const userPromptText = lastUserPrompt ? lastUserPrompt.label : "";
 
   // First-primary-call cache hit rate. Used by the cache-pollution detector
@@ -512,6 +570,14 @@ function summarizeRun(ca: CostAnalysisLike | null | undefined): RunSummary {
 
   return {
     totalCost, totalInput, totalOutput, totalCached, totalFresh, totalCacheWrite,
+    outputAttribution: ca.totals.outputAttribution || {
+      visible: totalOutput,
+      reasoning: 0,
+      toolArguments: 0,
+      unattributed: 0,
+      reasoningSource: "none",
+    },
+    measuredThreadCount: ca.threads ? ca.threads.length : (ca.prompts.length > 0 ? 1 : 0),
     cacheHitRate, promptCount: ca.prompts.length, llmCallCount,
     fixedCost, variableCost,
     fixedShare: totalCost > 0 ? fixedCost / totalCost : 0,
@@ -820,6 +886,7 @@ function buildFingerprint(ca: CostAnalysisLike | null | undefined, summary: RunS
     firstUserPrompt: "", firstUserPromptHash: "00000000",
     systemPromptText: "", systemPromptChars: 0, systemPromptHash: "00000000",
     systemPromptHashTrusted: false,
+    systemBlocks: [],
     filesTouched: [], filesEdited: [], toolsInvoked: [],
   };
   if (!ca || !Array.isArray(ca.prompts) || ca.prompts.length === 0) return empty;
@@ -829,6 +896,7 @@ function buildFingerprint(ca: CostAnalysisLike | null | undefined, summary: RunS
   // start from a single user message so this captures "the prompt".
   let firstUserPrompt = "";
   for (const p of ca.prompts) {
+    if (p.name === "tool/runSubagent") continue;
     const llmEvents = (p.events || []).filter((e) => e.kind === "llm" || e.kind === undefined);
     if (llmEvents.length === 0) continue;
     const allOverhead = llmEvents.every((e) => e.category === "overhead");
@@ -850,6 +918,7 @@ function buildFingerprint(ca: CostAnalysisLike | null | undefined, summary: RunS
   let systemPromptChars = 0;
   let systemPromptHash = "00000000";
   let systemPromptHashTrusted = false;
+  let systemBlocks: SystemBlockLike[] = [];
   for (const p of ca.prompts) {
     let found = false;
     for (const ev of p.events || []) {
@@ -866,6 +935,7 @@ function buildFingerprint(ca: CostAnalysisLike | null | undefined, summary: RunS
       systemPromptChars = typeof ev.systemChars === "number" && ev.systemChars >= 0
         ? ev.systemChars
         : systemPromptText.length;
+      systemBlocks = ev.systemBlocks || [];
       found = true;
       break;
     }
@@ -890,6 +960,7 @@ function buildFingerprint(ca: CostAnalysisLike | null | undefined, summary: RunS
 
   // turnCount: number of non-overhead prompts (one per user-facing chat turn).
   const turnCount = ca.prompts.filter((p) => {
+    if (p.name === "tool/runSubagent") return false;
     const llmEvents = (p.events || []).filter((e) => e.kind === "llm" || e.kind === undefined);
     if (llmEvents.length === 0) return false;
     return !llmEvents.every((e) => e.category === "overhead");
@@ -906,6 +977,7 @@ function buildFingerprint(ca: CostAnalysisLike | null | undefined, summary: RunS
     systemPromptChars,
     systemPromptHash,
     systemPromptHashTrusted,
+    systemBlocks,
     filesTouched: Array.from(filesTouched).sort(),
     filesEdited: Array.from(filesEdited).sort(),
     toolsInvoked: Array.from(toolsInvoked).sort(),
@@ -1039,7 +1111,64 @@ function buildDriftReport(fa: RunFingerprint, fb: RunFingerprint): DriftReport {
 
   const hasAnyDrift = rows.some((r) => r.status === "diff");
   const hasBlockingDrift = rows.some((r) => r.status === "diff" && r.blocking);
-  return { rows, hasBlockingDrift, hasAnyDrift };
+  return {
+    rows,
+    hasBlockingDrift,
+    hasAnyDrift,
+    systemPromptDiff: buildSystemPromptDiff(fa.systemBlocks, fb.systemBlocks),
+  };
+}
+
+export function buildSystemPromptDiff(
+  blocksA: SystemBlockLike[],
+  blocksB: SystemBlockLike[],
+): SystemPromptDiff | null {
+  if (!blocksA || !blocksB || (blocksA.length === 0 && blocksB.length === 0)) return null;
+  const mapA = new Map(blocksA.map((block) => [block.key, block]));
+  const mapB = new Map(blocksB.map((block) => [block.key, block]));
+  const keys = new Set([...mapA.keys(), ...mapB.keys()]);
+  const rows: SystemPromptDiffRow[] = [];
+  let taggedCharsA = 0;
+  let taggedCharsB = 0;
+  let totalBlockDelta = 0;
+  for (const key of keys) {
+    const a = mapA.get(key);
+    const b = mapB.get(key);
+    const charsA = a?.chars || 0;
+    const charsB = b?.chars || 0;
+    const delta = charsB - charsA;
+    taggedCharsA += charsA;
+    taggedCharsB += charsB;
+    totalBlockDelta += delta;
+    const sample = a || b!;
+    rows.push({
+      key,
+      tag: sample.tag,
+      attrs: sample.attrs,
+      status: a && b
+        ? (
+          charsA === charsB &&
+          (a.bodyHash && b.bodyHash
+            ? a.bodyHash === b.bodyHash
+            : a.bodyPreview === b.bodyPreview)
+            ? "identical"
+            : "chars-differ"
+        )
+        : a ? "only-A" : "only-B",
+      charsA,
+      charsB,
+      delta,
+      preview: sample.bodyPreview.slice(0, 200),
+    });
+  }
+  rows.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+  return {
+    rows,
+    taggedCharsA,
+    taggedCharsB,
+    totalBlockDelta,
+    hasBlockDrift: rows.some((row) => row.status !== "identical"),
+  };
 }
 
 function truncate(s: string, n: number): string {

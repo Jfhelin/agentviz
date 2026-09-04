@@ -46,13 +46,14 @@ describe("formatComparisonAsMarkdown", () => {
   it("produces a markdown blob containing the major sections", () => {
     const cmp = compareRunsCost(mkRun({}), mkRun({ extraPromptCount: 1 }))!;
     const md = formatComparisonAsMarkdown(cmp, { nameA: "run-a", nameB: "run-b" });
-    expect(md).toContain("# Cost compare summary: run-a vs run-b");
+    expect(md).toContain("# AGENTVIZ comparison analysis package: run-a vs run-b");
     expect(md).toContain("## Run drift");
     expect(md).toContain("## Pre- vs post-divergence cost split");
     expect(md).toContain("## Headline cost KPIs");
     expect(md).toContain("## Behavioral KPIs");
     expect(md).toContain("## Per-bucket cost delta");
     expect(md).toContain("## Final responses");
+    expect(md).toContain("## Structured facts");
   });
 
   it("includes the technique label when provided", () => {
@@ -76,6 +77,18 @@ describe("formatComparisonAsMarkdown", () => {
     expect(md).toContain("Tool calls");
     expect(md).toContain("Distinct tools");
     expect(md).toContain("Total output tokens");
+  });
+
+  it("includes exact output attribution and thread evidence in structured facts", () => {
+    const a: any = mkRun({});
+    const b: any = mkRun({});
+    a.totals.outputAttribution = { visible: 7, reasoning: 2, toolArguments: 1, unattributed: 0 };
+    b.totals.outputAttribution = { visible: 5, reasoning: 1, toolArguments: 2, unattributed: 2 };
+    a.threads = [{ kind: "main", measuredLlmCalls: 1 }];
+    b.threads = [{ kind: "main", measuredLlmCalls: 1 }, { kind: "subagent", measuredLlmCalls: 1 }];
+    const md = formatComparisonAsMarkdown(compareRunsCost(a, b)!, { nameA: "a", nameB: "b" });
+    expect(md).toContain('"toolArguments": 2');
+    expect(md).toContain('"measuredThreadCount": 2');
   });
 
   it("trims long final answers to a preview", () => {

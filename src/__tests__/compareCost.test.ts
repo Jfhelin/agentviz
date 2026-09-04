@@ -3,14 +3,15 @@ import * as fs from "fs";
 import { compareRunsCost, projectPrefixTaxOver } from "../lib/compareCost";
 import { parseCopilotChatExport } from "../lib/copilotChatExportParser";
 
-// These fixtures live outside the repo (user attachments). The test is
-// SKIPPED when they aren't available, so CI on a fresh checkout still passes.
+// Optional real-world fixtures are supplied explicitly so tests never depend
+// on a contributor's local filesystem layout.
 const FIXTURES = {
-  caveman: "/Users/jfhelin/.copilot/workspaces/e41f93cd-465a-4313-8701-888682ca72ec/attachments/9be5e028-3b03-41ae-915f-41b83e05bf53-copilot_all_prompts_caveman.json",
-  polite:  "/Users/jfhelin/.copilot/workspaces/e41f93cd-465a-4313-8701-888682ca72ec/attachments/729bad37-c16c-4dc1-8231-f47f96d310af-copilot_all_prompts_polite.json",
+  caveman: process.env.AGENTVIZ_CAVEMAN_FIXTURE || "",
+  polite: process.env.AGENTVIZ_POLITE_FIXTURE || "",
 };
 
 const haveFixtures = Object.values(FIXTURES).every(p => {
+  if (!p) return false;
   try { fs.accessSync(p); return true; } catch { return false; }
 });
 
@@ -47,6 +48,86 @@ describe("compareRunsCost (synthetic minimal)", () => {
     expect(r2!.answersEquivalent).toBe(false);
     const r3 = compareRunsCost(mk("  paris.  "), mk("Paris."));
     expect(r3!.answersEquivalent).toBe(true); // normalized
+  });
+
+  it("compares full responses instead of truncated previews", () => {
+    const mk = (responseText: string) => ({
+      prompts: [{
+        index: 0, cost: 0.01, output: 5, cached: 0, fresh: 100, cacheWrite: 0,
+        promptTokens: 100, llmCount: 1,
+        events: [{
+          name: "x", model: "m", cost: 0.01, output: 5, cached: 0, fresh: 100,
+          cacheWrite: 0, promptTokens: 100, components: { system: 100 },
+          responsePreview: responseText.slice(0, 800), responseText,
+        }],
+      }],
+      totals: { promptTokens: 100, output: 5, cached: 0, fresh: 100, cacheWrite: 0, cost: 0.01, llmCalls: 1, toolCalls: 0, cacheHitRate: 0 },
+    });
+    const prefix = "x".repeat(800);
+    expect(compareRunsCost(mk(prefix + "A"), mk(prefix + "B"))!.answersEquivalent).toBe(false);
+  });
+
+  it("uses the last primary response when overhead follows in the same prompt", () => {
+    const mk = (answer: string) => ({
+      prompts: [{
+        index: 0, label: "Question", cost: 0.02, output: 10, cached: 0, fresh: 100,
+        cacheWrite: 0, promptTokens: 100, llmCount: 2,
+        events: [
+          {
+            kind: "llm" as const, category: "primary" as const, name: "panel/editAgent",
+            model: "m", cost: 0.019, output: 8, cached: 0, fresh: 90, cacheWrite: 0,
+            promptTokens: 90, components: { system: 90 }, responseText: answer,
+            responsePreview: answer,
+          },
+          {
+            kind: "llm" as const, category: "overhead" as const, name: "title",
+            model: "m", cost: 0.001, output: 2, cached: 0, fresh: 10, cacheWrite: 0,
+            promptTokens: 10, components: { system: 10 }, responseText: "same title",
+            responsePreview: "same title",
+          },
+        ],
+      }],
+      totals: { promptTokens: 100, output: 10, cached: 0, fresh: 100, cacheWrite: 0, cost: 0.02, llmCalls: 2, toolCalls: 0, cacheHitRate: 0 },
+    });
+    const result = compareRunsCost(mk("Answer A"), mk("Answer B"))!;
+    expect(result.answersEquivalent).toBe(false);
+    expect(result.finalAnswerA).toBe("Answer A");
+    expect(result.finalAnswerB).toBe("Answer B");
+  });
+
+  it("excludes subagent prompts from user-facing answers and turn counts", () => {
+    const mk = (childAnswer: string) => ({
+      prompts: [
+        {
+          index: 0, promptId: "main", name: "panel/editAgent", label: "Question",
+          cost: 0.01, output: 5, cached: 0, fresh: 100, cacheWrite: 0,
+          promptTokens: 100, llmCount: 1,
+          events: [{
+            kind: "llm" as const, category: "primary" as const, name: "panel/editAgent",
+            model: "m", cost: 0.01, output: 5, cached: 0, fresh: 100, cacheWrite: 0,
+            promptTokens: 100, components: { system: 100 }, responseText: "Main answer",
+            responsePreview: "Main answer",
+          }],
+        },
+        {
+          index: 1, promptId: "child", name: "tool/runSubagent", label: "Child task",
+          cost: 0.01, output: 5, cached: 0, fresh: 100, cacheWrite: 0,
+          promptTokens: 100, llmCount: 1,
+          events: [{
+            kind: "llm" as const, category: "primary" as const, name: "tool/runSubagent",
+            model: "m", cost: 0.01, output: 5, cached: 0, fresh: 100, cacheWrite: 0,
+            promptTokens: 100, components: { system: 100 }, responseText: childAnswer,
+            responsePreview: childAnswer,
+          }],
+        },
+      ],
+      totals: { promptTokens: 200, output: 10, cached: 0, fresh: 200, cacheWrite: 0, cost: 0.02, llmCalls: 2, toolCalls: 0, cacheHitRate: 0 },
+    });
+    const result = compareRunsCost(mk("Child A"), mk("Child B"))!;
+    expect(result.answersEquivalent).toBe(true);
+    expect(result.finalAnswerA).toBe("Main answer");
+    expect(result.behavioralKpis.userTurns.a).toBe(1);
+    expect(result.behavioralKpis.userTurns.b).toBe(1);
   });
 
   it("classifies near-identical totals as 'noise' verdict", () => {
