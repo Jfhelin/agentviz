@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
-import { resolve, dirname } from "node:path";
+import { readFileSync, existsSync } from "node:fs";
+import { resolve } from "node:path";
 import { parseSession, detectFormat } from "../lib/parseSession";
 
 // Minimal in-tree fixture (committed). Always available.
@@ -70,46 +70,6 @@ describe("copilot chat export parser (real-world fixture)", () => {
     expect(anyMiss).toBe(true);
   });
 
-  it("writes a parsed summary for inspection", () => {
-    const parsed = parseSession(text);
-    const ca = (parsed as any).metadata.costAnalysis;
-    const out = {
-      totals: ca.totals,
-      prompts: ca.prompts.map((p: any) => ({
-        index: p.index,
-        label: (p.label || "").slice(0, 80),
-        promptTokens: p.promptTokens,
-        cost: +p.cost.toFixed(4),
-        contextInitial: p.prompt.contextInitial,
-        contextFinal: p.prompt.contextFinal,
-        cacheRecommit: p.prompt.cacheRecommit,
-        unexpectedMissCount: p.prompt.unexpectedMissCount,
-        modelSwitchedIn: p.prompt.modelSwitchedIn,
-        llmCalls: p.events
-          .filter((e: any) => e.kind === "llm")
-          .map((e: any) => ({
-            model: e.model,
-            pt: e.promptTokens,
-            cached: e.cached,
-            cw: e.cacheWrite,
-            newTotal: e.newTotal,
-            delta: e.deltaVsPrev,
-            miss: e.unexpectedMiss,
-            diag: e.cacheMissDiag
-              ? {
-                  changed: e.cacheMissDiag.toolDefsChanged,
-                  sample: e.cacheMissDiag.changedSample,
-                }
-              : null,
-          })),
-      })),
-    };
-    const dest =
-      "/Users/jfhelin/.copilot/workspaces/e1763fd6-eca9-4dfc-8579-0618e1239142/artifacts/parsed-summary.json";
-    mkdirSync(dirname(dest), { recursive: true });
-    writeFileSync(dest, JSON.stringify(out, null, 2));
-    expect(existsSync(dest)).toBe(true);
-  });
 });
 
 describe("overhead call categorization", () => {

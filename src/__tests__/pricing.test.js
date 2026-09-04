@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { estimateCost, estimateMultiModelCost, formatCost, hasModelPricing } from "../lib/pricing.js";
+import { estimateCost, estimateMultiModelCost, formatCost, getModelPrice, hasModelPricing } from "../lib/pricing.js";
 
 describe("estimateCost", function () {
   it("returns 0 for null tokenUsage", function () {
@@ -87,6 +87,14 @@ describe("estimateMultiModelCost", function () {
     });
     // Only Sonnet is priced; Gemini contributes 0
     expect(cost).toBeCloseTo(4.50, 2);
+  });
+});
+
+describe("getModelPrice", function () {
+  it("resolves long-context pricing from token usage", function () {
+    var price = getModelPrice("GPT-5.4", { inputTokens: 300000 });
+    expect(price.input).toBe(5.00);
+    expect(price.output).toBe(22.50);
   });
 });
 

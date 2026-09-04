@@ -253,6 +253,14 @@ Each LLM call surfaces three lenses on "input": **CTX** (full prompt size), **&#
 
 The Cost tab only appears when the loaded session is a Copilot Chat export. Drag and drop a `copilot_all_prompts_*.json` file onto the landing screen to use it.
 
+For terminal-only analysis, the repository-local `copilot-chat-export` skill generates a compact digest without launching the UI:
+
+```bash
+node .github/skills/copilot-chat-export/scripts/digest.mjs /path/to/copilot_all_prompts_*.json
+```
+
+The digest leads with measured request usage, keeps parent `runSubagent` projections explicitly supplemental, and reconciles visible text, reasoning, tool arguments, and unattributed output to the measured completion-token total. It imports the current rate table from `src/lib/pricing.js` instead of embedding model prices.
+
 **Format support:** Cost view depends on per-call context breakdown (system prompt, tool definitions, history, tool results, current prompt as separate token counts) plus per-call cache-read / cache-write usage. Today only the VS Code Copilot Chat export carries that data; Claude Code JSONL and Copilot CLI JSONL surface aggregate `tokenUsage` totals but not the breakdown, so the Cost tab is hidden for those formats. The plan is to lift `contextBreakdown` into the normalized event/turn schema so any future parser can light up Cost view by populating the field when the source data exists.
 
 ### Coach View

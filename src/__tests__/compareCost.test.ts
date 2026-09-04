@@ -615,6 +615,24 @@ describe("compareRunsCost: drift detection", () => {
     // very little.
   });
 
+  it("uses long-context output pricing when projecting prefix tax", () => {
+    const template: any = {
+      prompts: [{
+        index: 0, cost: 3.75, output: 100000, cached: 0, fresh: 300000, cacheWrite: 0,
+        promptTokens: 300000, llmCount: 1, label: "long context",
+        events: [{
+          name: "panel/editAgent", model: "gpt-5.4",
+          cost: 3.75, output: 100000, cached: 0, fresh: 300000, cacheWrite: 0,
+          promptTokens: 300000, components: { system: 300000 },
+          category: "primary", kind: "llm",
+        }],
+      }],
+      totals: { promptTokens: 300000, output: 100000, cached: 0, fresh: 300000, cacheWrite: 0, cost: 3.75, llmCalls: 1, toolCalls: 0, cacheHitRate: 0 },
+    };
+    const projection = projectPrefixTaxOver(template, 100, "A");
+    expect(projection.projectedExtraCost).toBeCloseTo(0.0005, 7);
+  });
+
   it("skips overhead and tool events from the projection", () => {
     const template: any = {
       prompts: [{
