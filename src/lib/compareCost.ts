@@ -1163,7 +1163,12 @@ export function projectPrefixTaxOver(
       if (inputTokens <= 0) continue;
       callCount += 1;
       templateTotalCost += ev.cost || 0;
-      const price = getModelPrice(ev.model);
+      const price = getModelPrice(ev.model, {
+        inputTokens: ev.fresh || 0,
+        outputTokens: ev.output || 0,
+        cacheRead: ev.cached || 0,
+        cacheWrite: ev.cacheWrite || 0,
+      });
       let outputCost = 0;
       if (price && (ev.output || 0) > 0) {
         outputCost = ((ev.output || 0) / 1e6) * price.output;

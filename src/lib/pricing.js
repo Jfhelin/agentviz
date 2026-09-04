@@ -11,6 +11,8 @@
  * lookupPrice() returns the first substring match.
  */
 
+export var PRICING_LAST_VERIFIED = "2026-09";
+
 var PRICE_TABLE = [
   // Anthropic. Keep specific entries before family matches.
   { match: "claude-fable-5-1", input: 10.00, output: 50.00, cacheReadRatio: 0.025, cacheWriteRatio: 1.25 },
@@ -95,8 +97,8 @@ export function hasModelPricing(modelName) {
 /** Returns the raw price row for a model (or null). Useful for callers that
  * need the per-input rate to estimate ad-hoc costs (e.g. image attachments
  * billed at standard input rate but counted outside `tokenUsage`). */
-export function getModelPrice(modelName) {
-  return lookupPrice(modelName);
+export function getModelPrice(modelName, tokenUsage) {
+  return lookupPrice(modelName, tokenUsage);
 }
 
 /**
