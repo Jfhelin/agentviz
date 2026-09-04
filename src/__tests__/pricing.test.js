@@ -21,6 +21,28 @@ describe("estimateCost", function () {
     // 1M * $3.00/M + 100K * $15.00/M = $3.00 + $1.50 = $4.50
     expect(cost).toBeCloseTo(4.50, 2);
   });
+
+  it("prices the Claude 4 display name used by VS Code exports", function () {
+    var cost = estimateCost({ inputTokens: 1000000, outputTokens: 100000 }, "Claude 4");
+    expect(cost).toBeCloseTo(4.50, 2);
+  });
+
+  it("prices Claude Sonnet 5 at its explicit Copilot rate", function () {
+    var cost = estimateCost({ inputTokens: 1000000, outputTokens: 100000 }, "Claude Sonnet 5");
+    // 1M * $2.00/M + 100K * $10.00/M = $3.00
+    expect(cost).toBeCloseTo(3.00, 2);
+  });
+
+  it("prices currently exported GPT-5.4 and Gemini 3.5 Flash calls", function () {
+    expect(estimateCost({ inputTokens: 100000, outputTokens: 100000 }, "GPT-5.4")).toBeCloseTo(1.75, 2);
+    expect(estimateCost({ inputTokens: 1000000, outputTokens: 100000 }, "Gemini 3.5 Flash")).toBeCloseTo(2.40, 2);
+  });
+
+  it("applies the GPT-5.4 long-context tier above 272K tokens", function () {
+    var cost = estimateCost({ inputTokens: 300000, outputTokens: 100000 }, "GPT-5.4");
+    // 300K * $5/M + 100K * $22.50/M
+    expect(cost).toBeCloseTo(3.75, 2);
+  });
 });
 
 describe("estimateMultiModelCost", function () {
