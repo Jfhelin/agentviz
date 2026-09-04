@@ -34,7 +34,7 @@ AI coding agents (Claude Code, VS Code Copilot Chat, Copilot CLI, etc.) generate
 - **Stream live** as a session unfolds -- the view updates in real time
 - **Discover sessions** automatically from the Copilot CLI and VS Code session stores
 - **Get AI coaching** on prompt engineering, skills, and MCP setup grounded in best practices
-- **Switch themes** between dark, light, and system-matched modes with one click
+- **Read comfortably** with a clean, high-contrast light palette
 
 ## Quick Start
 
@@ -298,7 +298,7 @@ AI-powered session coaching available directly from any session. The coach reads
 | **Session Q&A** | Slide-over drawer (`Cmd+Shift+K`) with instant answers for common queries and Copilot SDK model fallback for open-ended questions. |
 | **Skills and Capability Tracking** | Stats View surfaces every skill, instruction, agent, MCP server, tool, and prompt from the session with lifecycle stage bars, invocation counts, source chips, and expandable event timelines. Filter by category or source. |
 | **Autonomy Metrics** | Measures human response time, idle gaps, and intervention frequency per session. |
-| **Dark / Light / System Theme** | Full dark and light palettes with a one-click switcher in the header. System mode auto-follows OS preference. Preference is persisted across sessions. |
+| **Light Theme** | A clean, high-contrast light palette across every view. |
 
 ### Session Q&A
 
@@ -412,7 +412,7 @@ src/
     aiCoachAgent.js      # AI Coach powered by @github/copilot-sdk (gpt-4o)
     qaClassifier.js      # Session Q&A instant answer engine (9 patterns + model context)
     qaAgent.js           # Q&A agent powered by @github/copilot-sdk for model fallback
-    theme.js             # Design tokens (dark/light/system mode-aware palette)
+    theme.js             # Light-theme design tokens
     theme.d.ts           # TypeScript declarations for theme.js
     constants.js         # Sample events for demo mode
     replayLayout.js      # Virtualized windowing for large sessions
@@ -509,13 +509,7 @@ npm run typecheck       # Type-check with tsc --noEmit
 
 ### Design System
 
-AGENTVIZ ships with full dark and light themes plus a **System** mode that follows your OS preference. The theme switcher is in the top bar (sun/moon/monitor icons). Your choice persists in localStorage across sessions.
-
-- **Dark mode** (default): True black base (`#0f0f16`) with blue, purple, and green accents
-- **Light mode**: Clean white base (`#f8f9fc`) with deeper, higher-contrast accent colors
-- **System mode**: Automatically matches `prefers-color-scheme` and updates live if you change your OS setting
-
-All colors are defined as design tokens in `src/lib/theme.js` with dynamic getters that resolve to the active palette at render time. A visual reference of every token in both modes is available in `docs/color-palette.html`. JetBrains Mono throughout. No CSS framework; all styles are inline.
+AGENTVIZ uses a single clean, high-contrast light theme with a `#f6f7fb` page background and white surfaces. All colors are defined as design tokens in `src/lib/theme.js`; the complete visual reference is available in `docs/color-palette.html`. JetBrains Mono throughout. No CSS framework; all styles are inline.
 
 ### Configuration
 

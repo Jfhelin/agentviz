@@ -28,7 +28,7 @@ src/
     useHashRouter.js   # Hash-based routing between inbox and session views
     useAsyncStatus.js  # Async operation state machine (idle/loading/success/error)
   lib/
-    theme.js           # Design token system, TRACK_TYPES, AGENT_COLORS
+    theme.js           # Light-theme design tokens, TRACK_TYPES, AGENT_COLORS
     theme.d.ts         # TypeScript declarations for theme.js
     constants.js       # SAMPLE_EVENTS data for demo mode
     parser.ts          # parseClaudeCodeJSONL() - Claude Code JSONL parser
@@ -143,6 +143,7 @@ Vite proxies `/api/*` to the backend automatically.
 - Unicode characters used directly or as escape sequences in JS
 - Components receive data as props, no global state management
 - Design tokens defined in src/lib/theme.js
+- AGENTVIZ uses a single light theme with no runtime theme preference or switcher
 - Product name is always AGENTVIZ (all caps, no spaces)
 - UI/UX design system: see docs/ui-ux-style-guide.md -- all UI changes must conform to it
 - Cache usage summaries omit the cache-write segment when `cacheWrite` is zero

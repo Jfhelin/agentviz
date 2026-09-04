@@ -388,57 +388,11 @@ describe("App browser regressions", function () {
     await app.unmount();
   });
 
-  it("preserves a raw light theme preference through initial mount", async function () {
-    global.localStorage.setItem("agentviz:theme-mode", "light");
-
-    var warnSpy = vi.spyOn(console, "warn").mockImplementation(function () {});
-
+  it("uses the light theme without showing a theme selector", async function () {
     var app = await renderApp();
 
-    expect(document.documentElement.dataset.themePreference).toBe("light");
-    expect(document.documentElement.dataset.theme).toBe("light");
-
-    // No console warnings during migration from bare string to JSON
-    var themeWarnings = warnSpy.mock.calls.filter(function (args) {
-      return String(args[0] || "").includes("theme-mode") || String(args[1] || "").includes("theme-mode");
-    });
-    expect(themeWarnings).toHaveLength(0);
-
-    await sleep(350);
-
-    expect(global.localStorage.getItem("agentviz:theme-mode")).toBe("\"light\"");
-    expect(document.documentElement.dataset.theme).toBe("light");
-
-    warnSpy.mockRestore();
-    await app.unmount();
-  });
-
-  it("applies theme changes immediately without a reload", async function () {
-    global.localStorage.setItem("agentviz:theme-mode", "dark");
-
-    var app = await renderApp();
-
-    await click(findClickableText(app.container, "load a demo session"));
-    await waitFor(function () {
-      return findByText(app.container, "demo-session.jsonl");
-    }, "expected demo session to load");
-
-    var appShell = app.container.firstElementChild;
-    var initialStyle = appShell.getAttribute("style");
-    expect(initialStyle).toContain("background: rgb(0, 0, 0)");
-
-    await click(app.container.querySelector('button[aria-label="Theme selector"]'));
-    await click(findExactButton(app.container, "Light"));
-
-    await waitFor(function () {
-      var style = appShell.getAttribute("style") || "";
-      return style.includes("background: rgb(246, 247, 251)") ? style : "";
-    }, "expected session shell background to switch to light mode");
-
-    expect(document.documentElement.dataset.themePreference).toBe("light");
-    expect(document.documentElement.dataset.theme).toBe("light");
-    expect(appShell.getAttribute("style")).toContain("background: rgb(246, 247, 251)");
-    expect(appShell.getAttribute("style")).not.toBe(initialStyle);
+    expect(app.container.firstElementChild.getAttribute("style")).toContain("background: rgb(246, 247, 251)");
+    expect(app.container.querySelector('button[aria-label="Theme selector"]')).toBeNull();
 
     await app.unmount();
   });

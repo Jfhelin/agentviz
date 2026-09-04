@@ -32,7 +32,7 @@ function normalizeCssColor(value) {
   return node.style.background;
 }
 
-describe("StatsView theme updates", function () {
+describe("StatsView theme", function () {
   beforeEach(function () {
     globalThis.IS_REACT_ACT_ENVIRONMENT = true;
     window.localStorage = createLocalStorage();
@@ -44,8 +44,7 @@ describe("StatsView theme updates", function () {
     document.body.innerHTML = "";
   });
 
-  it("updates card surfaces when switching from light to dark", async function () {
-    window.localStorage.setItem("agentviz:theme-mode", "light");
+  it("uses the light surface token for cards", async function () {
     vi.resetModules();
 
     var React = await import("react");
@@ -56,8 +55,7 @@ describe("StatsView theme updates", function () {
     var act = React.act;
     var createRoot = ReactDOM.createRoot;
     var StatsView = StatsViewMod.default;
-    var lightSurface = normalizeCssColor(themeMod.getThemeTokensForMode("light", "dark").bg.surface);
-    var darkSurface = normalizeCssColor(themeMod.getThemeTokensForMode("dark", "dark").bg.surface);
+    var lightSurface = normalizeCssColor(themeMod.theme.bg.surface);
     var container = document.createElement("div");
     document.body.appendChild(container);
     var root = createRoot(container);
@@ -85,14 +83,6 @@ describe("StatsView theme updates", function () {
 
     var totalEventsCard = findExactText(container, "Total Events").parentElement;
     expect(totalEventsCard.style.background).toBe(lightSurface);
-
-    themeMod.syncThemeState("dark", "dark");
-    await act(async function () {
-      root.render(<StatsView {...props} />);
-    });
-
-    totalEventsCard = findExactText(container, "Total Events").parentElement;
-    expect(totalEventsCard.style.background).toBe(darkSurface);
 
     await act(async function () {
       root.unmount();

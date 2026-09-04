@@ -2,386 +2,116 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>AGENTVIZ Color Palette Review</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AGENTVIZ Light Color Palette</title>
 <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: 'JetBrains Mono', monospace; background: #1a1a24; color: #f0f0f2; padding: 24px; max-width: 1200px; margin: 0 auto; }
-  h1 { font-size: 18px; margin-bottom: 4px; }
-  .subtitle { font-size: 11px; color: #717178; margin-bottom: 24px; }
-  .modes { display: flex; gap: 32px; margin-bottom: 32px; }
-  .mode { flex: 1; border-radius: 8px; padding: 16px; }
-  .mode.dark { background: #000000; border: 1px solid #232333; }
-  .mode.light { background: #f6f7fb; border: 1px solid #d8deea; }
-  .mode h2 { font-size: 14px; margin-bottom: 12px; }
-  .mode.light h2 { color: #141824; }
-  .section { margin-bottom: 16px; }
-  .section-label { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
-  .mode.dark .section-label { color: #717178; }
-  .mode.light .section-label { color: #70788d; }
-  .row { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; font-size: 11px; }
-  .swatch { width: 28px; height: 18px; border-radius: 4px; flex-shrink: 0; border: 1px solid rgba(128,128,128,0.2); }
-  .token { width: 200px; flex-shrink: 0; }
-  .hex { width: 80px; flex-shrink: 0; opacity: 0.7; }
-  .changed { font-size: 9px; color: #10d97a; margin-left: 4px; }
-  .mode.dark .token { color: #a1a1a8; }
-  .mode.dark .hex { color: #585860; }
-  .mode.light .token { color: #4f5669; }
-  .mode.light .hex { color: #8a90a2; }
-  .preview-row { display: flex; gap: 32px; margin-bottom: 32px; }
-  .preview-card { flex: 1; border-radius: 8px; padding: 16px; }
-  .preview-card.dark { background: #0f0f16; border: 1px solid #232333; }
-  .preview-card.light { background: #ffffff; border: 1px solid #d8deea; }
-  .preview-card h3 { font-size: 12px; margin-bottom: 12px; }
-  .preview-card.light h3 { color: #141824; }
-  .agent-pill { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 10px; margin: 2px 4px 2px 0; }
-  .track-bar { height: 20px; border-radius: 4px; margin-bottom: 4px; display: flex; align-items: center; padding: 0 8px; font-size: 10px; }
-  .divider { border: none; border-top: 1px solid #232333; margin: 24px 0; }
-  .note { font-size: 10px; color: #717178; margin-top: 4px; line-height: 1.6; }
-  .banner { background: rgba(100,117,232,0.1); border: 1px solid rgba(100,117,232,0.3); border-radius: 6px; padding: 10px 14px; margin-bottom: 24px; font-size: 11px; color: #a1a1a8; }
-  .banner strong { color: #6475e8; }
+  * { box-sizing: border-box; }
+  body { margin: 0 auto; padding: 24px; max-width: 1100px; background: #f6f7fb; color: #141824; font-family: 'JetBrains Mono', monospace; }
+  h1 { margin: 0 0 4px; font-size: 20px; }
+  h2 { margin: 24px 0 10px; font-size: 14px; }
+  p { margin: 0; color: #70788d; font-size: 11px; }
+  .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 20px; }
+  .row { display: grid; grid-template-columns: 28px 1fr 190px; align-items: center; gap: 8px; min-height: 24px; font-size: 11px; }
+  .swatch { width: 28px; height: 18px; border: 1px solid #c2cad8; border-radius: 4px; }
+  .token { color: #4f5669; }
+  .value { color: #8a90a2; }
+  @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
+<h1>AGENTVIZ Light Color Palette</h1>
+<p>Runtime color tokens from <code>src/lib/theme.js</code>. AGENTVIZ uses this single light palette.</p>
 
-<h1>AGENTVIZ Color Palette Review v2</h1>
-<p class="subtitle">Proposed changes: remove all warm/brown/orange tones</p>
-
-<div class="banner">
-  <strong>Changes from v1:</strong>
-  semantic.warning &rarr; clean yellow (was muddy red/brown) &bull;
-  semantic.error &rarr; cool rose (was warm red) &bull;
-  agentType.code-review &rarr; cyan (was amber) &bull;
-  track.agent &rarr; cyan (was amber) &bull;
-  agentType.default &rarr; cyan (was amber)
+<h2>Backgrounds</h2>
+<div class="grid">
+  <div class="row"><span class="swatch" style="background:#f6f7fb"></span><span class="token">bg.base</span><span class="value">#f6f7fb</span></div>
+  <div class="row"><span class="swatch" style="background:#ffffff"></span><span class="token">bg.surface</span><span class="value">#ffffff</span></div>
+  <div class="row"><span class="swatch" style="background:#eef1f7"></span><span class="token">bg.raised</span><span class="value">#eef1f7</span></div>
+  <div class="row"><span class="swatch" style="background:rgba(17,24,39,0.48)"></span><span class="token">bg.overlay</span><span class="value">rgba(17, 24, 39, 0.48)</span></div>
+  <div class="row"><span class="swatch" style="background:#e5e9f2"></span><span class="token">bg.hover</span><span class="value">#e5e9f2</span></div>
+  <div class="row"><span class="swatch" style="background:#d8deea"></span><span class="token">bg.active</span><span class="value">#d8deea</span></div>
 </div>
 
-<!-- BG + BORDER + TEXT -->
-<div class="modes">
-  <div class="mode dark">
-    <h2>Dark Mode</h2>
-    <div class="section">
-      <div class="section-label">Backgrounds</div>
-      <div class="row"><div class="swatch" style="background:#000000"></div><div class="token">bg.base</div><div class="hex">#000000</div></div>
-      <div class="row"><div class="swatch" style="background:#0f0f16"></div><div class="token">bg.surface</div><div class="hex">#0f0f16</div></div>
-      <div class="row"><div class="swatch" style="background:#1a1a24"></div><div class="token">bg.raised</div><div class="hex">#1a1a24</div></div>
-      <div class="row"><div class="swatch" style="background:#20202e"></div><div class="token">bg.hover</div><div class="hex">#20202e</div></div>
-      <div class="row"><div class="swatch" style="background:#26263a"></div><div class="token">bg.active</div><div class="hex">#26263a</div></div>
-    </div>
-    <div class="section">
-      <div class="section-label">Borders</div>
-      <div class="row"><div class="swatch" style="background:#1a1a24"></div><div class="token">border.subtle</div><div class="hex">#1a1a24</div></div>
-      <div class="row"><div class="swatch" style="background:#232333"></div><div class="token">border.default</div><div class="hex">#232333</div></div>
-      <div class="row"><div class="swatch" style="background:#2e2e42"></div><div class="token">border.strong</div><div class="hex">#2e2e42</div></div>
-      <div class="row"><div class="swatch" style="background:#6475e8"></div><div class="token">border.focus</div><div class="hex">#6475e8</div></div>
-    </div>
-    <div class="section">
-      <div class="section-label">Text</div>
-      <div class="row"><div class="swatch" style="background:#f0f0f2"></div><div class="token">text.primary</div><div class="hex">#f0f0f2</div></div>
-      <div class="row"><div class="swatch" style="background:#a1a1a8"></div><div class="token">text.secondary</div><div class="hex">#a1a1a8</div></div>
-      <div class="row"><div class="swatch" style="background:#717178"></div><div class="token">text.muted</div><div class="hex">#717178</div></div>
-      <div class="row"><div class="swatch" style="background:#585860"></div><div class="token">text.dim</div><div class="hex">#585860</div></div>
-      <div class="row"><div class="swatch" style="background:#454548"></div><div class="token">text.ghost</div><div class="hex">#454548</div></div>
-    </div>
-    <div class="section">
-      <div class="section-label">Accent</div>
-      <div class="row"><div class="swatch" style="background:#6475e8"></div><div class="token">accent.primary</div><div class="hex">#6475e8</div></div>
-      <div class="row"><div class="swatch" style="background:#7585f0"></div><div class="token">accent.hover</div><div class="hex">#7585f0</div></div>
-    </div>
-    <div class="section">
-      <div class="section-label">Semantic</div>
-      <div class="row"><div class="swatch" style="background:#10d97a"></div><div class="token">semantic.success</div><div class="hex">#10d97a</div></div>
-      <div class="row"><div class="swatch" style="background:#eab308"></div><div class="token">semantic.warning</div><div class="hex">#eab308</div><span class="changed">CHANGED (was #d14d4d)</span></div>
-      <div class="row"><div class="swatch" style="background:#f43f5e"></div><div class="token">semantic.error</div><div class="hex">#f43f5e</div><span class="changed">CHANGED (was #ef4444)</span></div>
-      <div class="row"><div class="swatch" style="background:#f43f5e15"></div><div class="token">semantic.errorBg</div><div class="hex">#f43f5e15</div><span class="changed">CHANGED</span></div>
-      <div class="row"><div class="swatch" style="background:#f43f5e30"></div><div class="token">semantic.errorBorder</div><div class="hex">#f43f5e30</div><span class="changed">CHANGED</span></div>
-      <div class="row"><div class="swatch" style="background:#fb7185"></div><div class="token">semantic.errorText</div><div class="hex">#fb7185</div><span class="changed">CHANGED (was #f87171)</span></div>
-    </div>
-  </div>
-
-  <div class="mode light">
-    <h2>Light Mode</h2>
-    <div class="section">
-      <div class="section-label">Backgrounds</div>
-      <div class="row"><div class="swatch" style="background:#f6f7fb"></div><div class="token">bg.base</div><div class="hex">#f6f7fb</div></div>
-      <div class="row"><div class="swatch" style="background:#ffffff"></div><div class="token">bg.surface</div><div class="hex">#ffffff</div></div>
-      <div class="row"><div class="swatch" style="background:#eef1f7"></div><div class="token">bg.raised</div><div class="hex">#eef1f7</div></div>
-      <div class="row"><div class="swatch" style="background:#e5e9f2"></div><div class="token">bg.hover</div><div class="hex">#e5e9f2</div></div>
-      <div class="row"><div class="swatch" style="background:#d8deea"></div><div class="token">bg.active</div><div class="hex">#d8deea</div></div>
-    </div>
-    <div class="section">
-      <div class="section-label">Borders</div>
-      <div class="row"><div class="swatch" style="background:#e4e8f0"></div><div class="token">border.subtle</div><div class="hex">#e4e8f0</div></div>
-      <div class="row"><div class="swatch" style="background:#d8deea"></div><div class="token">border.default</div><div class="hex">#d8deea</div></div>
-      <div class="row"><div class="swatch" style="background:#c2cad8"></div><div class="token">border.strong</div><div class="hex">#c2cad8</div></div>
-      <div class="row"><div class="swatch" style="background:#6475e8"></div><div class="token">border.focus</div><div class="hex">#6475e8</div></div>
-    </div>
-    <div class="section">
-      <div class="section-label">Text</div>
-      <div class="row"><div class="swatch" style="background:#141824"></div><div class="token">text.primary</div><div class="hex">#141824</div></div>
-      <div class="row"><div class="swatch" style="background:#4f5669"></div><div class="token">text.secondary</div><div class="hex">#4f5669</div></div>
-      <div class="row"><div class="swatch" style="background:#70788d"></div><div class="token">text.muted</div><div class="hex">#70788d</div></div>
-      <div class="row"><div class="swatch" style="background:#8a90a2"></div><div class="token">text.dim</div><div class="hex">#8a90a2</div></div>
-      <div class="row"><div class="swatch" style="background:#b0b6c8"></div><div class="token">text.ghost</div><div class="hex">#b0b6c8</div></div>
-    </div>
-    <div class="section">
-      <div class="section-label">Accent</div>
-      <div class="row"><div class="swatch" style="background:#6475e8"></div><div class="token">accent.primary</div><div class="hex">#6475e8</div></div>
-      <div class="row"><div class="swatch" style="background:#5467e6"></div><div class="token">accent.hover</div><div class="hex">#5467e6</div></div>
-    </div>
-    <div class="section">
-      <div class="section-label">Semantic</div>
-      <div class="row"><div class="swatch" style="background:#0ea86b"></div><div class="token">semantic.success</div><div class="hex">#0ea86b</div></div>
-      <div class="row"><div class="swatch" style="background:#ca8a04"></div><div class="token">semantic.warning</div><div class="hex">#ca8a04</div><span class="changed">CHANGED (was #b45309)</span></div>
-      <div class="row"><div class="swatch" style="background:#e11d48"></div><div class="token">semantic.error</div><div class="hex">#e11d48</div><span class="changed">CHANGED (was #d32f2f)</span></div>
-      <div class="row"><div class="swatch" style="background:#e11d4814"></div><div class="token">semantic.errorBg</div><div class="hex">#e11d4814</div><span class="changed">CHANGED</span></div>
-      <div class="row"><div class="swatch" style="background:#e11d482a"></div><div class="token">semantic.errorBorder</div><div class="hex">#e11d482a</div><span class="changed">CHANGED</span></div>
-      <div class="row"><div class="swatch" style="background:#be123c"></div><div class="token">semantic.errorText</div><div class="hex">#be123c</div><span class="changed">CHANGED (was #c53030)</span></div>
-    </div>
-  </div>
+<h2>Borders and text</h2>
+<div class="grid">
+  <div class="row"><span class="swatch" style="background:#e4e8f0"></span><span class="token">border.subtle</span><span class="value">#e4e8f0</span></div>
+  <div class="row"><span class="swatch" style="background:#d8deea"></span><span class="token">border.default</span><span class="value">#d8deea</span></div>
+  <div class="row"><span class="swatch" style="background:#c2cad8"></span><span class="token">border.strong</span><span class="value">#c2cad8</span></div>
+  <div class="row"><span class="swatch" style="background:#6475e8"></span><span class="token">border.focus</span><span class="value">#6475e8</span></div>
+  <div class="row"><span class="swatch" style="background:#141824"></span><span class="token">text.primary</span><span class="value">#141824</span></div>
+  <div class="row"><span class="swatch" style="background:#4f5669"></span><span class="token">text.secondary</span><span class="value">#4f5669</span></div>
+  <div class="row"><span class="swatch" style="background:#70788d"></span><span class="token">text.muted</span><span class="value">#70788d</span></div>
+  <div class="row"><span class="swatch" style="background:#8a90a2"></span><span class="token">text.dim</span><span class="value">#8a90a2</span></div>
+  <div class="row"><span class="swatch" style="background:#b0b6c8"></span><span class="token">text.ghost</span><span class="value">#b0b6c8</span></div>
 </div>
 
-<!-- AGENT + TRACK COLORS -->
-<div class="modes">
-  <div class="mode dark">
-    <h2>Agent &amp; Track Colors</h2>
-    <div class="section">
-      <div class="section-label">Agent Type Colors (multi-agent branches)</div>
-      <div class="row"><div class="swatch" style="background:#3b9eff"></div><div class="token">agentType.explore</div><div class="hex">#3b9eff</div><span style="font-size:9px;color:#585860;margin-left:4px">blue</span></div>
-      <div class="row"><div class="swatch" style="background:#10d97a"></div><div class="token">agentType.task</div><div class="hex">#10d97a</div><span style="font-size:9px;color:#585860;margin-left:4px">green</span></div>
-      <div class="row"><div class="swatch" style="background:#a78bfa"></div><div class="token">agentType.general-purpose</div><div class="hex">#a78bfa</div><span style="font-size:9px;color:#585860;margin-left:4px">purple</span></div>
-      <div class="row"><div class="swatch" style="background:#06b6d4"></div><div class="token">agentType.code-review</div><div class="hex">#06b6d4</div><span class="changed">CHANGED (was #f59e0b amber &rarr; cyan)</span></div>
-      <div class="row"><div class="swatch" style="background:#ec4899"></div><div class="token">agentType.configure-copilot</div><div class="hex">#ec4899</div><span style="font-size:9px;color:#585860;margin-left:4px">pink</span></div>
-      <div class="row"><div class="swatch" style="background:#06b6d4"></div><div class="token">agentType.default</div><div class="hex">#06b6d4</div><span class="changed">CHANGED (was #f59e0b)</span></div>
-    </div>
-    <div class="section">
-      <div class="section-label">Track Colors</div>
-      <div class="row"><div class="swatch" style="background:#94a3b8"></div><div class="token">track.reasoning</div><div class="hex">#94a3b8</div><span style="font-size:9px;color:#585860;margin-left:4px">slate</span></div>
-      <div class="row"><div class="swatch" style="background:#3b9eff"></div><div class="token">track.tool_call</div><div class="hex">#3b9eff</div><span style="font-size:9px;color:#585860;margin-left:4px">blue</span></div>
-      <div class="row"><div class="swatch" style="background:#a78bfa"></div><div class="token">track.context</div><div class="hex">#a78bfa</div><span style="font-size:9px;color:#585860;margin-left:4px">purple</span></div>
-      <div class="row"><div class="swatch" style="background:#10d97a"></div><div class="token">track.output</div><div class="hex">#10d97a</div><span style="font-size:9px;color:#585860;margin-left:4px">green</span></div>
-      <div class="row"><div class="swatch" style="background:#06b6d4"></div><div class="token">track.agent</div><div class="hex">#06b6d4</div><span class="changed">CHANGED (was #f59e0b amber &rarr; cyan)</span></div>
-    </div>
-  </div>
-
-  <div class="mode light">
-    <h2>Agent &amp; Track Colors</h2>
-    <div class="section">
-      <div class="section-label">Agent Type Colors (multi-agent branches)</div>
-      <div class="row"><div class="swatch" style="background:#2563eb"></div><div class="token">agentType.explore</div><div class="hex">#2563eb</div><span style="font-size:9px;color:#8a90a2;margin-left:4px">blue</span></div>
-      <div class="row"><div class="swatch" style="background:#0ea86b"></div><div class="token">agentType.task</div><div class="hex">#0ea86b</div><span style="font-size:9px;color:#8a90a2;margin-left:4px">green</span></div>
-      <div class="row"><div class="swatch" style="background:#8b5cf6"></div><div class="token">agentType.general-purpose</div><div class="hex">#8b5cf6</div><span style="font-size:9px;color:#8a90a2;margin-left:4px">purple</span></div>
-      <div class="row"><div class="swatch" style="background:#0891b2"></div><div class="token">agentType.code-review</div><div class="hex">#0891b2</div><span class="changed">CHANGED (was #d97706 amber &rarr; cyan)</span></div>
-      <div class="row"><div class="swatch" style="background:#db2777"></div><div class="token">agentType.configure-copilot</div><div class="hex">#db2777</div><span style="font-size:9px;color:#8a90a2;margin-left:4px">pink</span></div>
-      <div class="row"><div class="swatch" style="background:#0891b2"></div><div class="token">agentType.default</div><div class="hex">#0891b2</div><span class="changed">CHANGED (was #d97706)</span></div>
-    </div>
-    <div class="section">
-      <div class="section-label">Track Colors</div>
-      <div class="row"><div class="swatch" style="background:#64748b"></div><div class="token">track.reasoning</div><div class="hex">#64748b</div><span style="font-size:9px;color:#8a90a2;margin-left:4px">slate</span></div>
-      <div class="row"><div class="swatch" style="background:#2563eb"></div><div class="token">track.tool_call</div><div class="hex">#2563eb</div><span style="font-size:9px;color:#8a90a2;margin-left:4px">blue</span></div>
-      <div class="row"><div class="swatch" style="background:#8b5cf6"></div><div class="token">track.context</div><div class="hex">#8b5cf6</div><span style="font-size:9px;color:#8a90a2;margin-left:4px">purple</span></div>
-      <div class="row"><div class="swatch" style="background:#0ea86b"></div><div class="token">track.output</div><div class="hex">#0ea86b</div><span style="font-size:9px;color:#8a90a2;margin-left:4px">green</span></div>
-      <div class="row"><div class="swatch" style="background:#0891b2"></div><div class="token">track.agent</div><div class="hex">#0891b2</div><span class="changed">CHANGED (was #d97706 amber &rarr; cyan)</span></div>
-    </div>
-  </div>
+<h2>Accent and semantic</h2>
+<div class="grid">
+  <div class="row"><span class="swatch" style="background:#6475e8"></span><span class="token">accent.primary</span><span class="value">#6475e8</span></div>
+  <div class="row"><span class="swatch" style="background:#5467e6"></span><span class="token">accent.hover</span><span class="value">#5467e6</span></div>
+  <div class="row"><span class="swatch" style="background:#6475e818"></span><span class="token">accent.muted</span><span class="value">#6475e818</span></div>
+  <div class="row"><span class="swatch" style="background:#0ea86b"></span><span class="token">semantic.success</span><span class="value">#0ea86b</span></div>
+  <div class="row"><span class="swatch" style="background:#ca8a04"></span><span class="token">semantic.warning</span><span class="value">#ca8a04</span></div>
+  <div class="row"><span class="swatch" style="background:#e11d48"></span><span class="token">semantic.error</span><span class="value">#e11d48</span></div>
+  <div class="row"><span class="swatch" style="background:#e11d4814"></span><span class="token">semantic.errorBg</span><span class="value">#e11d4814</span></div>
+  <div class="row"><span class="swatch" style="background:#e11d482a"></span><span class="token">semantic.errorBorder</span><span class="value">#e11d482a</span></div>
+  <div class="row"><span class="swatch" style="background:#be123c"></span><span class="token">semantic.errorText</span><span class="value">#be123c</span></div>
+  <div class="row"><span class="swatch" style="background:#6475e8"></span><span class="token">semantic.info</span><span class="value">#6475e8</span></div>
 </div>
 
-<hr class="divider">
-
-<!-- COST VIEW PALETTE -->
-<h2 style="margin-bottom:4px">Cost View Palette</h2>
-<p class="subtitle">Categorical token-cost colors used by <code>CostView</code>, output attribution, and the cache-miss / recommit / model-switch callouts. Output attribution intentionally reuses <code>cost.output</code> (visible), <code>cost.cwrite</code> (reasoning), <code>cost.ctxHistory</code> (tool arguments), and muted text (unattributed), so no duplicate swatches are introduced.</p>
-
-<div class="row-grid">
-  <div class="mode dark">
-    <h2>Dark Mode</h2>
-    <div class="section">
-      <div class="section-label">Cumulative Cost (token type)</div>
-      <div class="row"><div class="swatch" style="background:#56d364"></div><div class="token">cost.fresh</div><div class="hex">#56d364</div></div>
-      <div class="row"><div class="swatch" style="background:#f4b340"></div><div class="token">cost.cwrite</div><div class="hex">#f4b340</div></div>
-      <div class="row"><div class="swatch" style="background:#3DA9D4"></div><div class="token">cost.cached</div><div class="hex">#3DA9D4</div></div>
-      <div class="row"><div class="swatch" style="background:#a371f7"></div><div class="token">cost.output</div><div class="hex">#a371f7</div></div>
-    </div>
-    <div class="section">
-      <div class="section-label">Per-call Context (component)</div>
-      <div class="row"><div class="swatch" style="background:#7A8B9E"></div><div class="token">cost.ctxSystem</div><div class="hex">#7A8B9E</div></div>
-      <div class="row"><div class="swatch" style="background:#4A5568"></div><div class="token">cost.ctxToolDefs</div><div class="hex">#4A5568</div></div>
-      <div class="row"><div class="swatch" style="background:#E6A847"></div><div class="token">cost.ctxHistory</div><div class="hex">#E6A847</div></div>
-      <div class="row"><div class="swatch" style="background:#B8642F"></div><div class="token">cost.ctxToolResults</div><div class="hex">#B8642F</div></div>
-      <div class="row"><div class="swatch" style="background:#3DA9D4"></div><div class="token">cost.ctxCurrent</div><div class="hex">#3DA9D4</div></div>
-      <div class="row"><div class="swatch" style="background:#2C7A99"></div><div class="token">cost.ctxOutput</div><div class="hex">#2C7A99</div></div>
-    </div>
-    <div class="section">
-      <div class="section-label">Tool Group Source Chips</div>
-      <div class="row"><div class="swatch" style="background:#a371f7"></div><div class="token">cost.kindMcp</div><div class="hex">#a371f7</div></div>
-      <div class="row"><div class="swatch" style="background:#f4b340"></div><div class="token">cost.kindExtension</div><div class="hex">#f4b340</div></div>
-      <div class="row"><div class="swatch" style="background:#3DA9D4"></div><div class="token">cost.kindBuiltin</div><div class="hex">#3DA9D4</div></div>
-    </div>
-    <div class="section">
-      <div class="section-label">Callout Tints</div>
-      <div class="row"><div class="swatch" style="background:#2a141c"></div><div class="token">cost.missBg</div><div class="hex">#2a141c</div><span style="font-size:9px;color:#585860;margin-left:4px">unexpected miss</span></div>
-      <div class="row"><div class="swatch" style="background:#1a1d12"></div><div class="token">cost.recommitBg</div><div class="hex">#1a1d12</div><span style="font-size:9px;color:#585860;margin-left:4px">cache recommit</span></div>
-      <div class="row"><div class="swatch" style="background:#0f1a22"></div><div class="token">cost.switchBg</div><div class="hex">#0f1a22</div><span style="font-size:9px;color:#585860;margin-left:4px">model switch</span></div>
-      <div class="row"><div class="swatch" style="background:#0e1f14"></div><div class="token">cost.okBg</div><div class="hex">#0e1f14</div><span style="font-size:9px;color:#585860;margin-left:4px">net new</span></div>
-    </div>
-  </div>
-
-  <div class="mode light">
-    <h2>Light Mode</h2>
-    <div class="section">
-      <div class="section-label">Cumulative Cost (token type)</div>
-      <div class="row"><div class="swatch" style="background:#0ea86b"></div><div class="token">cost.fresh</div><div class="hex">#0ea86b</div></div>
-      <div class="row"><div class="swatch" style="background:#ca8a04"></div><div class="token">cost.cwrite</div><div class="hex">#ca8a04</div></div>
-      <div class="row"><div class="swatch" style="background:#1e88c4"></div><div class="token">cost.cached</div><div class="hex">#1e88c4</div></div>
-      <div class="row"><div class="swatch" style="background:#7c5ce6"></div><div class="token">cost.output</div><div class="hex">#7c5ce6</div></div>
-    </div>
-    <div class="section">
-      <div class="section-label">Per-call Context (component)</div>
-      <div class="row"><div class="swatch" style="background:#5a6b80"></div><div class="token">cost.ctxSystem</div><div class="hex">#5a6b80</div></div>
-      <div class="row"><div class="swatch" style="background:#2d3748"></div><div class="token">cost.ctxToolDefs</div><div class="hex">#2d3748</div></div>
-      <div class="row"><div class="swatch" style="background:#b87a1a"></div><div class="token">cost.ctxHistory</div><div class="hex">#b87a1a</div></div>
-      <div class="row"><div class="swatch" style="background:#8a4a1f"></div><div class="token">cost.ctxToolResults</div><div class="hex">#8a4a1f</div></div>
-      <div class="row"><div class="swatch" style="background:#1e88c4"></div><div class="token">cost.ctxCurrent</div><div class="hex">#1e88c4</div></div>
-      <div class="row"><div class="swatch" style="background:#1c5f78"></div><div class="token">cost.ctxOutput</div><div class="hex">#1c5f78</div></div>
-    </div>
-    <div class="section">
-      <div class="section-label">Tool Group Source Chips</div>
-      <div class="row"><div class="swatch" style="background:#7c5ce6"></div><div class="token">cost.kindMcp</div><div class="hex">#7c5ce6</div></div>
-      <div class="row"><div class="swatch" style="background:#ca8a04"></div><div class="token">cost.kindExtension</div><div class="hex">#ca8a04</div></div>
-      <div class="row"><div class="swatch" style="background:#1e88c4"></div><div class="token">cost.kindBuiltin</div><div class="hex">#1e88c4</div></div>
-    </div>
-    <div class="section">
-      <div class="section-label">Callout Tints</div>
-      <div class="row"><div class="swatch" style="background:#fde7ec"></div><div class="token">cost.missBg</div><div class="hex">#fde7ec</div><span style="font-size:9px;color:#8a90a2;margin-left:4px">unexpected miss</span></div>
-      <div class="row"><div class="swatch" style="background:#fdf6e0"></div><div class="token">cost.recommitBg</div><div class="hex">#fdf6e0</div><span style="font-size:9px;color:#8a90a2;margin-left:4px">cache recommit</span></div>
-      <div class="row"><div class="swatch" style="background:#e0edfa"></div><div class="token">cost.switchBg</div><div class="hex">#e0edfa</div><span style="font-size:9px;color:#8a90a2;margin-left:4px">model switch</span></div>
-      <div class="row"><div class="swatch" style="background:#dcf2e2"></div><div class="token">cost.okBg</div><div class="hex">#dcf2e2</div><span style="font-size:9px;color:#8a90a2;margin-left:4px">net new</span></div>
-    </div>
-  </div>
+<h2>Agents and tracks</h2>
+<div class="grid">
+  <div class="row"><span class="swatch" style="background:#70788d"></span><span class="token">agent.user</span><span class="value">#70788d</span></div>
+  <div class="row"><span class="swatch" style="background:#6475e8"></span><span class="token">agent.assistant</span><span class="value">#6475e8</span></div>
+  <div class="row"><span class="swatch" style="background:#8b5cf6"></span><span class="token">agent.system</span><span class="value">#8b5cf6</span></div>
+  <div class="row"><span class="swatch" style="background:#2563eb"></span><span class="token">agentType.explore</span><span class="value">#2563eb</span></div>
+  <div class="row"><span class="swatch" style="background:#0ea86b"></span><span class="token">agentType.task</span><span class="value">#0ea86b</span></div>
+  <div class="row"><span class="swatch" style="background:#8b5cf6"></span><span class="token">agentType.general-purpose</span><span class="value">#8b5cf6</span></div>
+  <div class="row"><span class="swatch" style="background:#0891b2"></span><span class="token">agentType.code-review</span><span class="value">#0891b2</span></div>
+  <div class="row"><span class="swatch" style="background:#db2777"></span><span class="token">agentType.configure-copilot</span><span class="value">#db2777</span></div>
+  <div class="row"><span class="swatch" style="background:#0891b2"></span><span class="token">agentType.default</span><span class="value">#0891b2</span></div>
+  <div class="row"><span class="swatch" style="background:#64748b"></span><span class="token">track.reasoning</span><span class="value">#64748b</span></div>
+  <div class="row"><span class="swatch" style="background:#2563eb"></span><span class="token">track.tool_call</span><span class="value">#2563eb</span></div>
+  <div class="row"><span class="swatch" style="background:#8b5cf6"></span><span class="token">track.context</span><span class="value">#8b5cf6</span></div>
+  <div class="row"><span class="swatch" style="background:#0ea86b"></span><span class="token">track.output</span><span class="value">#0ea86b</span></div>
+  <div class="row"><span class="swatch" style="background:#0891b2"></span><span class="token">track.agent</span><span class="value">#0891b2</span></div>
 </div>
 
-<hr class="divider">
-
-<!-- SIMULATED UI PREVIEW -->
-<h1 style="margin-bottom:4px">UI Preview</h1>
-<p class="subtitle">Agent badges and track bars in context</p>
-
-<div class="preview-row">
-  <div class="preview-card dark">
-    <h3>Dark: Agent Badges</h3>
-    <div>
-      <span class="agent-pill" style="background:rgba(59,158,255,0.15);color:#3b9eff;border:1px solid rgba(59,158,255,0.3)">Explore</span>
-      <span class="agent-pill" style="background:rgba(16,217,122,0.15);color:#10d97a;border:1px solid rgba(16,217,122,0.3)">Task</span>
-      <span class="agent-pill" style="background:rgba(167,139,250,0.15);color:#a78bfa;border:1px solid rgba(167,139,250,0.3)">General</span>
-      <span class="agent-pill" style="background:rgba(6,182,212,0.15);color:#06b6d4;border:1px solid rgba(6,182,212,0.3)">Code Review</span>
-      <span class="agent-pill" style="background:rgba(236,72,153,0.15);color:#ec4899;border:1px solid rgba(236,72,153,0.3)">Configure</span>
-    </div>
-    <h3 style="margin-top:16px">Dark: Track Bars</h3>
-    <div class="track-bar" style="background:rgba(148,163,184,0.15);color:#94a3b8;width:60%">Reasoning</div>
-    <div class="track-bar" style="background:rgba(59,158,255,0.15);color:#3b9eff;width:90%">Tool Calls</div>
-    <div class="track-bar" style="background:rgba(167,139,250,0.15);color:#a78bfa;width:40%">Context</div>
-    <div class="track-bar" style="background:rgba(16,217,122,0.15);color:#10d97a;width:50%">Output</div>
-    <div class="track-bar" style="background:rgba(6,182,212,0.15);color:#06b6d4;width:30%">Agents</div>
-    <h3 style="margin-top:16px">Dark: Semantic</h3>
-    <div style="display:flex;gap:8px;margin-top:4px">
-      <span class="agent-pill" style="background:rgba(16,217,122,0.15);color:#10d97a;border:1px solid rgba(16,217,122,0.3)">Success</span>
-      <span class="agent-pill" style="background:rgba(234,179,8,0.15);color:#eab308;border:1px solid rgba(234,179,8,0.3)">Warning</span>
-      <span class="agent-pill" style="background:rgba(244,63,94,0.15);color:#f43f5e;border:1px solid rgba(244,63,94,0.3)">Error</span>
-    </div>
-    <div style="margin-top:8px;padding:8px;border-radius:4px;background:#f43f5e15;border:1px solid #f43f5e30;font-size:10px;color:#fb7185">
-      Error banner example: Something went wrong
-    </div>
-  </div>
-
-  <div class="preview-card light">
-    <h3 style="color:#141824">Light: Agent Badges</h3>
-    <div>
-      <span class="agent-pill" style="background:rgba(37,99,235,0.1);color:#2563eb;border:1px solid rgba(37,99,235,0.2)">Explore</span>
-      <span class="agent-pill" style="background:rgba(14,168,107,0.1);color:#0ea86b;border:1px solid rgba(14,168,107,0.2)">Task</span>
-      <span class="agent-pill" style="background:rgba(139,92,246,0.1);color:#8b5cf6;border:1px solid rgba(139,92,246,0.2)">General</span>
-      <span class="agent-pill" style="background:rgba(8,145,178,0.1);color:#0891b2;border:1px solid rgba(8,145,178,0.2)">Code Review</span>
-      <span class="agent-pill" style="background:rgba(219,39,119,0.1);color:#db2777;border:1px solid rgba(219,39,119,0.2)">Configure</span>
-    </div>
-    <h3 style="margin-top:16px;color:#141824">Light: Track Bars</h3>
-    <div class="track-bar" style="background:rgba(100,116,139,0.1);color:#64748b;width:60%">Reasoning</div>
-    <div class="track-bar" style="background:rgba(37,99,235,0.1);color:#2563eb;width:90%">Tool Calls</div>
-    <div class="track-bar" style="background:rgba(139,92,246,0.1);color:#8b5cf6;width:40%">Context</div>
-    <div class="track-bar" style="background:rgba(14,168,107,0.1);color:#0ea86b;width:50%">Output</div>
-    <div class="track-bar" style="background:rgba(8,145,178,0.1);color:#0891b2;width:30%">Agents</div>
-    <h3 style="margin-top:16px;color:#141824">Light: Semantic</h3>
-    <div style="display:flex;gap:8px;margin-top:4px">
-      <span class="agent-pill" style="background:rgba(14,168,107,0.1);color:#0ea86b;border:1px solid rgba(14,168,107,0.2)">Success</span>
-      <span class="agent-pill" style="background:rgba(202,138,4,0.1);color:#ca8a04;border:1px solid rgba(202,138,4,0.2)">Warning</span>
-      <span class="agent-pill" style="background:rgba(225,29,72,0.1);color:#e11d48;border:1px solid rgba(225,29,72,0.2)">Error</span>
-    </div>
-    <div style="margin-top:8px;padding:8px;border-radius:4px;background:#e11d4814;border:1px solid #e11d482a;font-size:10px;color:#be123c">
-      Error banner example: Something went wrong
-    </div>
-  </div>
+<h2>Cost view</h2>
+<div class="grid">
+  <div class="row"><span class="swatch" style="background:#0ea86b"></span><span class="token">cost.fresh</span><span class="value">#0ea86b</span></div>
+  <div class="row"><span class="swatch" style="background:#ca8a04"></span><span class="token">cost.cwrite</span><span class="value">#ca8a04</span></div>
+  <div class="row"><span class="swatch" style="background:#1e88c4"></span><span class="token">cost.cached</span><span class="value">#1e88c4</span></div>
+  <div class="row"><span class="swatch" style="background:#7c5ce6"></span><span class="token">cost.output / kindMcp</span><span class="value">#7c5ce6</span></div>
+  <div class="row"><span class="swatch" style="background:#5a6b80"></span><span class="token">cost.ctxSystem</span><span class="value">#5a6b80</span></div>
+  <div class="row"><span class="swatch" style="background:#2d3748"></span><span class="token">cost.ctxToolDefs</span><span class="value">#2d3748</span></div>
+  <div class="row"><span class="swatch" style="background:#b87a1a"></span><span class="token">cost.ctxHistory</span><span class="value">#b87a1a</span></div>
+  <div class="row"><span class="swatch" style="background:#8a4a1f"></span><span class="token">cost.ctxToolResults / chipFgResult</span><span class="value">#8a4a1f</span></div>
+  <div class="row"><span class="swatch" style="background:#1e88c4"></span><span class="token">cost.ctxCurrent / kindBuiltin</span><span class="value">#1e88c4</span></div>
+  <div class="row"><span class="swatch" style="background:#1c5f78"></span><span class="token">cost.ctxOutput</span><span class="value">#1c5f78</span></div>
+  <div class="row"><span class="swatch" style="background:#ca8a04"></span><span class="token">cost.kindExtension</span><span class="value">#ca8a04</span></div>
+  <div class="row"><span class="swatch" style="background:#ede8fa"></span><span class="token">cost.chipBgMcp</span><span class="value">#ede8fa</span></div>
+  <div class="row"><span class="swatch" style="background:#fdf3d4"></span><span class="token">cost.chipBgExtension / chipBgUser</span><span class="value">#fdf3d4</span></div>
+  <div class="row"><span class="swatch" style="background:#dceffb"></span><span class="token">cost.chipBgBuiltin</span><span class="value">#dceffb</span></div>
+  <div class="row"><span class="swatch" style="background:#dcf2e2"></span><span class="token">cost.chipBgAssistant / okBg</span><span class="value">#dcf2e2</span></div>
+  <div class="row"><span class="swatch" style="background:#fbe5d4"></span><span class="token">cost.chipBgResult</span><span class="value">#fbe5d4</span></div>
+  <div class="row"><span class="swatch" style="background:#a36b08"></span><span class="token">cost.chipFgUser</span><span class="value">#a36b08</span></div>
+  <div class="row"><span class="swatch" style="background:#0e7c4d"></span><span class="token">cost.chipFgAssistant</span><span class="value">#0e7c4d</span></div>
+  <div class="row"><span class="swatch" style="background:#fde7ec"></span><span class="token">cost.missBg</span><span class="value">#fde7ec</span></div>
+  <div class="row"><span class="swatch" style="background:#f5b9c5"></span><span class="token">cost.missBorder</span><span class="value">#f5b9c5</span></div>
+  <div class="row"><span class="swatch" style="background:#a8203b"></span><span class="token">cost.missText</span><span class="value">#a8203b</span></div>
+  <div class="row"><span class="swatch" style="background:#8a162e"></span><span class="token">cost.missAccent / missCodeText</span><span class="value">#8a162e</span></div>
+  <div class="row"><span class="swatch" style="background:#c0263e"></span><span class="token">cost.missBadgeBg</span><span class="value">#c0263e</span></div>
+  <div class="row"><span class="swatch" style="background:#fdf0f3"></span><span class="token">cost.missCodeBg</span><span class="value">#fdf0f3</span></div>
+  <div class="row"><span class="swatch" style="background:#f5d0d8"></span><span class="token">cost.missCodeBorder</span><span class="value">#f5d0d8</span></div>
+  <div class="row"><span class="swatch" style="background:#fdf6e0"></span><span class="token">cost.recommitBg</span><span class="value">#fdf6e0</span></div>
+  <div class="row"><span class="swatch" style="background:#e8d28a"></span><span class="token">cost.recommitBorder</span><span class="value">#e8d28a</span></div>
+  <div class="row"><span class="swatch" style="background:#7a5b10"></span><span class="token">cost.recommitText</span><span class="value">#7a5b10</span></div>
+  <div class="row"><span class="swatch" style="background:#e0edfa"></span><span class="token">cost.switchBg</span><span class="value">#e0edfa</span></div>
+  <div class="row"><span class="swatch" style="background:#a8c8ec"></span><span class="token">cost.switchBorder</span><span class="value">#a8c8ec</span></div>
+  <div class="row"><span class="swatch" style="background:#1c4f88"></span><span class="token">cost.switchText</span><span class="value">#1c4f88</span></div>
+  <div class="row"><span class="swatch" style="background:#a6dfb8"></span><span class="token">cost.okBorder</span><span class="value">#a6dfb8</span></div>
+  <div class="row"><span class="swatch" style="background:#eaf6ee"></span><span class="token">cost.okBarTrack</span><span class="value">#eaf6ee</span></div>
 </div>
-
-<hr class="divider">
-
-<h1 style="margin-bottom:4px">Color Family Summary</h1>
-<p class="subtitle">All cool-toned. Zero browns or oranges.</p>
-
-<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-top:12px">
-  <div style="text-align:center">
-    <div style="width:48px;height:48px;border-radius:8px;background:#3b9eff;margin:0 auto 6px"></div>
-    <div style="font-size:10px;color:#a1a1a8">Blue</div>
-    <div style="font-size:9px;color:#585860">explore, tool_call</div>
-  </div>
-  <div style="text-align:center">
-    <div style="width:48px;height:48px;border-radius:8px;background:#10d97a;margin:0 auto 6px"></div>
-    <div style="font-size:10px;color:#a1a1a8">Green</div>
-    <div style="font-size:9px;color:#585860">task, output, success</div>
-  </div>
-  <div style="text-align:center">
-    <div style="width:48px;height:48px;border-radius:8px;background:#a78bfa;margin:0 auto 6px"></div>
-    <div style="font-size:10px;color:#a1a1a8">Purple</div>
-    <div style="font-size:9px;color:#585860">general, context, system</div>
-  </div>
-  <div style="text-align:center">
-    <div style="width:48px;height:48px;border-radius:8px;background:#06b6d4;margin:0 auto 6px"></div>
-    <div style="font-size:10px;color:#a1a1a8">Cyan</div>
-    <div style="font-size:9px;color:#585860">code-review, agents</div>
-  </div>
-  <div style="text-align:center">
-    <div style="width:48px;height:48px;border-radius:8px;background:#ec4899;margin:0 auto 6px"></div>
-    <div style="font-size:10px;color:#a1a1a8">Pink</div>
-    <div style="font-size:9px;color:#585860">configure-copilot</div>
-  </div>
-  <div style="text-align:center">
-    <div style="width:48px;height:48px;border-radius:8px;background:#94a3b8;margin:0 auto 6px"></div>
-    <div style="font-size:10px;color:#a1a1a8">Slate</div>
-    <div style="font-size:9px;color:#585860">reasoning, user</div>
-  </div>
-</div>
-
-<div style="margin-top:16px">
-  <div style="display:flex;gap:12px;align-items:center">
-    <div style="text-align:center">
-      <div style="width:48px;height:48px;border-radius:8px;background:#eab308;margin:0 auto 6px"></div>
-      <div style="font-size:10px;color:#a1a1a8">Yellow</div>
-      <div style="font-size:9px;color:#585860">warning only</div>
-    </div>
-    <div style="text-align:center">
-      <div style="width:48px;height:48px;border-radius:8px;background:#f43f5e;margin:0 auto 6px"></div>
-      <div style="font-size:10px;color:#a1a1a8">Rose</div>
-      <div style="font-size:9px;color:#585860">error only</div>
-    </div>
-    <div style="font-size:10px;color:#585860;margin-left:8px">&larr; Reserved for semantic states, never used as track/agent identity colors</div>
-  </div>
-</div>
-
-<hr class="divider">
-<p class="note">
-  <strong>Design rules:</strong><br>
-  &bull; 6 identity hues: blue, green, purple, cyan, pink, slate -- used for agents, tracks, and data<br>
-  &bull; 2 semantic hues: yellow (warning), rose (error) -- never used as identity colors<br>
-  &bull; Accent: single blue (#6475e8) shared across both modes<br>
-  &bull; Light variants are deeper/more saturated for contrast on white<br>
-  &bull; No browns. No oranges. All cool-toned.
-</p>
-
 </body>
 </html>

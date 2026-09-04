@@ -24,7 +24,7 @@ The interface should feel fast, focused, and information-dense without ever feel
 ## 1. Color System
 
 All colors live in `src/lib/theme.js`. Components should reference `theme.*` tokens.
-The token names stay the same across modes, but the resolved values now follow the active `light`, `dark`, or `system` preference.
+AGENTVIZ uses one light palette. There is no runtime theme switcher or persisted theme preference.
 
 **Known exceptions:** `LiveIndicator.jsx` hardcodes `#34d399` (teal green) and
 `CompareView.jsx` hardcodes `#a78bfa` (purple) for the Session B accent.
@@ -33,94 +33,92 @@ These are legacy exceptions -- new code should use theme tokens.
 
 ### Backgrounds
 
-These values describe the active palette. The token names stay the same across modes, but the resolved values follow the current `light`, `dark`, or `system` preference.
-
-| Token | Dark | Light | Use |
-| --- | --- | --- | --- |
-| `theme.bg.base` | `#000000` | `#f6f7fb` | Page background |
-| `theme.bg.surface` | `#0f0f16` | `#ffffff` | Cards, panels, raised surfaces |
-| `theme.bg.raised` | `#1a1a24` | `#eef1f7` | Selected items, active states |
-| `theme.bg.overlay` | `rgba(0,0,0,0.7)` | `rgba(17, 24, 39, 0.48)` | Overlay backdrop |
-| `theme.bg.hover` | `#20202e` | `#e5e9f2` | Hover feedback |
-| `theme.bg.active` | `#26263a` | `#d8deea` | Active/pressed feedback |
+| Token | Value | Use |
+| --- | --- | --- |
+| `theme.bg.base` | `#f6f7fb` | Page background |
+| `theme.bg.surface` | `#ffffff` | Cards, panels, raised surfaces |
+| `theme.bg.raised` | `#eef1f7` | Selected items, active states |
+| `theme.bg.overlay` | `rgba(17, 24, 39, 0.48)` | Overlay backdrop |
+| `theme.bg.hover` | `#e5e9f2` | Hover feedback |
+| `theme.bg.active` | `#d8deea` | Active/pressed feedback |
 
 ### Text
 
 Five-level hierarchy. Use the minimum contrast level that communicates the information.
 
-| Token | Dark | Light | Use |
-| --- | --- | --- | --- |
-| `theme.text.primary` | `#f0f0f2` | `#141824` | Body text, values, important content |
-| `theme.text.secondary` | `#a1a1a8` | `#4f5669` | Labels, metadata, descriptions |
-| `theme.text.muted` | `#717178` | `#70788d` | Disabled text, tertiary info |
-| `theme.text.dim` | `#585860` | `#8a90a2` | Section headers (uppercase), subtle labels |
-| `theme.text.ghost` | `#454548` | `#b0b6c8` | Placeholders, gutter numbers, near-invisible |
+| Token | Value | Use |
+| --- | --- | --- |
+| `theme.text.primary` | `#141824` | Body text, values, important content |
+| `theme.text.secondary` | `#4f5669` | Labels, metadata, descriptions |
+| `theme.text.muted` | `#70788d` | Disabled text, tertiary info |
+| `theme.text.dim` | `#8a90a2` | Section headers (uppercase), subtle labels |
+| `theme.text.ghost` | `#b0b6c8` | Placeholders, gutter numbers, near-invisible |
 
 ### Accent
 
 One color. Used for: selection, focus rings, primary actions, active tab indicators.
 
-| Token | Dark | Light | Use |
-| --- | --- | --- | --- |
-| `theme.accent.primary` | `#6475e8` | `#6475e8` | Links, focus, selected, CTA |
-| `theme.accent.hover` | `#7585f0` | `#5467e6` | Hover state of accent elements |
-| `theme.accent.muted` | `#6475e820` | `#6475e818` | Subtle accent background |
+| Token | Value | Use |
+| --- | --- | --- |
+| `theme.accent.primary` | `#6475e8` | Links, focus, selected, CTA |
+| `theme.accent.hover` | `#5467e6` | Hover state of accent elements |
+| `theme.accent.muted` | `#6475e818` | Subtle accent background |
 
 ### Semantic
 
-| Token | Dark | Light | Use |
-| --- | --- | --- | --- |
-| `theme.semantic.success` | `#10d97a` | `#0ea86b` | Positive outcomes, output track, "done" |
-| `theme.semantic.warning` | `#eab308` | `#ca8a04` | Caution, modified files |
-| `theme.semantic.error` | `#f43f5e` | `#e11d48` | Errors, failures |
-| `theme.semantic.errorBg` | `#f43f5e15` | `#e11d4814` | Error row/card background |
-| `theme.semantic.errorBorder` | `#f43f5e30` | `#e11d482a` | Error container border |
-| `theme.semantic.errorText` | `#fb7185` | `#be123c` | Error text (lighter for readability) |
-| `theme.semantic.info` | `#6475e8` | `#6475e8` | Informational (same as accent) |
+| Token | Value | Use |
+| --- | --- | --- |
+| `theme.semantic.success` | `#0ea86b` | Positive outcomes, output track, "done" |
+| `theme.semantic.warning` | `#ca8a04` | Caution, modified files |
+| `theme.semantic.error` | `#e11d48` | Errors, failures |
+| `theme.semantic.errorBg` | `#e11d4814` | Error row/card background |
+| `theme.semantic.errorBorder` | `#e11d482a` | Error container border |
+| `theme.semantic.errorText` | `#be123c` | Error text |
+| `theme.semantic.info` | `#6475e8` | Informational |
 
 ### Agent Colors
 
 Subtle. The content matters, not who said it.
 
-| Token | Dark | Light | Use |
-| --- | --- | --- | --- |
-| `theme.agent.user` | `#8b8b99` | `#70788d` | User messages |
-| `theme.agent.assistant` | `#6475e8` | `#6475e8` | Assistant messages |
-| `theme.agent.system` | `#a78bfa` | `#8b5cf6` | System messages |
+| Token | Value | Use |
+| --- | --- | --- |
+| `theme.agent.user` | `#70788d` | User messages |
+| `theme.agent.assistant` | `#6475e8` | Assistant messages |
+| `theme.agent.system` | `#8b5cf6` | System messages |
 
 ### Track Colors
 
 Balanced luminance so no track visually dominates another.
 
-| Token | Dark | Light | Use |
-| --- | --- | --- | --- |
-| `theme.track.reasoning` | `#94a3b8` | `#64748b` | Thinking/reasoning events |
-| `theme.track.tool_call` | `#3b9eff` | `#2563eb` | Tool invocations |
-| `theme.track.context` | `#a78bfa` | `#8b5cf6` | Context loading |
-| `theme.track.output` | `#10d97a` | `#0ea86b` | Output/results |
-| `theme.track.agent` | `#06b6d4` | `#0891b2` | Agent/subagent events |
+| Token | Value | Use |
+| --- | --- | --- |
+| `theme.track.reasoning` | `#64748b` | Thinking/reasoning events |
+| `theme.track.tool_call` | `#2563eb` | Tool invocations |
+| `theme.track.context` | `#8b5cf6` | Context loading |
+| `theme.track.output` | `#0ea86b` | Output/results |
+| `theme.track.agent` | `#0891b2` | Agent/subagent events |
 
 ### Cost Colors
 
-Used by `CostView` for token-cost categorical data and the cache-miss / recommit / model-switch callouts. These are mode-aware tokens defined in `theme.cost.*`. Do not introduce new hex literals for cost categories: extend `theme.cost` and document them here instead.
+Used by `CostView` for token-cost categorical data and the cache-miss / recommit / model-switch callouts. Do not introduce new hex literals for cost categories: extend `theme.cost` and document them here instead.
 
-| Token | Dark | Light | Use |
-| --- | --- | --- | --- |
-| `theme.cost.fresh` | `#56d364` | `#0ea86b` | Cumulative cost: fresh input tokens |
-| `theme.cost.cwrite` | `#f4b340` | `#ca8a04` | Cumulative cost: cache writes |
-| `theme.cost.cached` | `#3DA9D4` | `#1e88c4` | Cumulative cost: cached reads |
-| `theme.cost.output` | `#a371f7` | `#7c5ce6` | Cumulative cost: output tokens |
-| `theme.cost.ctxSystem` | `#7A8B9E` | `#5a6b80` | Per-call context: system prompt |
-| `theme.cost.ctxToolDefs` | `#4A5568` | `#2d3748` | Per-call context: tool definitions |
-| `theme.cost.ctxHistory` | `#E6A847` | `#b87a1a` | Per-call context: conversation history |
-| `theme.cost.ctxToolResults` | `#B8642F` | `#8a4a1f` | Per-call context: tool results |
-| `theme.cost.ctxCurrent` | `#3DA9D4` | `#1e88c4` | Per-call context: current prompt |
-| `theme.cost.ctxOutput` | `#2C7A99` | `#1c5f78` | Per-call context: response |
-| `theme.cost.kindMcp` / `kindExtension` / `kindBuiltin` | mode-aware | mode-aware | Tool group source chips |
-| `theme.cost.miss*` | red tints | red tints | Unexpected cache miss callouts and code chips |
-| `theme.cost.recommit*` | yellow tints | yellow tints | Cache recommit callouts |
-| `theme.cost.switch*` | blue tints | blue tints | Model-switch callouts |
-| `theme.cost.ok*` | green tints | green tints | Net-new / fresh content blocks |
+| Token | Value | Use |
+| --- | --- | --- |
+| `theme.cost.fresh` | `#0ea86b` | Cumulative cost: fresh input tokens |
+| `theme.cost.cwrite` | `#ca8a04` | Cumulative cost: cache writes |
+| `theme.cost.cached` | `#1e88c4` | Cumulative cost: cached reads |
+| `theme.cost.output` | `#7c5ce6` | Cumulative cost: output tokens |
+| `theme.cost.ctxSystem` | `#5a6b80` | Per-call context: system prompt |
+| `theme.cost.ctxToolDefs` | `#2d3748` | Per-call context: tool definitions |
+| `theme.cost.ctxHistory` | `#b87a1a` | Per-call context: conversation history |
+| `theme.cost.ctxToolResults` | `#8a4a1f` | Per-call context: tool results |
+| `theme.cost.ctxCurrent` | `#1e88c4` | Per-call context: current prompt |
+| `theme.cost.ctxOutput` | `#1c5f78` | Per-call context: response |
+| `theme.cost.kindMcp` / `kindExtension` / `kindBuiltin` | Purple / yellow / blue | Tool group source chips |
+| `theme.cost.miss*` | Red tints | Unexpected cache miss callouts and code chips |
+| `theme.cost.recommit*` | Yellow tints | Cache recommit callouts |
+| `theme.cost.switch*` | Blue tints | Model-switch callouts |
+| `theme.cost.ok*` | Green tints | Net-new / fresh content blocks |
 
 #### Output Attribution Pattern
 
@@ -339,12 +337,12 @@ Depth is created through **thin borders**, not shadows. Shadows are used sparing
 
 ### Border Colors
 
-| Token | Dark | Light | Use |
-| --- | --- | --- | --- |
-| `theme.border.subtle` | `#1a1a24` | `#e4e8f0` | Nearly invisible dividers, diff gutters |
-| `theme.border.default` | `#232333` | `#d8deea` | Standard separators, card borders |
-| `theme.border.strong` | `#2e2e42` | `#c2cad8` | Emphasized dividers, drag handles |
-| `theme.border.focus` | `#6475e8` | `#6475e8` | Focus rings (same as accent) |
+| Token | Value | Use |
+| --- | --- | --- |
+| `theme.border.subtle` | `#e4e8f0` | Nearly invisible dividers, diff gutters |
+| `theme.border.default` | `#d8deea` | Standard separators, card borders |
+| `theme.border.strong` | `#c2cad8` | Emphasized dividers, drag handles |
+| `theme.border.focus` | `#6475e8` | Focus rings |
 
 ### Border Patterns
 
@@ -387,12 +385,12 @@ borderLeft: isSelected ? "2px solid " + barColor : "2px solid transparent"
 
 Minimal. Used only for floating/elevated elements.
 
-| Token | Dark | Light | Use |
-| --- | --- | --- | --- |
-| `theme.shadow.sm` | `0 1px 2px rgba(0,0,0,0.3)` | `0 1px 2px rgba(17,24,39,0.08)` | Subtle lift |
-| `theme.shadow.md` | `0 4px 12px rgba(0,0,0,0.25)` | `0 4px 12px rgba(17,24,39,0.08)` | Modals, command palette |
-| `theme.shadow.lg` | `0 12px 32px rgba(0,0,0,0.35)` | `0 12px 32px rgba(17,24,39,0.10)` | Large floating panels |
-| `theme.shadow.inset` | `inset 0 1px 2px rgba(0,0,0,0.2)` | `inset 0 1px 2px rgba(17,24,39,0.06)` | Pressed/inset effect |
+| Token | Value | Use |
+| --- | --- | --- |
+| `theme.shadow.sm` | `0 1px 2px rgba(17,24,39,0.08)` | Subtle lift |
+| `theme.shadow.md` | `0 4px 12px rgba(17,24,39,0.08)` | Modals, command palette |
+| `theme.shadow.lg` | `0 12px 32px rgba(17,24,39,0.10)` | Large floating panels |
+| `theme.shadow.inset` | `inset 0 1px 2px rgba(17,24,39,0.06)` | Pressed/inset effect |
 
 **Rule:** Shadows appear only on floating elements (modals, tooltips, dropdowns).
 Cards and panels rely on borders, not shadows, for depth.
@@ -904,13 +902,13 @@ to theme tokens over time but are not blocking issues.
 
 ## 11. Scrollbars
 
-Custom scrollbars match the dark theme (defined in `index.html`):
+Custom scrollbars match the light palette (defined in `index.html`):
 
 ```css
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #3a3a3f; border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: #585860; }
+::-webkit-scrollbar-thumb { background: var(--av-border-strong); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--av-text-secondary); }
 ```
 
 - Thin (6px), unobtrusive, transparent track.

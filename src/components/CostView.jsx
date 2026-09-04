@@ -15,7 +15,7 @@ function setCostUnit(u) { _costUnit = u === "currency" ? "currency" : "credits";
 function isCredits() { return _costUnit === "credits"; }
 
 // Cost view uses theme.cost.* tokens (defined in src/lib/theme.js).
-// These are categorical color roles that change with light/dark mode.
+// These are categorical color roles from the shared light palette.
 var COST_COLORS = {
   fresh:  theme.cost.fresh,
   cwrite: theme.cost.cwrite,

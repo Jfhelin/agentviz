@@ -157,7 +157,7 @@ export interface Theme {
     overlay: number;
     modal: number;
   };
-  mode: "dark" | "light";
+  mode: "light";
 }
 
 export declare const theme: Theme;

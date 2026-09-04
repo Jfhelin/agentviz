@@ -1,10 +1,5 @@
 import React, { useState, useRef, useMemo, useCallback, useEffect } from "react";
-import {
-  theme,
-  getResolvedThemeMode,
-  readStoredThemePreference,
-  syncThemeState,
-} from "./lib/theme.js";
+import { theme } from "./lib/theme.js";
 import { exportSingleSession, exportComparison } from "./lib/exportHtml.js";
 import usePersistentState from "./hooks/usePersistentState.js";
 import useSessionLoader from "./hooks/useSessionLoader.js";
@@ -129,13 +124,8 @@ function renderActiveView(activeView, props) {
 
 export default function App() {
   var [view, setView] = usePersistentState("agentviz:view", "replay");
-  var [themeModePreference, setThemeModePreference] = usePersistentState("agentviz:theme-mode", readStoredThemePreference);
   var [libraryEntries, setLibraryEntries] = useState(function () {
     return reconcileSessionLibrary();
-  });
-  var [systemThemeMode, setSystemThemeMode] = useState(function () {
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return "dark";
-    return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
   });
   var [showPalette, setShowPalette] = useState(false);
   var [showShortcuts, setShowShortcuts] = useState(false);
@@ -240,54 +230,6 @@ export default function App() {
     enabled: session.isLive,
     onLines: session.appendLines,
   });
-
-  useEffect(function () {
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
-
-    var mediaQuery = window.matchMedia("(prefers-color-scheme: light)");
-
-    function handleChange(event) {
-      setSystemThemeMode(event.matches ? "light" : "dark");
-    }
-
-    setSystemThemeMode(mediaQuery.matches ? "light" : "dark");
-
-    if (typeof mediaQuery.addEventListener === "function") {
-      mediaQuery.addEventListener("change", handleChange);
-      return function () {
-        mediaQuery.removeEventListener("change", handleChange);
-      };
-    }
-
-    mediaQuery.addListener(handleChange);
-    return function () {
-      mediaQuery.removeListener(handleChange);
-    };
-  }, []);
-
-  var themeTokens = useMemo(function () {
-    return syncThemeState(themeModePreference, systemThemeMode);
-  }, [themeModePreference, systemThemeMode]);
-  var resolvedThemeMode = getResolvedThemeMode(themeModePreference, systemThemeMode);
-
-  useEffect(function () {
-    if (typeof document === "undefined") return;
-
-    document.documentElement.dataset.theme = resolvedThemeMode;
-    document.documentElement.dataset.themePreference = themeModePreference;
-    document.documentElement.style.colorScheme = resolvedThemeMode;
-    document.documentElement.style.setProperty("--av-bg-base", themeTokens.bg.base);
-    document.documentElement.style.setProperty("--av-bg-surface", themeTokens.bg.surface);
-    document.documentElement.style.setProperty("--av-bg-hover", themeTokens.bg.hover);
-    document.documentElement.style.setProperty("--av-bg-active", themeTokens.bg.active);
-    document.documentElement.style.setProperty("--av-focus", themeTokens.border.focus);
-    document.documentElement.style.setProperty("--av-border", themeTokens.border.default);
-    document.documentElement.style.setProperty("--av-border-strong", themeTokens.border.strong);
-    document.documentElement.style.setProperty("--av-text-primary", themeTokens.text.primary);
-    document.documentElement.style.setProperty("--av-text-secondary", themeTokens.text.secondary);
-    document.body.style.background = themeTokens.bg.base;
-    document.body.style.color = themeTokens.text.primary;
-  }, [themeModePreference, systemThemeMode, resolvedThemeMode, themeTokens]);
 
   var autonomyMetrics = useMemo(function () {
     return buildAutonomyMetrics(session.events, session.turns, session.metadata);
@@ -486,8 +428,6 @@ export default function App() {
         session={session}
         activeView={activeView}
         setView={setView}
-        currentThemeMode={themeModePreference}
-        onSetThemeMode={setThemeModePreference}
         autonomyMetrics={autonomyMetrics}
         debrief={debrief}
         showPalette={showPalette}
@@ -520,7 +460,6 @@ function AppSessionView({
   showFilters, setShowFilters, showQA, setShowQA, qaFlag,
   searchInputRef, filtersRef, reset, allSessions, openStoredSession,
   handleExportSession, sessionExport, setCompareLanding,
-  currentThemeMode, onSetThemeMode,
 }) {
   var pb = usePlaybackContext();
 
@@ -631,8 +570,6 @@ function AppSessionView({
           return !!(session && session.metadata && session.metadata.costAnalysis);
         })}
         onSetView={setView}
-        currentThemeMode={currentThemeMode}
-        onSetThemeMode={onSetThemeMode}
         onReset={reset}
         search={pb.search}
         searchInputRef={searchInputRef}
